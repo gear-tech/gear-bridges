@@ -61,7 +61,7 @@ pub struct EthGearCoreArgs {
     #[arg(
         long = "size-batch-multiplier",
         env = "ETH_SIZE_BATCH_MULTIPLIER",
-        default_value = "30"
+        default_value = "3"
     )]
     pub size_batch_multiplier: u64,
 }
@@ -168,6 +168,15 @@ pub struct EthGearTokensArgs {
     #[arg(long, env)]
     pub ethereum_start_block: u64,
 
+    /// Independently approved starting-checkpoint slot for a root manager (never RPC-derived).
+    #[arg(
+        long,
+        env,
+        required_unless_present = "cutover_seal",
+        conflicts_with = "cutover_seal"
+    )]
+    pub root_minimum_receipt_slot: Option<u64>,
+
     /// Immutable predecessor seal for a replacement inbound deployment.
     #[arg(long, requires = "successor_manager_code_id")]
     pub cutover_seal: Option<PathBuf>,
@@ -177,6 +186,12 @@ pub struct EthGearTokensArgs {
     pub successor_manager_code_id: Option<String>,
     #[clap(flatten)]
     pub native_wrapper: common::NativeWrapperApprovalArgs,
+
+    /// Explicit approved gas ceiling for fresh Gear submissions; omitted permits reconciliation only.
+    #[arg(long, env = "GEAR_APPROVED_GAS_LIMIT", value_parser = clap::value_parser!(u64).range(1..))]
+    pub approved_gear_gas_limit: Option<u64>,
+    #[clap(flatten)]
+    pub historical_receipts: common::HistoricalReceiptApprovalArgs,
 }
 
 #[derive(Subcommand)]
@@ -251,8 +266,17 @@ pub struct EthGearManualArgs {
     pub cutover_seal: Option<PathBuf>,
     #[arg(long, requires = "cutover_seal")]
     pub successor_manager_code_id: Option<String>,
+    /// Independently approved starting-checkpoint slot; required for a root SubmitReceipt consumer.
+    #[arg(long, env, conflicts_with = "cutover_seal")]
+    pub root_minimum_receipt_slot: Option<u64>,
     #[clap(flatten)]
     pub native_wrapper: common::NativeWrapperApprovalArgs,
+
+    /// Explicit approved gas ceiling for fresh Gear submissions; omitted permits reconciliation only.
+    #[arg(long, env = "GEAR_APPROVED_GAS_LIMIT", value_parser = clap::value_parser!(u64).range(1..))]
+    pub approved_gear_gas_limit: Option<u64>,
+    #[clap(flatten)]
+    pub historical_receipts: common::HistoricalReceiptApprovalArgs,
 
     /// ProgramId of the checkpoint-light-client program
     #[arg(long = "checkpoint-light-client")]

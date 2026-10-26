@@ -218,7 +218,13 @@ async fn task(
             submission_guard.take();
         } else {
             if submission_guard.is_none() {
-                submission_guard = Some(this.eth_api.reserve_submission().await);
+                submission_guard = match this.eth_api.reserve_submission().await {
+                    Ok(guard) => Some(guard),
+                    Err(error) => {
+                        log::error!("HOLD: cannot acquire Ethereum original ownership: {error}");
+                        return;
+                    }
+                };
             }
             if !wait_for_original_completion(
                 &mut this,
@@ -249,7 +255,13 @@ async fn task(
         let mut prepared = request.prepared.clone();
         loop {
             if submission_guard.is_none() {
-                submission_guard = Some(this.eth_api.reserve_submission().await);
+                submission_guard = match this.eth_api.reserve_submission().await {
+                    Ok(guard) => Some(guard),
+                    Err(error) => {
+                        log::error!("HOLD: cannot acquire Ethereum signing ownership: {error}");
+                        return;
+                    }
+                };
             }
             let needs_reconciliation = prepared.is_none() && !ownership.borrow().is_empty();
             if needs_reconciliation
@@ -290,7 +302,8 @@ async fn task(
                         break;
                     }
                     submission_guard.take();
-                    if is_retryable_contract_submission(&error) {
+                    // process_request already rejects governance EnforcedPause at its authenticated destination.
+                    if is_retryable_contract_submission(&error, false) {
                         let request = request.clone();
                         let retry_requests = retry_requests.clone();
                         tokio::spawn(async move {
@@ -495,6 +508,9 @@ async fn process_request(
         ));
     }
     if fresh {
+        if let Err(error) = policy.validate_signing_cap(this.eth_api.max_gas_per_message()) {
+            return Ok(report_hold(tx_uuid, error.to_string(), responses));
+        }
         let signed = match this
             .eth_api
             .prepare_content_message(
@@ -512,6 +528,9 @@ async fn process_request(
         {
             Ok(signed) => signed,
             Err(error) => {
+                if matches!(&error, ethereum_client::Error::SigningPolicy(_)) {
+                    return Ok(report_hold(tx_uuid, error.to_string(), responses));
+                }
                 if matches!(
                     &error,
                     ethereum_client::Error::MessageQueue(
@@ -521,7 +540,14 @@ async fn process_request(
                     return Ok(report_hold(tx_uuid, "HOLD: message nonce already processed without an original signed receipt; another transaction cannot complete this operation".into(), responses));
                 }
                 let error = anyhow::Error::new(error);
-                if is_retryable_contract_submission(&error)
+                let governance_pause =
+                    matches!(
+                        error.downcast_ref::<ethereum_client::Error>(),
+                        Some(ethereum_client::Error::MessageQueue(
+                            IMessageQueueErrors::EnforcedPause(_)
+                        ))
+                    ) && is_governance_destination(&this.eth_api, message.destination).await?;
+                if is_retryable_contract_submission(&error, governance_pause)
                     || is_transport_error_recoverable(&error)
                 {
                     return Err(error);
@@ -616,15 +642,57 @@ fn report_hold(tx_uuid: Uuid, reason: String, responses: &UnboundedSender<Respon
     }
 }
 
-fn is_retryable_contract_submission(error: &anyhow::Error) -> bool {
+async fn is_governance_destination(api: &EthApi, destination: [u8; 20]) -> anyhow::Result<bool> {
+    use alloy::primitives::Address;
+    use ethereum_client::abi::IMessageQueue;
+    let view = api.verified_finalized_view().await?;
+    let queue = Address::from_slice(api.message_queue_address().as_bytes());
+    let primary = IMessageQueue::new(queue, api.raw_provider());
+    let witness = IMessageQueue::new(queue, api.raw_witness_provider()?);
+    let admin = primary
+        .governanceAdmin()
+        .block(view.block_id())
+        .call()
+        .await?;
+    let pauser = primary
+        .governancePauser()
+        .block(view.block_id())
+        .call()
+        .await?;
+    anyhow::ensure!(
+        admin
+            == witness
+                .governanceAdmin()
+                .block(view.block_id())
+                .call()
+                .await?
+            && pauser
+                == witness
+                    .governancePauser()
+                    .block(view.block_id())
+                    .call()
+                    .await?,
+        "HOLD: governance destination observations disagree"
+    );
+    view.recheck(api.raw_provider()).await?;
+    Ok(Address::from(destination) == admin || Address::from(destination) == pauser)
+}
+
+fn is_retryable_contract_submission(error: &anyhow::Error, governance_destination: bool) -> bool {
     matches!(
         error.downcast_ref::<ethereum_client::Error>(),
         Some(ethereum_client::Error::MessageQueue(error))
-            if is_retryable_message_queue_error(error)
+            if is_retryable_message_queue_error(error, governance_destination)
     )
 }
 
-fn is_retryable_message_queue_error(error: &IMessageQueueErrors) -> bool {
+fn is_retryable_message_queue_error(
+    error: &IMessageQueueErrors,
+    governance_destination: bool,
+) -> bool {
+    if governance_destination && matches!(error, IMessageQueueErrors::EnforcedPause(_)) {
+        return false;
+    }
     matches!(
         error,
         IMessageQueueErrors::ChallengeRoot(_)
@@ -701,12 +769,17 @@ mod tests {
                 IMessageQueue::MerkleRootDelayNotPassed {},
             ),
         ] {
-            assert!(is_retryable_message_queue_error(&error), "{error:?}");
+            assert!(is_retryable_message_queue_error(&error, false), "{error:?}");
         }
 
         let terminal =
             IMessageQueueErrors::InvalidMerkleProof(IMessageQueue::InvalidMerkleProof {});
-        assert!(!is_retryable_message_queue_error(&terminal));
+        assert!(!is_retryable_message_queue_error(&terminal, false));
+        // Reconstructed from supplied HTML, audited 7fe1b032: a dormant governance
+        // capability must not enter the unsigned automatic pause retry loop.
+        let paused = IMessageQueueErrors::EnforcedPause(IMessageQueue::EnforcedPause {});
+        assert!(!is_retryable_message_queue_error(&paused, true));
+        assert!(is_retryable_message_queue_error(&paused, false));
     }
 
     async fn original(nonce: u64) -> super::Original {
@@ -965,6 +1038,7 @@ mod tests {
         )
         .await?;
         let api = api
+            .with_max_gas_per_message(Some(1_000_000))
             .with_beacon_finality(beacon.config.clone(), &beacon.directory.join("store"))
             .await?
             .with_data_witness(&witness_url, 31337, state.chain[0].header.hash)
@@ -986,7 +1060,7 @@ mod tests {
         use std::sync::atomic::Ordering;
         let mut rpc = retry_rpc().await?;
         let original = original(36).await;
-        let guard = rpc.api.reserve_submission().await;
+        let guard = rpc.api.reserve_submission().await?;
         rpc.state.processed.store(true, Ordering::SeqCst);
         rpc.state.reject_send.store(true, Ordering::SeqCst);
         assert!(retry_original(&rpc.api, &guard, &original).await.is_err());
@@ -1061,7 +1135,7 @@ mod tests {
         let mut ownership = io.original_owners.subscribe();
         let mut registrations = io.original_registrations.subscribe();
         let mut sender = MessageSender::new(rpc.api.clone());
-        let guard = rpc.api.reserve_submission().await;
+        let guard = rpc.api.reserve_submission().await?;
         let waiting = tokio::spawn(async move {
             let result = wait_for_original_completion(
                 &mut sender,
@@ -1118,7 +1192,7 @@ mod tests {
             (true, 0)
         );
         let _released =
-            tokio::time::timeout(Duration::from_secs(5), rpc.api.reserve_submission()).await?;
+            tokio::time::timeout(Duration::from_secs(5), rpc.api.reserve_submission()).await??;
         Ok(())
     }
 
@@ -1140,7 +1214,7 @@ mod tests {
         });
         rpc.state.processed.store(true, Ordering::SeqCst);
         rpc.state.consumed.store(true, Ordering::SeqCst);
-        let guard = rpc.api.reserve_submission().await;
+        let guard = rpc.api.reserve_submission().await?;
         retry_original(&rpc.api, &guard, &original).await?;
         let calls = rpc.state.calls.lock().unwrap().clone();
         assert!(calls

@@ -6,7 +6,6 @@ use crate::{
 };
 use alloy::{providers::Provider, rpc::types::TransactionReceipt};
 use alloy_eips::BlockId;
-use alloy_rlp::Encodable;
 use anyhow::Context;
 use checkpoint_light_client_client::{traits::ServiceCheckpointFor as _, ServiceCheckpointFor};
 use eth_events_electra_client::{
@@ -34,7 +33,7 @@ use sails_rs::{
     ActorId,
 };
 use tokio::{
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{channel, Receiver, Sender, UnboundedReceiver},
     task::spawn_blocking,
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
@@ -53,15 +52,12 @@ pub struct Response {
 }
 
 pub struct ProofComposerIo {
-    requests_channel: UnboundedSender<Request>,
-    responses_channel: UnboundedReceiver<Response>,
+    requests_channel: Sender<Request>,
+    responses_channel: Receiver<Response>,
 }
 
 impl ProofComposerIo {
-    pub fn new(
-        requests_channel: UnboundedSender<Request>,
-        responses_channel: UnboundedReceiver<Response>,
-    ) -> Self {
+    pub fn new(requests_channel: Sender<Request>, responses_channel: Receiver<Response>) -> Self {
         Self {
             requests_channel,
             responses_channel,
@@ -75,12 +71,17 @@ impl ProofComposerIo {
         self.responses_channel.recv().await
     }
 
+    pub fn can_accept(&self) -> bool {
+        self.requests_channel.capacity() > 0
+    }
+
     /// Send request to compose proof for `tx` with uuid `tx_uuid`.
     ///
     /// Returns `false` if send failed which indicates that channel was closed.
-    pub fn compose_proof_for(&mut self, tx_uuid: Uuid, tx: TxHashWithSlot) -> bool {
+    pub async fn compose_proof_for(&mut self, tx_uuid: Uuid, tx: TxHashWithSlot) -> bool {
         self.requests_channel
             .send(Request { tx, tx_uuid })
+            .await
             .inspect_err(|err| {
                 log::error!("proof composer send failure: {err:?}");
             })
@@ -143,8 +144,8 @@ impl ProofComposer {
     }
 
     pub fn run(self, checkpoints: UnboundedReceiver<EthereumSlotNumber>) -> ProofComposerIo {
-        let (requests_tx, requests_rx) = unbounded_channel();
-        let (response_tx, response_rx) = unbounded_channel();
+        let (requests_tx, requests_rx) = channel(128);
+        let (response_tx, response_rx) = channel(128);
 
         spawn_blocking(move || {
             block_on(task(self, checkpoints, requests_rx, response_tx));
@@ -155,7 +156,7 @@ impl ProofComposer {
 
     async fn process(
         &mut self,
-        response_tx: &UnboundedSender<Response>,
+        response_tx: &Sender<Response>,
         tx: TxHashWithSlot,
         tx_uuid: Uuid,
     ) -> anyhow::Result<()> {
@@ -172,6 +173,7 @@ impl ProofComposer {
         {
             Ok(payload) => response_tx
                 .send(Response { payload, tx_uuid })
+                .await
                 .context("failed to send response"),
             Err(err) => {
                 log::error!(
@@ -188,8 +190,8 @@ impl ProofComposer {
 async fn task(
     mut this: ProofComposer,
     mut checkpoints: UnboundedReceiver<EthereumSlotNumber>,
-    mut requests: UnboundedReceiver<Request>,
-    responses: UnboundedSender<Response>,
+    mut requests: Receiver<Request>,
+    responses: Sender<Response>,
 ) {
     loop {
         if let Err(err) =
@@ -221,8 +223,8 @@ async fn task(
 async fn handle_requests(
     this: &mut ProofComposer,
     checkpoints: &mut UnboundedReceiver<EthereumSlotNumber>,
-    requests: &mut UnboundedReceiver<Request>,
-    responses: &UnboundedSender<Response>,
+    requests: &mut Receiver<Request>,
+    responses: &Sender<Response>,
 ) -> anyhow::Result<()> {
     loop {
         this.metrics
@@ -261,7 +263,7 @@ async fn handle_requests(
                 }
             }
 
-            value = requests.recv() => {
+            value = requests.recv(), if this.waiting_for_checkpoints.len() < 1_000 => {
                 if let Some(Request { tx_uuid, tx }) = value {
                     if this.last_checkpoint.filter(|&last_checkpoint| tx.slot_number <= last_checkpoint)
                         .is_some()
@@ -537,8 +539,6 @@ fn compose_event(
         "Receipt proof value does not match authenticated receipts root"
     );
 
-    let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
-    Encodable::encode(&receipt, &mut receipt_rlp);
     Ok(EthToVaraEvent {
         proof_block: BlockInclusionProof {
             block: BlockGenericForBlockBody {
@@ -552,7 +552,7 @@ fn compose_event(
         },
         proof,
         transaction_index: tx_index,
-        receipt_rlp,
+        receipt_rlp: value,
     })
 }
 
@@ -730,7 +730,6 @@ fn authenticate_beacon_block(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rlp::Decodable;
     use ethereum_common::utils::{BeaconBlockHeaderResponse, BeaconBlockResponse};
     use serde::Deserialize;
     use std::{io::Read, sync::LazyLock};
@@ -912,7 +911,8 @@ mod tests {
                 body_root: light.body.tree_hash_root(),
             };
             assert_eq!(header.tree_hash_root(), block.tree_hash_root());
-            let decoded = eth_utils::ReceiptEnvelope::decode(&mut &event.receipt_rlp[..]).unwrap();
+            // VB-20 reconstructed from HTML; audited revision 7fe1b032.
+            let decoded = eth_utils::decode_canonical_receipt(&event.receipt_rlp).unwrap();
             assert_eq!(decoded, eth_utils::map_receipt_envelope(original.as_ref()));
             let mut changed_block = block.clone();
             changed_block.state_root = Hash256::repeat_byte(7);

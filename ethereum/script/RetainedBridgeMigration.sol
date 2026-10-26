@@ -3,6 +3,7 @@ pragma solidity ^0.8.37;
 
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CommonBase} from "forge-std/Base.sol";
 import {Script} from "forge-std/Script.sol";
 import {Vm, VmSafe} from "forge-std/Vm.sol";
@@ -13,8 +14,11 @@ import {GovernancePauser} from "src/GovernancePauser.sol";
 import {MessageQueue} from "src/MessageQueue.sol";
 import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
-import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {SubstrateMerkleProof} from "src/beefy/utils/SubstrateMerkleProof.sol";
+import {IERC20Manager} from "src/interfaces/IERC20Manager.sol";
+import {GovernanceControl, IMessageQueue, LegacyControl, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
+import {Hasher} from "src/libraries/Hasher.sol";
 import {
     GovernancePacker,
     PauseProxyMessage,
@@ -23,10 +27,12 @@ import {
 } from "src/libraries/packing/GovernancePacker.sol";
 
 /// @dev Retains the entire deployed bridge. Each invocation prepares, verifies, or submits ONE approved transaction.
-/// JSON inputs contain an ABI-encoded `plan` (schema 1) / `action` (schema 2) byte string; their exact file bytes
+/// JSON inputs contain an ABI-encoded `plan` (schema 2) / `action` (schema 3) byte string; their exact file bytes
 /// are independently approved with RETAINED_PLAN_HASH / RETAINED_ACTION_HASH. Foundry run artifacts remain the
 /// original transaction/receipt record. An attempt marker only prevents a second signature if that record is missing.
 abstract contract RetainedBridgeMigration is CommonBase {
+    using Hasher for VaraMessage;
+
     struct Identity {
         address account;
         bytes32 codeHash;
@@ -65,6 +71,23 @@ abstract contract RetainedBridgeMigration is CommonBase {
         bytes32 root;
     }
 
+    struct CustodyDelta {
+        bytes32 transactionHash;
+        uint256 logIndex;
+        uint256 effectLogIndex;
+        address recipient;
+        uint256 amount;
+    }
+
+    struct CustodyLedger {
+        address token;
+        uint256 balance;
+        uint256 requiredBacking;
+        // Only Gear-supply representations are manager-controlled; unrelated ERC20 issuance is not bridge custody.
+        uint256 managedSupply;
+        CustodyDelta[] releases;
+    }
+
     struct MigrationPlan {
         uint256 chainId;
         bytes32 ethereumGenesis;
@@ -97,6 +120,12 @@ abstract contract RetainedBridgeMigration is CommonBase {
         bytes32 sourceCutApproval;
         bytes32 outstandingUnpauseInventory;
         ProxyPin[] retainedProxies;
+        // Independently approved before freeze; neither capability is synthesized from live RPC state.
+        LegacyControl migrationControl;
+        LegacyControl recoveryControl;
+        uint256 finalityMargin;
+        uint256 operationalMargin;
+        bytes32 drainedInventoryApproval;
     }
 
     struct GovernanceDelivery {
@@ -107,11 +136,14 @@ abstract contract RetainedBridgeMigration is CommonBase {
         uint256 leafIndex;
         VaraMessage message;
         bytes32[] proof;
+        GovernanceControl control;
     }
     enum GovernanceAction {
         Pause,
         Upgrade,
-        Unpause
+        Unpause,
+        Freeze,
+        Recovery
     }
     enum MigrationStage {
         Prepare,
@@ -126,7 +158,14 @@ abstract contract RetainedBridgeMigration is CommonBase {
         Verify,
         EmptyBarrier,
         RegisterUnpause,
-        Unpause
+        Unpause,
+        RegisterFreeze,
+        RegisterRecovery,
+        Freeze,
+        Recover,
+        RecordBarrier,
+        RegisterBarrier,
+        CaptureBarrier
     }
 
     struct FinalizedPin {
@@ -147,6 +186,7 @@ abstract contract RetainedBridgeMigration is CommonBase {
         FinalityObservation publication;
         uint256 sourceBlock;
         bytes proof;
+        bytes32 root; // Zero means authenticated initialized-empty progress.
         OriginalTransaction original;
     }
 
@@ -160,6 +200,7 @@ abstract contract RetainedBridgeMigration is CommonBase {
     struct UpgradeEvidence {
         GovernanceDelivery delivery;
         OriginalTransaction original;
+        bytes32 effectTransactionHash;
     }
 
     struct MigrationAction {
@@ -173,6 +214,9 @@ abstract contract RetainedBridgeMigration is CommonBase {
         UpgradeEvidence upgrade;
         FinalizedPin upgradeReadback;
         EmptyBarrier barrier;
+        // Independent finalized stage effect; never changes this action's original signer/nonce disposition.
+        bytes32 effectTransactionHash;
+        UpgradeEvidence freeze;
     }
 
     struct QueueSnapshotProof {
@@ -212,8 +256,28 @@ abstract contract RetainedBridgeMigration is CommonBase {
     }
 
     function retainedUpgradePayload(MigrationPlan memory p) internal pure returns (bytes memory) {
-        return GovernancePacker.pack(
-            UpgradeProxyMessage(p.queue.account, p.implementation.account, retainedMigrationCalldata(p))
+        // Exact prepublished legacy exception. The retained handler cannot decode the new envelope.
+        return abi.encodePacked(uint8(3), p.queue.account, p.implementation.account, retainedMigrationCalldata(p));
+    }
+
+    function retainedRecoveryPayload(MigrationPlan memory p) internal pure returns (bytes memory) {
+        return abi.encodePacked(
+            uint8(3),
+            p.queue.account,
+            p.implementation.account,
+            abi.encodeCall(MessageQueue.recoverLegacyPublication, (IVerifier(p.legacyVerifier.account), p.legacyMax))
+        );
+    }
+
+    function retainedFreezePayload(MigrationPlan memory p) internal pure returns (bytes memory) {
+        return abi.encodePacked(
+            uint8(3),
+            p.queue.account,
+            p.implementation.account,
+            abi.encodeCall(
+                MessageQueue.stageLegacyMigration,
+                (IVerifier(p.legacyVerifier.account), p.legacyMax, p.migrationControl, p.recoveryControl)
+            )
         );
     }
 
@@ -246,10 +310,9 @@ abstract contract RetainedBridgeMigration is CommonBase {
             "missing cut/inventory/retained evidence"
         );
         _retainedRequire(
-            p.genesisBlock != 0 && p.legacyInitializerVersion < 8 && p.legacyMax >= p.genesisBlock
-                && p.firstBeefyBlock > p.legacyMax && p.firstBeefyBlock <= type(uint32).max
-                && p.firstBeefyBlock <= p.legacyMax + 57_600 && p.bootstrap.mmrStartBlock != 0
-                && p.firstBeefyBlock >= p.bootstrap.mmrStartBlock
+            p.genesisBlock != 0 && p.legacyInitializerVersion < 7 && p.legacyMax >= p.genesisBlock
+                && p.firstBeefyBlock == p.legacyMax + 1 && p.firstBeefyBlock <= type(uint32).max
+                && p.bootstrap.mmrStartBlock != 0 && p.firstBeefyBlock >= p.bootstrap.mmrStartBlock
                 && p.bootstrap.initialBeefyBlock > p.bootstrap.mmrStartBlock,
             "cut/bootstrap range"
         );
@@ -288,12 +351,14 @@ abstract contract RetainedBridgeMigration is CommonBase {
         _retainedProxyInventory(p);
         MessageQueue q = MessageQueue(p.queue.account);
         address implementation = address(uint160(uint256(vm.load(p.queue.account, ERC1967Utils.IMPLEMENTATION_SLOT))));
+        bool staged = !migrated && implementation == p.implementation.account;
         _retainedRequire(
-            implementation == (migrated ? p.implementation.account : p.legacyImplementation.account),
+            implementation == (migrated || staged ? p.implementation.account : p.legacyImplementation.account),
             "proxy implementation"
         );
         uint64 version = uint64(uint256(vm.load(p.queue.account, RETAINED_INITIALIZER_SLOT)));
-        _retainedRequire(version == (migrated ? 8 : p.legacyInitializerVersion), "initializer version");
+        _retainedRequire(version == (migrated ? 8 : staged ? 7 : p.legacyInitializerVersion), "initializer version");
+        if (staged) _retainedRequire(q.frozenLegacyMaxBlock() == p.legacyMax, "staged cut changed");
         _retainedRequire(q.verifier() == (migrated ? p.verifier.account : p.legacyVerifier.account), "queue verifier");
         _retainedRequire(
             q.genesisBlock() == p.genesisBlock
@@ -330,6 +395,7 @@ abstract contract RetainedBridgeMigration is CommonBase {
                 && keccak256(abi.encode(manager.vftManagers())) == keccak256(abi.encode(p.sourceManagers)),
             "manager binding"
         );
+        _retainedRequire(manager.paused(), "stop deposits/payment creation before capture");
         for (uint256 i; i < p.sourceManagers.length; ++i) {
             _retainedRequire(p.sourceManagers[i] != 0, "zero source manager");
         }
@@ -370,6 +436,10 @@ abstract contract RetainedBridgeMigration is CommonBase {
         for (uint256 i; i < p.retainedState.length; ++i) {
             StatePin memory pin = p.retainedState[i];
             _retainedRequire(pin.target.code.length != 0 && pin.data.length >= 4, "retained readback target");
+            _retainedRequire(
+                bytes4(pin.data) != IERC20.balanceOf.selector && bytes4(pin.data) != IERC20.totalSupply.selector,
+                "mutable custody/supply belongs in drain ledger, not immutable pins"
+            );
             (bool ok, bytes memory result) = pin.target.staticcall(pin.data);
             _retainedRequire(ok && keccak256(result) == pin.resultHash, "retained state changed");
         }
@@ -420,6 +490,18 @@ abstract contract RetainedBridgeMigration is CommonBase {
         }
     }
 
+    function _retainedLifetime(MigrationPlan memory p) internal view {
+        _retainedClient(p, true);
+        BeefyClient client = BeefyClient(p.client.account);
+        uint256 delay = MessageQueue(p.queue.account).PROCESS_ADMIN_MESSAGE_DELAY();
+        _retainedRequire(p.finalityMargin != 0 && p.operationalMargin != 0, "missing approved lifetime margins");
+        _retainedRequire(
+            uint256(client.lastAuthenticatedSourceTimestampMs()) + client.MAX_SOURCE_AGE_MS()
+                > (block.timestamp + delay + p.finalityMargin + p.operationalMargin) * 1000,
+            "insufficient source-authenticated lifetime; refresh heartbeat"
+        );
+    }
+
     function _retainedVerifier(MigrationPlan memory p) internal view {
         _retainedIdentity(p.verifier);
         VaraQueueRootVerifier verifier = VaraQueueRootVerifier(p.verifier.account);
@@ -435,26 +517,28 @@ abstract contract RetainedBridgeMigration is CommonBase {
         _retainedRequire(MessageQueue(p.queue.account).paused() == expectedPaused, "unexpected pause state");
     }
 
-    function _retainedGovernancePayload(MigrationPlan memory p, GovernanceAction action)
-        internal
-        pure
-        returns (bytes memory)
-    {
+    function _retainedGovernancePayload(
+        MigrationPlan memory p,
+        GovernanceAction action,
+        GovernanceControl memory control
+    ) internal pure returns (bytes memory) {
         if (action == GovernanceAction.Upgrade) return retainedUpgradePayload(p);
-        if (action == GovernanceAction.Pause) return GovernancePacker.pack(PauseProxyMessage(p.queue.account));
-        return GovernancePacker.pack(UnpauseProxyMessage(p.queue.account));
+        if (action == GovernanceAction.Freeze) return retainedFreezePayload(p);
+        if (action == GovernanceAction.Recovery) return retainedRecoveryPayload(p);
+        if (action == GovernanceAction.Pause) return abi.encodePacked(uint8(1), p.queue.account);
+        return GovernancePacker.pack(UnpauseProxyMessage(p.queue.account), control);
     }
 
     function _validateRetainedDelivery(MigrationPlan memory p, GovernanceDelivery memory d, GovernanceAction action)
         internal
         pure
     {
-        bool admin = action == GovernanceAction.Upgrade;
+        bool admin = action != GovernanceAction.Pause && action != GovernanceAction.Unpause;
         _retainedRequire(
             d.sourceBlock != 0 && d.sourceBlock <= type(uint32).max && d.root != 0 && d.totalLeaves != 0
                 && d.leafIndex < d.totalLeaves && d.message.source == (admin ? p.sourceAdmin : p.sourcePauser)
                 && d.message.destination == (admin ? p.governanceAdmin.account : p.governancePauser.account)
-                && keccak256(d.message.payload) == keccak256(_retainedGovernancePayload(p, action)),
+                && keccak256(d.message.payload) == keccak256(_retainedGovernancePayload(p, action, d.control)),
             "governance intent"
         );
         _retainedRequire(
@@ -492,17 +576,61 @@ abstract contract RetainedBridgeMigration is CommonBase {
         _retainedRequire(
             q.getMerkleRoot(d.sourceBlock) == d.root && !q.isProcessed(d.message.nonce), "root/message state"
         );
+        if (action != GovernanceAction.Recovery) _retainedLifetime(p);
         if (action == GovernanceAction.Pause) {
             _retainedRequire(!q.paused(), "unexpected prior pause");
         } else {
             _retainedRequire(q.paused(), "upgrade must remain paused");
             _retainedIdentity(p.implementation);
-            _retainedClient(p, true);
-            _retainedVerifier(p);
+            if (action != GovernanceAction.Recovery) _retainedVerifier(p);
+            if (action == GovernanceAction.Freeze) {
+                _validateRetainedStage(p);
+            } else {
+                _retainedRequire(
+                    q.legacyPublicationFrozen() && q.frozenLegacyMaxBlock() == p.legacyMax,
+                    "finalize exact freeze before migration"
+                );
+            }
         }
         q.processMessage(d.sourceBlock, d.totalLeaves, d.leafIndex, d.message, d.proof);
         _retainedRequire(q.isProcessed(d.message.nonce) && q.paused(), "governance did not complete paused");
         if (action == GovernanceAction.Upgrade) verifyRetainedPoststate(p, true);
+    }
+
+    function _validateRetainedStage(MigrationPlan memory p) internal view {
+        MessageQueue q = MessageQueue(p.queue.account);
+        _retainedRequire(
+            uint64(uint256(vm.load(p.queue.account, RETAINED_INITIALIZER_SLOT))) == p.legacyInitializerVersion
+                && p.legacyInitializerVersion < 7,
+            "initializer 7 not independently unused"
+        );
+        _retainedRequire(
+            keccak256(p.migrationControl.message.payload) == keccak256(retainedUpgradePayload(p))
+                && keccak256(p.recoveryControl.message.payload) == keccak256(retainedRecoveryPayload(p)),
+            "prepublished controls differ from approval"
+        );
+        _validateRetainedLegacyControl(p, p.migrationControl);
+        _validateRetainedLegacyControl(p, p.recoveryControl);
+        _retainedRequire(q.maxBlockNumber() == p.legacyMax, "freeze compare-and-swap cut");
+    }
+
+    function _validateRetainedLegacyControl(MigrationPlan memory p, LegacyControl memory c) private view {
+        MessageQueue q = MessageQueue(p.queue.account);
+        _retainedRequire(
+            c.message.source == p.sourceAdmin && c.message.destination == p.governanceAdmin.account
+                && c.sourceBlock <= p.legacyMax
+                && c.validUntil > block.timestamp + p.finalityMargin + p.operationalMargin
+                && !q.isProcessed(c.message.nonce)
+                && _retainedMembership(
+                    q.getMerkleRoot(c.sourceBlock), c.message.hash(), c.leafIndex, c.totalLeaves, c.proof
+                ),
+            "missing/expired prepublished recovery or migration"
+        );
+        _retainedRequire(
+            block.timestamp
+                >= q.getMerkleRootTimestamp(q.getMerkleRoot(c.sourceBlock)) + q.PROCESS_ADMIN_MESSAGE_DELAY(),
+            "prepublished controls not mature"
+        );
     }
 
     function _retainedSnapshot(bytes memory encoded) internal pure returns (QueueSnapshotProof memory p) {
@@ -559,14 +687,32 @@ abstract contract RetainedBridgeMigration is CommonBase {
             b.publication.state.number > b.upgradeReadback.state.number
                 && _retainedObservationTime(b.publication) > _retainedObservationTime(b.upgradeReadback)
                 && b.sourceBlock >= p.firstBeefyBlock && d.sourceBlock > b.sourceBlock && empty.initialized
-                && unpause.initialized && empty.queueId < unpause.queueId
-                && uint256(empty.sourceTimestampMs) > b.upgradeReadback.observedAt * 1000 + skew
-                && uint256(unpause.sourceTimestampMs) > b.publication.observedAt * 1000 + skew,
-            "unpause precedes finalized upgrade/empty epoch"
+                && unpause.initialized && uint256(empty.sourceTimestampMs) > b.upgradeReadback.observedAt * 1000 + skew
+                && uint256(unpause.sourceTimestampMs) > b.publication.observedAt * 1000 + skew
+                && d.control.requiredAdminAction == MessageQueue(p.queue.account).migrationAdminAction()
+                && d.control.requiredBarrier == _retainedBarrierIdentity(p, b)
+                && d.control.requiredBarrier == MessageQueue(p.queue.account).migrationBarrier(),
+            "unpause precedes finalized upgrade/progress"
         );
     }
 
-    /// @dev Used only after canonical original publication receipts and finalized pins have been authenticated.
+    function _retainedBarrierIdentity(MigrationPlan memory p, EmptyBarrier memory b) internal view returns (bytes32) {
+        QueueSnapshotProof memory snapshot = _retainedSnapshot(b.proof);
+        return keccak256(
+            abi.encode(
+                p.chainId,
+                p.queue.account,
+                MessageQueue(p.queue.account).migrationAdminAction(),
+                b.sourceBlock,
+                snapshot.queueId,
+                b.root,
+                b.publication.state.number,
+                b.publication.state.blockHash
+            )
+        );
+    }
+
+    /// @dev Used only after canonical publication effects and finalized pins have been authenticated.
     /// Queue proof verification is still performed by the actual queue when this previously absent root is published.
     function registerRetainedUnpauseRoot(MigrationPlan memory p, GovernanceDelivery memory d, EmptyBarrier memory b)
         internal
@@ -646,13 +792,25 @@ abstract contract RetainedBridgeMigration is CommonBase {
         if (a.stage == MigrationStage.EmptyBarrier) {
             return (
                 p.queue.account,
-                abi.encodeCall(MessageQueue.submitEmptyQueueProgress, (a.barrier.sourceBlock, a.barrier.proof)),
+                a.barrier.root == bytes32(0)
+                    ? abi.encodeCall(MessageQueue.submitEmptyQueueProgress, (a.barrier.sourceBlock, a.barrier.proof))
+                    : abi.encodeCall(
+                        IMessageQueue.submitMerkleRoot, (a.barrier.sourceBlock, a.barrier.root, a.barrier.proof)
+                    ),
+                address(0)
+            );
+        }
+        if (a.stage == MigrationStage.CaptureBarrier) {
+            return (
+                p.queue.account,
+                abi.encodeCall(MessageQueue.captureMigrationPublicationHash, (a.barrier.sourceBlock)),
                 address(0)
             );
         }
         if (
             a.stage == MigrationStage.RegisterPause || a.stage == MigrationStage.RegisterUpgrade
-                || a.stage == MigrationStage.RegisterUnpause
+                || a.stage == MigrationStage.RegisterUnpause || a.stage == MigrationStage.RegisterFreeze
+                || a.stage == MigrationStage.RegisterRecovery || a.stage == MigrationStage.RegisterBarrier
         ) {
             return (
                 p.queue.account,
@@ -661,7 +819,9 @@ abstract contract RetainedBridgeMigration is CommonBase {
             );
         }
         _retainedRequire(
-            a.stage == MigrationStage.Pause || a.stage == MigrationStage.Upgrade || a.stage == MigrationStage.Unpause,
+            a.stage == MigrationStage.Pause || a.stage == MigrationStage.Upgrade || a.stage == MigrationStage.Unpause
+                || a.stage == MigrationStage.Freeze || a.stage == MigrationStage.Recover
+                || a.stage == MigrationStage.RecordBarrier,
             "stage has no transaction"
         );
         return (
@@ -679,7 +839,7 @@ abstract contract RetainedBridgeMigration is CommonBase {
         string memory json = vm.readFile(vm.envString("RETAINED_PLAN"));
         bytes32 planHash = keccak256(bytes(json));
         _retainedRequire(
-            planHash == vm.envBytes32("RETAINED_PLAN_HASH") && vm.parseJsonUint(json, ".schemaVersion") == 1,
+            planHash == vm.envBytes32("RETAINED_PLAN_HASH") && vm.parseJsonUint(json, ".schemaVersion") == 2,
             "plan hash/schema changed"
         );
         MigrationPlan memory p = abi.decode(vm.parseJsonBytes(json, ".plan"), (MigrationPlan));
@@ -688,14 +848,15 @@ abstract contract RetainedBridgeMigration is CommonBase {
         string memory actionJson = vm.readFile(vm.envString("RETAINED_ACTION"));
         bytes32 actionHash = keccak256(bytes(actionJson));
         _retainedRequire(
-            actionHash == vm.envBytes32("RETAINED_ACTION_HASH") && vm.parseJsonUint(actionJson, ".schemaVersion") == 2,
+            actionHash == vm.envBytes32("RETAINED_ACTION_HASH") && vm.parseJsonUint(actionJson, ".schemaVersion") == 3,
             "action hash/schema changed"
         );
         MigrationAction memory a = abi.decode(vm.parseJsonBytes(actionJson, ".action"), (MigrationAction));
         _retainedRequire(a.planHash == planHash, "action belongs to another plan");
         _authenticateRetainedSourceCut(p, a.stage);
-        bool migrated = _retainedImplementation(p.queue.account) == p.implementation.account;
+        bool migrated = uint64(uint256(vm.load(p.queue.account, RETAINED_INITIALIZER_SLOT))) == 8;
         validateRetainedMigration(p, migrated);
+        _authenticateRetainedDrain(p);
         _authenticateRetainedRecoveryRoles(p);
         if (a.stage == MigrationStage.Prepare) {
             _retainedRequire(!migrated && !existingQueue.paused(), "preparation requires active legacy queue");
@@ -707,9 +868,27 @@ abstract contract RetainedBridgeMigration is CommonBase {
         if (a.stage == MigrationStage.Verify) {
             _verifyRetainedFinalizedPoststate(p, a.upgradeReadback);
             _captureRetainedObservation(
-                a.planHash, MigrationStage.Upgrade, a.upgrade.original.transactionHash, a.upgradeReadback
+                a.planHash, MigrationStage.Upgrade, a.upgrade.effectTransactionHash, a.upgradeReadback
             );
             emit RetainedMigrationVerified(planHash, a.upgradeReadback.number, a.upgradeReadback.blockHash);
+            return existingQueue;
+        }
+        if (
+            a.stage == MigrationStage.CaptureBarrier
+                && existingQueue.migrationPublicationBlockHash(a.barrier.sourceBlock) != bytes32(0)
+        ) {
+            _authenticateRetainedBarrier(p, a.barrier);
+            _retainedActionPoststate(p, a);
+            return existingQueue; // Captured administrative identity, no disposition of an own original.
+        }
+        if (a.effectTransactionHash != bytes32(0)) {
+            // Never rewrite or release the runner's original/attempt marker.
+            FinalizedPin memory effect = _authenticateRetainedStageEffect(p, a);
+            _retainedActionPoststate(p, a);
+            if (a.stage == MigrationStage.EmptyBarrier) {
+                _checkRetainedEmptyChronology(p, a.barrier);
+                _captureRetainedObservation(a.planHash, a.stage, a.effectTransactionHash, effect);
+            }
             return existingQueue;
         }
         (address target, bytes memory data, address created) = _retainedActionCall(p, a);
@@ -814,16 +993,16 @@ abstract contract RetainedBridgeMigration is CommonBase {
                     == created,
                 "verifier address"
             );
-        } else if (a.stage == MigrationStage.RegisterPause || a.stage == MigrationStage.RegisterUpgrade) {
-            registerRetainedGovernanceRoot(
-                p,
-                a.delivery,
-                a.stage == MigrationStage.RegisterPause ? GovernanceAction.Pause : GovernanceAction.Upgrade
-            );
-        } else if (a.stage == MigrationStage.Pause || a.stage == MigrationStage.Upgrade) {
-            executeRetainedGovernance(
-                p, a.delivery, a.stage == MigrationStage.Pause ? GovernanceAction.Pause : GovernanceAction.Upgrade
-            );
+        } else if (
+            a.stage == MigrationStage.RegisterPause || a.stage == MigrationStage.RegisterUpgrade
+                || a.stage == MigrationStage.RegisterFreeze || a.stage == MigrationStage.RegisterRecovery
+        ) {
+            registerRetainedGovernanceRoot(p, a.delivery, _retainedActionKind(a.stage));
+        } else if (
+            a.stage == MigrationStage.Pause || a.stage == MigrationStage.Upgrade || a.stage == MigrationStage.Freeze
+                || a.stage == MigrationStage.Recover
+        ) {
+            executeRetainedGovernance(p, a.delivery, _retainedActionKind(a.stage));
         } else if (a.stage == MigrationStage.RegisterUnpause) {
             registerRetainedUnpauseRoot(p, a.delivery, a.barrier);
         } else if (a.stage == MigrationStage.Unpause) {
@@ -838,6 +1017,18 @@ abstract contract RetainedBridgeMigration is CommonBase {
         _retainedActionPoststate(p, a);
     }
 
+    function _retainedActionKind(MigrationStage stage) private pure returns (GovernanceAction) {
+        if (stage == MigrationStage.RegisterPause || stage == MigrationStage.Pause) return GovernanceAction.Pause;
+        if (stage == MigrationStage.RegisterUpgrade || stage == MigrationStage.Upgrade) {
+            return GovernanceAction.Upgrade;
+        }
+        if (stage == MigrationStage.RegisterFreeze || stage == MigrationStage.Freeze) return GovernanceAction.Freeze;
+        if (stage == MigrationStage.RegisterRecovery || stage == MigrationStage.Recover) {
+            return GovernanceAction.Recovery;
+        }
+        return GovernanceAction.Unpause;
+    }
+
     function _retainedActionPrestate(MigrationPlan memory p, MigrationAction memory a, bool migrated) private {
         MessageQueue q = MessageQueue(p.queue.account);
         if (a.stage <= MigrationStage.Bootstrap) {
@@ -850,6 +1041,40 @@ abstract contract RetainedBridgeMigration is CommonBase {
             }
             return;
         }
+        if (
+            a.stage == MigrationStage.RegisterPause || a.stage == MigrationStage.RegisterUpgrade
+                || a.stage == MigrationStage.Pause || a.stage == MigrationStage.Freeze
+        ) _retainedLifetime(p);
+        if (a.stage == MigrationStage.Upgrade) {
+            _validateRetainedDelivery(p, a.freeze.delivery, GovernanceAction.Freeze);
+            FinalizedPin memory freezePin =
+                _authenticateRetainedGovernanceEffect(p, a.freeze.delivery, a.freeze.effectTransactionHash);
+            uint256 fork = vm.activeFork();
+            vm.createSelectFork(vm.envString("RETAINED_RPC_URL"), freezePin.number);
+            validateRetainedMigration(p, false);
+            _retainedRequire(MessageQueue(p.queue.account).legacyPublicationFrozen(), "freeze not finalized");
+            vm.selectFork(fork);
+        }
+        if (a.stage == MigrationStage.CaptureBarrier) {
+            _authenticateRetainedBarrier(p, a.barrier);
+            return;
+        }
+        if (a.stage == MigrationStage.RecordBarrier || a.stage == MigrationStage.RegisterBarrier) {
+            _authenticateRetainedBarrier(p, a.barrier);
+            _validateRetainedBarrierControl(p, a);
+            _retainedRequire(
+                q.migrationPublicationBlockHash(a.barrier.sourceBlock) == a.barrier.publication.state.blockHash,
+                "capture canonical publication hash before governance delay"
+            );
+            _retainedRequire(!q.isProcessed(a.delivery.message.nonce), "barrier control already processed");
+            _retainedRequire(
+                a.stage == MigrationStage.RegisterBarrier
+                    ? q.getMerkleRoot(a.delivery.sourceBlock) == bytes32(0)
+                    : q.getMerkleRoot(a.delivery.sourceBlock) == a.delivery.root,
+                "barrier control root state"
+            );
+            return;
+        }
         if (a.stage == MigrationStage.EmptyBarrier) {
             verifyRetainedPoststate(p, true);
             _verifyRetainedFinalizedPoststate(p, a.barrier.upgradeReadback.state);
@@ -857,14 +1082,11 @@ abstract contract RetainedBridgeMigration is CommonBase {
             _retainedRequire(a.barrier.sourceBlock > q.maxBlockNumber(), "empty progress already present");
             return;
         }
-        GovernanceAction action = a.stage == MigrationStage.RegisterPause || a.stage == MigrationStage.Pause
-            ? GovernanceAction.Pause
-            : a.stage == MigrationStage.RegisterUpgrade || a.stage == MigrationStage.Upgrade
-                ? GovernanceAction.Upgrade
-                : GovernanceAction.Unpause;
+        GovernanceAction action = _retainedActionKind(a.stage);
         _validateRetainedDelivery(p, a.delivery, action);
         bool registration = a.stage == MigrationStage.RegisterPause || a.stage == MigrationStage.RegisterUpgrade
-            || a.stage == MigrationStage.RegisterUnpause;
+            || a.stage == MigrationStage.RegisterUnpause || a.stage == MigrationStage.RegisterFreeze
+            || a.stage == MigrationStage.RegisterRecovery;
         _retainedRequire(
             !q.isProcessed(a.delivery.message.nonce), "message already processed without original evidence"
         );
@@ -878,8 +1100,8 @@ abstract contract RetainedBridgeMigration is CommonBase {
             if (registration) _retainedRequire(!q.paused(), "legacy batch must precede pause");
             if (!registration) {
                 _retainedRequire(q.maxBlockNumber() == p.legacyMax, "stale legacy maximum");
-                _retainedRequire(q.paused() == (action == GovernanceAction.Upgrade), "unexpected pause state");
-                if (action == GovernanceAction.Upgrade) {
+                _retainedRequire(q.paused() == (action != GovernanceAction.Pause), "unexpected pause state");
+                if (action != GovernanceAction.Pause && action != GovernanceAction.Recovery) {
                     _retainedIdentity(p.implementation);
                     _retainedClient(p, true);
                     _retainedVerifier(p);
@@ -891,6 +1113,26 @@ abstract contract RetainedBridgeMigration is CommonBase {
                 ? q.getMerkleRoot(a.delivery.sourceBlock) == 0
                 : q.getMerkleRoot(a.delivery.sourceBlock) == a.delivery.root,
             "publication state mismatch"
+        );
+    }
+
+    function _validateRetainedBarrierControl(MigrationPlan memory p, MigrationAction memory a) private pure {
+        GovernanceDelivery memory d = a.delivery;
+        bytes memory payload = GovernancePacker.pack(
+            UpgradeProxyMessage(
+                p.queue.account,
+                p.implementation.account,
+                abi.encodeCall(
+                    MessageQueue.recordMigrationBarrier, (a.barrier.sourceBlock, a.barrier.publication.state.blockHash)
+                )
+            ),
+            d.control
+        );
+        _retainedRequire(
+            d.message.source == p.sourceAdmin && d.message.destination == p.governanceAdmin.account
+                && d.sourceBlock >= p.firstBeefyBlock && d.root != 0 && d.totalLeaves != 0
+                && d.leafIndex < d.totalLeaves && keccak256(d.message.payload) == keccak256(payload),
+            "barrier finality attestation intent"
         );
     }
 
@@ -911,6 +1153,30 @@ abstract contract RetainedBridgeMigration is CommonBase {
             verifyRetainedPoststate(p, true);
             _retainedRequire(
                 MessageQueue(p.queue.account).maxBlockNumber() >= a.barrier.sourceBlock, "empty progress absent"
+            );
+        } else if (a.stage == MigrationStage.RecordBarrier) {
+            _retainedRequire(
+                MessageQueue(p.queue.account).migrationBarrier() == _retainedBarrierIdentity(p, a.barrier),
+                "barrier attestation absent"
+            );
+        } else if (a.stage == MigrationStage.CaptureBarrier) {
+            _retainedRequire(
+                MessageQueue(p.queue.account).migrationPublicationBlockHash(a.barrier.sourceBlock)
+                    == a.barrier.publication.state.blockHash,
+                "publication hash capture absent"
+            );
+        } else if (a.stage == MigrationStage.Freeze) {
+            validateRetainedMigration(p, false);
+            _retainedRequire(
+                MessageQueue(p.queue.account).stagedMigrationMessage() == p.migrationControl.message.hash()
+                    && MessageQueue(p.queue.account).stagedRecoveryMessage() == p.recoveryControl.message.hash(),
+                "frozen controls changed"
+            );
+        } else if (a.stage == MigrationStage.Recover) {
+            _retainedRequire(
+                !MessageQueue(p.queue.account).legacyPublicationFrozen()
+                    && MessageQueue(p.queue.account).beefyRootMinimum() == 0 && MessageQueue(p.queue.account).paused(),
+                "staging recovery absent"
             );
         } else if (a.stage == MigrationStage.Pause) {
             validateRetainedMigration(p, false);
@@ -933,25 +1199,17 @@ abstract contract RetainedBridgeMigration is CommonBase {
 
     /// @dev Matching state or a competing executor never disposes of an approved original.
     function _authenticateRetainedPredecessor(MigrationPlan memory p, MigrationAction memory a) internal {
-        if (a.stage < MigrationStage.Verify) return;
+        if (
+            a.stage < MigrationStage.Verify
+                || (a.stage > MigrationStage.Unpause
+                    && a.stage != MigrationStage.RecordBarrier
+                    && a.stage != MigrationStage.RegisterBarrier
+                    && a.stage != MigrationStage.CaptureBarrier)
+        ) return;
         GovernanceDelivery memory delivery = a.upgrade.delivery;
         _validateRetainedDelivery(p, delivery, GovernanceAction.Upgrade);
-        OriginalTransaction memory original = a.upgrade.original;
-        string memory artifact = vm.readFile(original.artifact);
-        string memory entry = string.concat(".transactions[", vm.toString(original.transactionIndex), "].transaction");
-        uint256 nonce = vm.parseJsonUint(artifact, string.concat(entry, ".nonce"));
-        _retainedRequire(nonce <= type(uint64).max, "upgrade nonce overflow");
-        FinalizedPin memory included = _authenticateRetainedOriginal(
-            original,
-            vm.parseJsonAddress(artifact, string.concat(entry, ".from")),
-            uint64(nonce),
-            p.queue.account,
-            abi.encodeCall(
-                IMessageQueue.processMessage,
-                (delivery.sourceBlock, delivery.totalLeaves, delivery.leafIndex, delivery.message, delivery.proof)
-            ),
-            address(0)
-        );
+        FinalizedPin memory included =
+            _authenticateRetainedGovernanceEffect(p, delivery, a.upgrade.effectTransactionHash);
         FinalizedPin memory readback =
             a.stage == MigrationStage.Verify ? a.upgradeReadback : a.barrier.upgradeReadback.state;
         _retainedRequire(
@@ -964,7 +1222,7 @@ abstract contract RetainedBridgeMigration is CommonBase {
                 "RETAINED_UPGRADE_OBSERVATION",
                 a.planHash,
                 MigrationStage.Upgrade,
-                original.transactionHash,
+                a.upgrade.effectTransactionHash,
                 a.barrier.upgradeReadback
             );
         }
@@ -979,6 +1237,339 @@ abstract contract RetainedBridgeMigration is CommonBase {
         }
     }
 
+    /// @dev Independently approved source closure and settled cohorts precede queue pause.
+    function _authenticateRetainedDrain(MigrationPlan memory p) internal {
+        string memory json = vm.readFile(vm.envString("RETAINED_DRAIN"));
+        _retainedRequire(
+            p.drainedInventoryApproval != 0 && keccak256(bytes(json)) == p.drainedInventoryApproval
+                && vm.parseJsonAddress(json, ".manager") == p.manager.account
+                && vm.parseJsonAddress(json, ".queue") == p.queue.account
+                && vm.parseJsonBytes32(json, ".sourceAdmissionEvidence") != 0
+                && vm.parseJsonBytes32(json, ".liabilityInventory") != 0
+                && vm.parseJsonUint(json, ".unsettledInbound") == 0 && vm.parseJsonUint(json, ".unsettledOutbound") == 0
+                && vm.parseJsonUint(json, ".unprocessable") == 0,
+            "missing/blocked drain inventory"
+        );
+        FinalizedPin memory capture = abi.decode(vm.parseJsonBytes(json, ".capture"), (FinalizedPin));
+        _authenticateRetainedPin(capture);
+        CustodyLedger[] memory ledgers = abi.decode(vm.parseJsonBytes(json, ".custody"), (CustodyLedger[]));
+        _retainedRequire(ledgers.length == p.tokens.length, "incomplete custody inventory");
+        uint256 fork = vm.activeFork();
+        vm.createSelectFork(vm.envString("RETAINED_RPC_URL"), capture.number);
+        _retainedProxyInventory(p);
+        address[] memory capturedTokens = ERC20Manager(p.manager.account).tokens();
+        _retainedRequire(capturedTokens.length == p.tokens.length, "capture token inventory changed");
+        _retainedRequire(
+            ERC20Manager(p.manager.account).paused() && !MessageQueue(p.queue.account).paused(),
+            "capture must follow admission stop/drain and precede queue pause"
+        );
+        for (uint256 i; i < ledgers.length; ++i) {
+            _retainedRequire(capturedTokens[i] == p.tokens[i].account, "capture token identity changed");
+            _retainedRequire(
+                ledgers[i].token == p.tokens[i].account
+                    && IERC20(ledgers[i].token).balanceOf(p.manager.account) == ledgers[i].balance
+                    && ledgers[i].balance >= ledgers[i].requiredBacking,
+                "capture custody/backing mismatch"
+            );
+            bool managed =
+                ERC20Manager(p.manager.account).getTokenType(ledgers[i].token) == IERC20Manager.TokenType.Gear;
+            _retainedRequire(
+                managed
+                    ? IERC20(ledgers[i].token).totalSupply() == ledgers[i].managedSupply
+                    : ledgers[i].managedSupply == 0,
+                "capture managed supply mismatch"
+            );
+        }
+        vm.selectFork(fork);
+        for (uint256 i; i < ledgers.length; ++i) {
+            _authenticateRetainedCustody(p, capture, ledgers[i]);
+        }
+    }
+
+    function _authenticateRetainedCustody(
+        MigrationPlan memory p,
+        FinalizedPin memory capture,
+        CustodyLedger memory ledger
+    ) internal {
+        string memory logs = _retainedRpc(
+            "eth_getLogs",
+            string.concat(
+                '[{"address":"',
+                vm.toString(ledger.token),
+                '","fromBlock":"',
+                _retainedHex(capture.number + 1),
+                '","toBlock":"',
+                _retainedHex(block.number),
+                '","topics":["',
+                vm.toString(keccak256("Transfer(address,address,uint256)")),
+                '"]}]'
+            )
+        );
+        uint256 count = vm.parseJsonArrayLength(logs, "$");
+        uint256 balance = ledger.balance;
+        uint256 backing = ledger.requiredBacking;
+        bool managed = ERC20Manager(p.manager.account).getTokenType(ledger.token) == IERC20Manager.TokenType.Gear;
+        uint256 supply = ledger.managedSupply;
+        bool[] memory consumed = new bool[](ledger.releases.length);
+        for (uint256 i; i < count; ++i) {
+            string memory key = string.concat("$[", vm.toString(i), "]");
+            address from = address(uint160(uint256(vm.parseJsonBytes32(logs, string.concat(key, ".topics[1]")))));
+            address to = address(uint160(uint256(vm.parseJsonBytes32(logs, string.concat(key, ".topics[2]")))));
+            bool minted = managed && from == address(0);
+            if (from != p.manager.account && to != p.manager.account && !minted && !(managed && to == address(0))) {
+                continue;
+            }
+            _retainedRequire(!vm.parseJsonBool(logs, string.concat(key, ".removed")), "removed custody event");
+            bytes32 hash = vm.parseJsonBytes32(logs, string.concat(key, ".transactionHash"));
+            uint256 index = vm.parseJsonUint(logs, string.concat(key, ".logIndex"));
+            uint256 amount = abi.decode(vm.parseJsonBytes(logs, string.concat(key, ".data")), (uint256));
+            (string memory receipt, FinalizedPin memory pin) = _retainedEffectReceipt(hash);
+            _retainedRequire(
+                pin.number == vm.parseJsonUint(logs, string.concat(key, ".blockNumber"))
+                    && pin.blockHash == vm.parseJsonBytes32(logs, string.concat(key, ".blockHash")),
+                "custody event inclusion changed"
+            );
+            uint256 receiptCount = vm.parseJsonArrayLength(receipt, ".logs");
+            bool included;
+            for (uint256 k; k < receiptCount; ++k) {
+                string memory r = string.concat(".logs[", vm.toString(k), "]");
+                if (vm.parseJsonUint(receipt, string.concat(r, ".logIndex")) != index) continue;
+                _retainedRequire(
+                    vm.parseJsonAddress(receipt, string.concat(r, ".address")) == ledger.token
+                        && keccak256(vm.parseJson(receipt, string.concat(r, ".topics")))
+                            == keccak256(vm.parseJson(logs, string.concat(key, ".topics")))
+                        && keccak256(vm.parseJsonBytes(receipt, string.concat(r, ".data")))
+                            == keccak256(abi.encode(amount)),
+                    "custody receipt log mismatch"
+                );
+                included = true;
+            }
+            _retainedRequire(included, "custody event absent from receipt");
+            _retainedRequire(!managed || to != address(0), "managed burn after admission stop");
+            if (minted || (from == p.manager.account && to != p.manager.account)) {
+                bool authorized;
+                for (uint256 j; j < ledger.releases.length; ++j) {
+                    CustodyDelta memory release = ledger.releases[j];
+                    if (release.transactionHash != hash || release.logIndex != index) continue;
+                    _retainedRequire(
+                        !consumed[j] && release.recipient == to && release.amount == amount,
+                        "custody release changed/duplicated"
+                    );
+                    for (uint256 k; k < j; ++k) {
+                        _retainedRequire(
+                            ledger.releases[k].transactionHash != hash
+                                || ledger.releases[k].effectLogIndex != release.effectLogIndex,
+                            "economic effect reused"
+                        );
+                    }
+                    _retainedReleaseEffect(p, ledger.token, receipt, release);
+                    consumed[j] = true;
+                    authorized = true;
+                }
+                _retainedRequire(authorized, "unexplained outflow/deficit, even if masked by donation");
+                if (minted) {
+                    supply += amount;
+                } else {
+                    _retainedRequire(amount <= balance && amount <= backing, "custody/backing deficit");
+                    balance -= amount;
+                    backing -= amount;
+                }
+            }
+            if (to == p.manager.account && from != p.manager.account) {
+                balance += amount;
+            }
+        }
+        for (uint256 i; i < consumed.length; ++i) {
+            _retainedRequire(consumed[i], "approved custody release missing");
+        }
+        _retainedRequire(
+            IERC20(ledger.token).balanceOf(p.manager.account) == balance && balance >= backing,
+            "unexplained custody change or insufficient backing"
+        );
+        _retainedRequire(!managed || IERC20(ledger.token).totalSupply() == supply, "unexplained managed supply change");
+    }
+
+    function _retainedReleaseEffect(MigrationPlan memory p, address token, string memory receipt, CustodyDelta memory d)
+        private
+        pure
+    {
+        uint256 count = vm.parseJsonArrayLength(receipt, ".logs");
+        for (uint256 i; i < count; ++i) {
+            string memory key = string.concat(".logs[", vm.toString(i), "]");
+            if (vm.parseJsonUint(receipt, string.concat(key, ".logIndex")) != d.effectLogIndex) continue;
+            _retainedRequire(
+                vm.parseJsonAddress(receipt, string.concat(key, ".address")) == p.manager.account
+                    && vm.parseJsonArrayLength(receipt, string.concat(key, ".topics")) == 4
+                    && vm.parseJsonBytes32(receipt, string.concat(key, ".topics[0]"))
+                        == keccak256("Bridged(bytes32,address,address,uint256)")
+                    && uint256(vm.parseJsonBytes32(receipt, string.concat(key, ".topics[2]"))) == uint160(d.recipient)
+                    && uint256(vm.parseJsonBytes32(receipt, string.concat(key, ".topics[3]"))) == uint160(token)
+                    && keccak256(vm.parseJsonBytes(receipt, string.concat(key, ".data")))
+                        == keccak256(abi.encode(d.amount)),
+                "approved release lacks exact economic effect"
+            );
+            return;
+        }
+        revert RetainedMigrationHold("approved release effect missing");
+    }
+
+    /// @dev Effect authentication deliberately imposes no outer call shape or executor identity.
+    function _retainedEffectReceipt(bytes32 hash) private returns (string memory receipt, FinalizedPin memory pin) {
+        _retainedRequire(hash != 0, "missing effect transaction");
+        receipt = _retainedRpc("eth_getTransactionReceipt", string.concat('["', vm.toString(hash), '"]'));
+        _retainedRequire(
+            vm.parseJsonBytes32(receipt, ".transactionHash") == hash && vm.parseJsonUint(receipt, ".status") == 1,
+            "effect absent/reverted"
+        );
+        pin.number = vm.parseJsonUint(receipt, ".blockNumber");
+        pin.blockHash = vm.parseJsonBytes32(receipt, ".blockHash");
+        string memory header = _retainedBlock(_retainedHex(pin.number));
+        pin.timestamp = vm.parseJsonUint(header, ".timestamp");
+        _authenticateRetainedPin(pin);
+        _retainedRequire(
+            vm.parseJsonBytes32(
+                header,
+                string.concat(".transactions[", vm.toString(vm.parseJsonUint(receipt, ".transactionIndex")), "]")
+            ) == hash,
+            "effect absent from canonical block"
+        );
+    }
+
+    function _retainedExactLog(string memory receipt, address emitter, bytes32 topic, bytes memory data) private pure {
+        uint256 matches;
+        uint256 count = vm.parseJsonArrayLength(receipt, ".logs");
+        for (uint256 i; i < count; ++i) {
+            string memory key = string.concat(".logs[", vm.toString(i), "]");
+            if (
+                vm.parseJsonAddress(receipt, string.concat(key, ".address")) != emitter
+                    || vm.parseJsonArrayLength(receipt, string.concat(key, ".topics")) != 1
+                    || vm.parseJsonBytes32(receipt, string.concat(key, ".topics[0]")) != topic
+            ) continue;
+            if (keccak256(vm.parseJsonBytes(receipt, string.concat(key, ".data"))) == keccak256(data)) ++matches;
+        }
+        _retainedRequire(matches == 1, "missing/duplicate exact effect");
+    }
+
+    function _authenticateRetainedGovernanceEffect(MigrationPlan memory p, GovernanceDelivery memory d, bytes32 hash)
+        internal
+        returns (FinalizedPin memory pin)
+    {
+        string memory receipt;
+        (receipt, pin) = _retainedEffectReceipt(hash);
+        _retainedRequire(
+            _retainedMembership(d.root, d.message.hash(), d.leafIndex, d.totalLeaves, d.proof)
+                && MessageQueue(p.queue.account).getMerkleRoot(d.sourceBlock) == d.root
+                && MessageQueue(p.queue.account).isProcessed(d.message.nonce),
+            "effect membership/state"
+        );
+        _retainedExactLog(
+            receipt,
+            p.queue.account,
+            IMessageQueue.MessageProcessed.selector,
+            abi.encode(d.sourceBlock, d.message.hash(), d.message.nonce, d.message.destination)
+        );
+    }
+
+    // ABI-decoded script evidence is memory, unlike the contract's calldata-only proof helper.
+    function _retainedMembership(bytes32 root, bytes32 node, uint256 position, uint256 width, bytes32[] memory proof)
+        private
+        pure
+        returns (bool)
+    {
+        if (position >= width) return false;
+        uint256 index;
+        while (width > 1) {
+            if ((position & 1) == 1) {
+                if (index == proof.length) return false;
+                node = SubstrateMerkleProof.efficientHash(proof[index++], node);
+            } else if (position + 1 < width) {
+                if (index == proof.length) return false;
+                node = SubstrateMerkleProof.efficientHash(node, proof[index++]);
+            }
+            position >>= 1;
+            width = (width >> 1) + (width & 1);
+        }
+        return index == proof.length && node == root;
+    }
+
+    function _authenticateRetainedRootEffect(MigrationPlan memory p, uint256 sourceBlock, bytes32 root, bytes32 hash)
+        private
+        returns (FinalizedPin memory pin)
+    {
+        string memory receipt;
+        (receipt, pin) = _retainedEffectReceipt(hash);
+        if (root != bytes32(0)) {
+            _retainedExactLog(
+                receipt, p.queue.account, IMessageQueue.MerkleRoot.selector, abi.encode(sourceBlock, root)
+            );
+            _retainedRequire(MessageQueue(p.queue.account).getMerkleRoot(sourceBlock) == root, "root effect mismatch");
+        } else {
+            uint256 matches;
+            uint256 count = vm.parseJsonArrayLength(receipt, ".logs");
+            for (uint256 i; i < count; ++i) {
+                string memory key = string.concat(".logs[", vm.toString(i), "]");
+                if (
+                    vm.parseJsonAddress(receipt, string.concat(key, ".address")) == p.queue.account
+                        && vm.parseJsonArrayLength(receipt, string.concat(key, ".topics")) == 2
+                        && vm.parseJsonBytes32(receipt, string.concat(key, ".topics[0]"))
+                            == IMessageQueue.EmptyQueueProgress.selector
+                        && uint256(vm.parseJsonBytes32(receipt, string.concat(key, ".topics[1]"))) == sourceBlock
+                ) ++matches;
+            }
+            _retainedRequire(matches == 1, "missing/duplicate empty progress");
+        }
+    }
+
+    function _authenticateRetainedStageEffect(MigrationPlan memory p, MigrationAction memory a)
+        private
+        returns (FinalizedPin memory pin)
+    {
+        if (a.stage == MigrationStage.RegisterUnpause || a.stage == MigrationStage.Unpause) {
+            _authenticateRetainedBarrier(p, a.barrier);
+            _checkRetainedUnpauseChronology(p, a.delivery, a.barrier);
+        }
+        if (a.stage == MigrationStage.RegisterBarrier || a.stage == MigrationStage.RecordBarrier) {
+            _authenticateRetainedBarrier(p, a.barrier);
+            _validateRetainedBarrierControl(p, a);
+            if (a.stage == MigrationStage.RegisterBarrier) {
+                return
+                    _authenticateRetainedRootEffect(p, a.delivery.sourceBlock, a.delivery.root, a.effectTransactionHash);
+            }
+            pin = _authenticateRetainedGovernanceEffect(p, a.delivery, a.effectTransactionHash);
+            uint256 fork = vm.activeFork();
+            vm.createSelectFork(vm.envString("RETAINED_RPC_URL"), pin.number);
+            _retainedActionPoststate(p, a);
+            vm.selectFork(fork);
+            return pin;
+        }
+        if (a.stage == MigrationStage.EmptyBarrier) {
+            _checkRetainedEmptyChronology(p, a.barrier);
+            pin = _authenticateRetainedRootEffect(p, a.barrier.sourceBlock, a.barrier.root, a.effectTransactionHash);
+            _retainedPublicationIdentity(p, a.barrier, pin);
+            _retainedRequire(pin.number > a.barrier.upgradeReadback.state.number, "publication precedes upgrade");
+            return pin;
+        }
+        if (
+            a.stage == MigrationStage.RegisterPause || a.stage == MigrationStage.RegisterUpgrade
+                || a.stage == MigrationStage.RegisterUnpause || a.stage == MigrationStage.RegisterFreeze
+                || a.stage == MigrationStage.RegisterRecovery
+        ) {
+            _validateRetainedDelivery(p, a.delivery, _retainedActionKind(a.stage));
+            return _authenticateRetainedRootEffect(p, a.delivery.sourceBlock, a.delivery.root, a.effectTransactionHash);
+        }
+        _retainedRequire(
+            a.stage == MigrationStage.Pause || a.stage == MigrationStage.Freeze || a.stage == MigrationStage.Upgrade
+                || a.stage == MigrationStage.Unpause || a.stage == MigrationStage.Recover,
+            "unsupported external stage effect"
+        );
+        _validateRetainedDelivery(p, a.delivery, _retainedActionKind(a.stage));
+        pin = _authenticateRetainedGovernanceEffect(p, a.delivery, a.effectTransactionHash);
+        uint256 fork = vm.activeFork();
+        vm.createSelectFork(vm.envString("RETAINED_RPC_URL"), pin.number);
+        _retainedActionPoststate(p, a);
+        vm.selectFork(fork);
+    }
+
     /// @dev An independently approved capture authenticates WHEN qualification was observed.
     /// Rechecking a currently-finalized header alone cannot establish historical finality timing.
     function _authenticateRetainedObservation(
@@ -988,9 +1579,9 @@ abstract contract RetainedBridgeMigration is CommonBase {
         bytes32 transactionHash,
         FinalityObservation memory observation
     ) private {
-        string memory json = vm.readFile(vm.envString(variable));
+        string memory json = vm.readFile(_retainedEvidenceConfig(variable));
         _retainedRequire(
-            keccak256(bytes(json)) == vm.envBytes32(string.concat(variable, "_HASH"))
+            keccak256(bytes(json)) == vm.parseBytes32(_retainedEvidenceConfig(string.concat(variable, "_HASH")))
                 && vm.parseJsonUint(json, ".schemaVersion") == 1 && vm.parseJsonBytes32(json, ".planHash") == planHash
                 && vm.parseJsonUint(json, ".stage") == uint256(stage) && transactionHash != 0
                 && vm.parseJsonBytes32(json, ".transactionHash") == transactionHash
@@ -1054,6 +1645,10 @@ abstract contract RetainedBridgeMigration is CommonBase {
 
     function _retainedRpc(string memory method, string memory params) internal virtual returns (string memory) {
         return vm.rpcJson(vm.envString("RETAINED_RPC_URL"), method, params);
+    }
+
+    function _retainedEvidenceConfig(string memory variable) internal view virtual returns (string memory) {
+        return vm.envString(variable);
     }
 
     function _retainedBlock(string memory tag) private returns (string memory) {
@@ -1244,22 +1839,30 @@ abstract contract RetainedBridgeMigration is CommonBase {
         _retainedRequire(found, "original Foundry receipt missing");
     }
 
+    function _retainedPublicationIdentity(MigrationPlan memory p, EmptyBarrier memory barrier, FinalizedPin memory pin)
+        private
+        view
+    {
+        (uint64 queueId, uint64 sourceTime, uint256 published, bytes32 root) =
+            MessageQueue(p.queue.account).publications(barrier.sourceBlock);
+        QueueSnapshotProof memory snapshot = _retainedSnapshot(barrier.proof);
+        _retainedRequire(
+            snapshot.initialized && queueId == snapshot.queueId && sourceTime == snapshot.sourceTimestampMs
+                && root == barrier.root && published == pin.number,
+            "barrier publication identity"
+        );
+    }
+
     function _authenticateRetainedBarrier(MigrationPlan memory p, EmptyBarrier memory barrier) private {
         _verifyRetainedFinalizedPoststate(p, barrier.upgradeReadback.state);
         _authenticateRetainedPin(barrier.publication.state);
-        bytes memory input = abi.encodeCall(MessageQueue.submitEmptyQueueProgress, (barrier.sourceBlock, barrier.proof));
-        string memory artifact = vm.readFile(barrier.original.artifact);
-        string memory entry =
-            string.concat(".transactions[", vm.toString(barrier.original.transactionIndex), "].transaction");
-        uint256 nonce = vm.parseJsonUint(artifact, string.concat(entry, ".nonce"));
-        _retainedRequire(nonce <= type(uint64).max, "barrier nonce overflow");
-        FinalizedPin memory included = _authenticateRetainedOriginal(
-            barrier.original,
-            vm.parseJsonAddress(artifact, string.concat(entry, ".from")),
-            uint64(nonce),
-            p.queue.account,
-            input,
-            address(0)
+        FinalizedPin memory included =
+            _authenticateRetainedRootEffect(p, barrier.sourceBlock, barrier.root, barrier.original.transactionHash);
+        _retainedPublicationIdentity(p, barrier, included);
+        _retainedRequire(
+            included.number == barrier.publication.state.number
+                && included.blockHash == barrier.publication.state.blockHash,
+            "barrier finalized inclusion"
         );
         _retainedRequire(
             included.number > barrier.upgradeReadback.state.number
@@ -1270,24 +1873,8 @@ abstract contract RetainedBridgeMigration is CommonBase {
     }
 
     function _authenticateRetainedRootOriginal(MigrationPlan memory p, GovernanceDelivery memory d) private {
-        OriginalTransaction memory original = OriginalTransaction(
-            vm.envString("RETAINED_ROOT_ARTIFACT"),
-            vm.envBytes32("RETAINED_ROOT_ARTIFACT_HASH"),
-            vm.envUint("RETAINED_ROOT_TRANSACTION_INDEX"),
-            vm.envBytes32("RETAINED_ROOT_TRANSACTION_HASH")
-        );
-        string memory artifact = vm.readFile(original.artifact);
-        string memory entry = string.concat(".transactions[", vm.toString(original.transactionIndex), "].transaction");
-        uint256 nonce = vm.parseJsonUint(artifact, string.concat(entry, ".nonce"));
-        _retainedRequire(nonce <= type(uint64).max, "root nonce overflow");
-        _authenticateRetainedOriginal(
-            original,
-            vm.parseJsonAddress(artifact, string.concat(entry, ".from")),
-            uint64(nonce),
-            p.queue.account,
-            abi.encodeCall(IMessageQueue.submitMerkleRoot, (d.sourceBlock, d.root, d.rootProof)),
-            address(0)
-        );
+        // Successful effect identity, not necessarily a runner-owned transaction.
+        _authenticateRetainedRootEffect(p, d.sourceBlock, d.root, vm.envBytes32("RETAINED_ROOT_TRANSACTION_HASH"));
     }
 
     /// @dev Timelock AccessControl is not enumerable: authenticate its full grant/revoke history, not only supplied members.
@@ -1380,7 +1967,7 @@ abstract contract RetainedBridgeMigration is CommonBase {
     }
 
     function _authenticateRetainedSourceCut(MigrationPlan memory p, MigrationStage stage) internal view {
-        string memory cut = vm.readFile(vm.envString("RETAINED_SOURCE_CUT"));
+        string memory cut = vm.readFile(_retainedEvidenceConfig("RETAINED_SOURCE_CUT"));
         _retainedRequire(
             keccak256(bytes(cut)) == p.sourceCutApproval && vm.parseJsonAddress(cut, ".queue") == p.queue.account
                 && vm.parseJsonBytes32(cut, ".sourceDomain") == p.bootstrap.sourceDomain
@@ -1389,21 +1976,29 @@ abstract contract RetainedBridgeMigration is CommonBase {
             "source cut changed"
         );
         LegacyRootPin[] memory roots = abi.decode(vm.parseJsonBytes(cut, ".roots"), (LegacyRootPin[]));
-        _retainedRequire(roots.length != 0, "source cut has no coverage");
+        _retainedRequire(
+            roots.length != 0 && roots[roots.length - 1].sourceBlock == p.legacyMax
+                && vm.parseJsonBytes32(cut, ".sourceCoverageDigest") != 0,
+            "source cut has no complete approved coverage"
+        );
         MessageQueue q = MessageQueue(p.queue.account);
-        bool requireCoverage = stage >= MigrationStage.Pause || q.paused()
-            || _retainedImplementation(p.queue.account) == p.implementation.account;
+        bool requireCoverage = stage == MigrationStage.Pause || stage == MigrationStage.Freeze
+            || stage == MigrationStage.Upgrade || (stage >= MigrationStage.Verify && stage <= MigrationStage.Unpause)
+            || q.paused() || _retainedImplementation(p.queue.account) == p.implementation.account;
         for (uint256 i; i < roots.length; ++i) {
             _retainedRequire(
                 roots[i].sourceBlock >= p.genesisBlock && roots[i].sourceBlock <= p.legacyMax && roots[i].root != 0,
                 "cut coverage outside legacy range"
+            );
+            _retainedRequire(
+                i == 0 || roots[i - 1].sourceBlock < roots[i].sourceBlock, "unordered/duplicate source coverage"
             );
             bytes32 actualRoot = q.getMerkleRoot(roots[i].sourceBlock);
             if (requireCoverage || actualRoot != 0) {
                 _retainedRequire(actualRoot == roots[i].root, "unsettled/conflicting cut root");
             }
         }
-        string memory inventory = vm.readFile(vm.envString("RETAINED_UNPAUSE_INVENTORY"));
+        string memory inventory = vm.readFile(_retainedEvidenceConfig("RETAINED_UNPAUSE_INVENTORY"));
         _retainedRequire(
             keccak256(bytes(inventory)) == p.outstandingUnpauseInventory
                 && vm.parseJsonAddress(inventory, ".queue") == p.queue.account

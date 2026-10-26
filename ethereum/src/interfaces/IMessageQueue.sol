@@ -16,6 +16,24 @@ struct VaraMessage {
     bytes payload;
 }
 
+/// @dev Canonical control fields; the wire format is a flat ABI tuple, not an encoded struct.
+struct GovernanceControl {
+    uint64 sequence;
+    uint64 validUntil;
+    uint64 incidentEpoch;
+    bytes32 requiredAdminAction;
+    bytes32 requiredBarrier;
+}
+
+struct LegacyControl {
+    VaraMessage message;
+    uint256 sourceBlock;
+    uint256 totalLeaves;
+    uint256 leafIndex;
+    bytes32[] proof;
+    uint64 validUntil;
+}
+
 /**
  * @dev Interface for the MessageQueue contract.
  */
@@ -66,6 +84,34 @@ interface IMessageQueue is IPausable {
     error InvalidBeefyRecoveryTimelock();
     error NotBeefyRecoveryTimelock();
     error InvalidBeefyRecovery();
+    error InvalidGovernanceControl();
+    error GovernanceControlExpired();
+    error GovernanceControlConsumed();
+    error GovernanceDependencyMissing();
+    error LegacyPublicationFrozen();
+    error InvalidLegacyStage();
+    error InvalidMigrationBarrier();
+
+    event GovernanceControlCompleted(bytes32 indexed messageHash, bytes32 indexed stream, uint64 sequence);
+    event LegacyMigrationStaged(uint256 cut, bytes32 migrationMessage, bytes32 recoveryMessage);
+    event LegacyPublicationRecovered(uint256 cut);
+    event MigrationBarrierRecorded(bytes32 indexed barrier, uint256 sourceBlock, bytes32 publicationHash);
+    event MigrationPublicationHashCaptured(
+        uint256 indexed sourceBlock, bytes32 indexed identity, bytes32 publicationHash
+    );
+
+    function stageLegacyMigration(
+        IVerifier expectedLegacyVerifier,
+        uint256 expectedLegacyMaxBlock,
+        LegacyControl calldata migration,
+        LegacyControl calldata recovery
+    ) external;
+    function recoverLegacyPublication(IVerifier expectedLegacyVerifier, uint256 expectedLegacyMaxBlock) external;
+    /// @dev Permissionless canonical identity capture within 256 blocks; does not attest finality.
+    function captureMigrationPublicationHash(uint256 sourceBlock) external returns (bytes32);
+    function migrationPublicationBlockHash(uint256 sourceBlock) external view returns (bytes32);
+    /// @dev Admin attests destination finality; canonical publication identity is independently checked on-chain.
+    function recordMigrationBarrier(uint256 sourceBlock, bytes32 publicationBlockHash) external returns (bytes32);
 
     event BeefyVerifierRecovered(
         address indexed previousVerifier, address indexed replacementVerifier, uint256 maxBlock

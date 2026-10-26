@@ -68,6 +68,31 @@ enum Command {
         #[arg(long)]
         owned_fixture_network: Option<PathBuf>,
     },
+    /// Independently maintain client freshness and ordered handovers, including pre-binding.
+    TokensHeartbeat {
+        #[arg(long)]
+        source_rpc: String,
+        #[arg(long)]
+        witness_rpc: String,
+        #[arg(long)]
+        ethereum_rpc: String,
+        #[command(flatten)]
+        finality: cli_utils::EthereumFinalityArgs,
+        #[arg(long)]
+        wallet: PathBuf,
+        #[arg(long)]
+        deployment_manifest: PathBuf,
+        #[arg(long)]
+        output_dir: PathBuf,
+        #[arg(long)]
+        client_deployment_transaction: Option<alloy::primitives::B256>,
+        #[arg(long)]
+        reconcile_once: bool,
+        #[arg(long)]
+        local_rehearsal: bool,
+        #[arg(long, conflicts_with = "local_rehearsal")]
+        owned_fixture_network: Option<PathBuf>,
+    },
     TokensFollow {
         #[arg(long, default_value = "ws://127.0.0.1:9944")]
         source_rpc: String,
@@ -183,6 +208,36 @@ async fn main() -> Result<()> {
             )
             .await
         }
+        Command::TokensHeartbeat {
+            source_rpc,
+            witness_rpc,
+            ethereum_rpc,
+            finality,
+            wallet,
+            deployment_manifest,
+            output_dir,
+            client_deployment_transaction,
+            reconcile_once,
+            local_rehearsal,
+            owned_fixture_network,
+        } => {
+            follower::follow_tokens(
+                &source_rpc,
+                &witness_rpc,
+                &ethereum_rpc,
+                &finality,
+                &wallet,
+                None,
+                &deployment_manifest,
+                &output_dir,
+                reconcile_once,
+                local_rehearsal,
+                owned_fixture_network.as_deref(),
+                client_deployment_transaction,
+                cli.ethereum_network,
+            )
+            .await
+        }
         Command::TokensFollow {
             source_rpc,
             witness_rpc,
@@ -203,7 +258,7 @@ async fn main() -> Result<()> {
                 &ethereum_rpc,
                 &finality,
                 &wallet,
-                &root_wallet,
+                Some(&root_wallet),
                 &deployment_manifest,
                 &output_dir,
                 reconcile_once,

@@ -123,12 +123,7 @@ fn drain(system: &System, messages: &[MessageId]) -> Vec<CoreLog> {
             result.failed,
             result.log
         );
-        logs.extend(
-            result
-                .log
-                .into_iter()
-                .filter(|log| log.reply_to().is_some_and(|id| messages.contains(&id))),
-        );
+        logs.extend(result.log);
         if messages
             .iter()
             .all(|message| logs.iter().any(|log| log.reply_to() == Some(*message)))
@@ -426,6 +421,101 @@ fn overlapping_replays_preserve_first_progress_and_immutable_normal_base() {
             assert!(call::<sync_io::Process>(&system, &program, finality(&data, 4)).is_ok());
             assert_progress(&system, &program, &ancestors[4]);
         }
+    });
+}
+
+// VB-18 reconstructed from supplied HTML, audited 7fe1b032; real CLC Wasm/BLS.
+#[test]
+fn duplicate_and_overlapping_replays_emit_only_committed_checkpoints() {
+    use checkpoint_light_client_client::service_replay_back::events::ServiceReplayBackEvents;
+    use sails_rs::events::EventIo;
+
+    large_stack(|| {
+        let data: Value = serde_json::from_slice(SYNTHETIC).unwrap();
+        let ancestors = headers(&data);
+        let system = System::new();
+        let program = initialize(&system, &data);
+        let baseline = state(&system, &program).checkpoints;
+        let events = |logs: &[CoreLog]| {
+            logs.iter()
+                .filter(|log| log.source() == program.id() && log.destination().is_zero())
+                .map(
+                    |log| match ServiceReplayBackEvents::decode_event(log.payload()).unwrap() {
+                        ServiceReplayBackEvents::NewCheckpoint {
+                            slot,
+                            tree_hash_root,
+                        } => (slot, tree_hash_root),
+                    },
+                )
+                .collect::<Vec<_>>()
+        };
+        let (update, aggregate) = full(&data, 3);
+        let payload = <replay_io::Start as ActionIo>::encode_call(&(
+            update,
+            aggregate,
+            vec![ancestors[2].clone()],
+        ));
+        let first = program.send_bytes(ACTOR, payload.clone());
+        let second = program.send_bytes(ACTOR, payload.clone());
+        let logs = drain(&system, &[first, second]);
+        for id in [first, second] {
+            assert!(matches!(
+                decode_reply::<replay_io::Start>(&program, &logs, id),
+                Ok(ReplayBackStatus::InProcess)
+            ));
+        }
+        assert!(
+            events(&logs).is_empty(),
+            "staged checkpoints are not committed events"
+        );
+        assert_eq!(state(&system, &program).checkpoints, baseline);
+        let before = state(&system, &program).replay_back.unwrap();
+
+        let mut wrong_anchor = ancestors[2].clone();
+        wrong_anchor.state_root.0[0] ^= 1;
+        assert!(matches!(
+            call::<replay_io::Process>(&system, &program, vec![ancestors[1].clone(), wrong_anchor]),
+            Err(ReplayBackError::Verify(Error::InvalidHeaders))
+        ));
+        assert_eq!(state(&system, &program).replay_back.unwrap(), before);
+        assert_eq!(state(&system, &program).checkpoints, baseline);
+
+        let duplicate = program.send_bytes(
+            ACTOR,
+            <replay_io::Process as ActionIo>::encode_call(&ancestors[2..4].to_vec()),
+        );
+        let logs = drain(&system, &[duplicate]);
+        assert!(matches!(
+            decode_reply::<replay_io::Process>(&program, &logs, duplicate),
+            Ok(ReplayBackStatus::InProcess)
+        ));
+        assert!(events(&logs).is_empty());
+        assert_eq!(state(&system, &program).replay_back.unwrap(), before);
+
+        let finish = program.send_bytes(
+            ACTOR,
+            <replay_io::Process as ActionIo>::encode_call(&ancestors[1..4].to_vec()),
+        );
+        let logs = drain(&system, &[finish]);
+        assert!(matches!(
+            decode_reply::<replay_io::Process>(&program, &logs, finish),
+            Ok(ReplayBackStatus::Finished)
+        ));
+        assert_progress(&system, &program, &ancestors[3]);
+        let committed = state(&system, &program).checkpoints;
+        assert_eq!(events(&logs), committed[baseline.len()..]);
+        assert!(matches!(
+            call::<replay_io::Process>(&system, &program, ancestors[1..4].to_vec()),
+            Err(ReplayBackError::NotStarted)
+        ));
+        let repeated = program.send_bytes(ACTOR, payload);
+        let logs = drain(&system, &[repeated]);
+        assert!(matches!(
+            decode_reply::<replay_io::Start>(&program, &logs, repeated),
+            Ok(ReplayBackStatus::Finished)
+        ));
+        assert!(events(&logs).is_empty());
+        assert_eq!(state(&system, &program).checkpoints, committed);
     });
 }
 
@@ -752,7 +842,7 @@ fn replay_batches_reject_order_duplicates_and_unbound_endpoints_atomically() {
                 0 => batch.reverse(),
                 1 => batch.push(batch[1].clone()),
                 2 => batch[0].state_root.0[0] ^= 1,
-                _ => batch.push(ancestors[3].clone()),
+                _ => batch.extend_from_slice(&ancestors[3..5]),
             }
             let (update, aggregate) = full(&data, 3);
             assert!(matches!(

@@ -414,6 +414,22 @@ fn intent(output: &Path, component: &str, binary: &[u8]) -> Result<(ActorId, boo
     }
     if state["programs"][component].is_null() {
         state["programs"][component] = json!({"id":address,"codeId":code_hex(code_id),"status":"unsigned","salt":format!("0x{}",hex::encode(&salt))});
+        if component == "vftManager" {
+            let floor = state["checkpointSlot"]
+                .as_u64()
+                .filter(|floor| *floor > 0)
+                .ok_or_else(|| anyhow!("approved positive starting checkpoint slot missing"))?;
+            state["programs"][component]["minimumReceiptSlot"] = json!(floor);
+        }
+    }
+    if component == "vftManager" {
+        ensure!(
+            state["checkpointSlot"]
+                .as_u64()
+                .is_some_and(|slot| slot > 0)
+                && state["programs"][component]["minimumReceiptSlot"] == state["checkpointSlot"],
+            "manager constructor floor is absent or differs from approved checkpoint; HOLD"
+        );
     }
     ensure!(
         state["programs"][component]["id"] == address
@@ -538,6 +554,10 @@ pub async fn prepare(
     checkpoint_hash: &str,
     output: &Path,
 ) -> Result<()> {
+    ensure!(
+        slot > 0,
+        "approved starting checkpoint slot must be positive"
+    );
     ensure!(
         beefy_relay::local_source_rpc(source_rpc),
         "public dev keys: source RPC must be loopback"
@@ -715,6 +735,7 @@ pub async fn prepare(
         .new(InitConfig {
             gear_bridge_builtin: actor(BUILTIN)?,
             historical_proxy_address: proxy,
+            minimum_receipt_slot: slot,
             config: config.clone(),
         })
         .with_gas_limit(gas)
@@ -729,6 +750,19 @@ pub async fn prepare(
     finalized =
         verify_prepared_constructor(&api, &path, "vftManager", manager, manager_code).await?;
     let service = vft_manager_client::VftManager::new(remoting.clone());
+    let domain = service
+        .cutover_status()
+        .at_block(sails_block_hash(finalized))
+        .recv(manager)
+        .await?;
+    ensure!(
+        domain.minimum_receipt_slot == slot
+            && domain.predecessor.is_none()
+            && domain.successor.is_none()
+            && domain.last_receipt_slot.is_none()
+            && domain.phase == vft_manager_client::CutoverPhase::Active,
+        "fresh manager deployment domain differs from approved checkpoint; HOLD"
+    );
     ensure!(
         service
             .gear_bridge_builtin()
@@ -2428,9 +2462,9 @@ pub async fn configure(
         gear_rpc_client::GearApi::new(witness_rpc, 3).await?,
     )
     .await?;
-    source.validate_attachment(&deployment["anchor"]).await?;
     ethereum.qualify_execution_source(&source).await?;
     ethereum.qualify_execution_source(&_witness).await?;
+    source.validate_attachment(&deployment["anchor"]).await?;
     ensure!(
         source.source_genesis == expected_genesis,
         "wrong source genesis"
@@ -2498,6 +2532,11 @@ pub async fn configure(
     let checkpoint_slot = stack["checkpointSlot"]
         .as_u64()
         .ok_or_else(|| anyhow!("checkpoint slot missing"))?;
+    ensure!(
+        checkpoint_slot > 0
+            && stack["programs"]["vftManager"]["minimumReceiptSlot"] == checkpoint_slot,
+        "manager constructor intent lacks the approved positive checkpoint floor; HOLD"
+    );
     let checkpoint_hash = decode_hash(&stack["checkpointHash"], "checkpoint hash")?;
 
     ensure!(
@@ -2630,6 +2669,19 @@ pub async fn configure(
     );
 
     let manager = vft_manager_client::VftManager::new(remoting.clone());
+    let domain = manager
+        .cutover_status()
+        .at_block(finalized_sails_hash)
+        .recv(manager_id)
+        .await?;
+    ensure!(
+        domain.minimum_receipt_slot == checkpoint_slot
+            && domain.predecessor.is_none()
+            && domain.successor.is_none()
+            && domain.last_receipt_slot.is_none()
+            && domain.phase == vft_manager_client::CutoverPhase::Active,
+        "manager activation domain differs from approved checkpoint; HOLD"
+    );
     let manager_admin = manager
         .admin()
         .at_block(finalized_sails_hash)
@@ -3684,6 +3736,45 @@ mod configuration_recovery_tests {
         assert!(match_setup_message(&action, 0, &changed).is_err());
         action["messages"][0]["submission"] = Value::Null;
         assert!(match_setup_message(&action, 0, &intent).is_err());
+        Ok(())
+    }
+
+    // VB-12 reconstructed from HTML; audited 7fe1b032, candidate baseline 3ccf409.
+    #[test]
+    fn manager_constructor_intent_binds_positive_checkpoint_floor() -> Result<()> {
+        let directory = directory("manager-floor")?;
+        let path = directory.join("token-stack.json");
+        save(
+            &directory,
+            &json!({
+                "sourceGenesis": format!("0x{}", hex::encode([1; 32])),
+                "checkpointSlot": 0, "programs": {}
+            }),
+        )?;
+        assert!(intent(&directory, "vftManager", &[1, 2, 3]).is_err());
+        let mut state = read_config_stack(&path)?;
+        state["checkpointSlot"] = json!(10);
+        save(&directory, &state)?;
+        assert!(intent(&directory, "vftManager", &[1, 2, 3])?.1);
+        let state = read_config_stack(&path)?;
+        assert_eq!(state["programs"]["vftManager"]["minimumReceiptSlot"], 10);
+        for floor in [Value::Null, json!(0), json!(11)] {
+            let mut changed = state.clone();
+            changed["programs"]["vftManager"]["minimumReceiptSlot"] = floor;
+            save(&directory, &changed)?;
+            let before = fs::read(&path)?;
+            assert!(intent(&directory, "vftManager", &[1, 2, 3]).is_err());
+            assert_eq!(
+                fs::read(&path)?,
+                before,
+                "do not rewrite historical constructor intent"
+            );
+        }
+        let mut changed_checkpoint = state;
+        changed_checkpoint["checkpointSlot"] = json!(11);
+        save(&directory, &changed_checkpoint)?;
+        assert!(intent(&directory, "vftManager", &[1, 2, 3]).is_err());
+        fs::remove_dir_all(directory)?;
         Ok(())
     }
 

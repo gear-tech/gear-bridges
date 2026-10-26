@@ -48,6 +48,7 @@ async fn bind_runtime(
     client: &GearApi,
     cutover_seal: Option<&Path>,
     approved_manager_code: Option<H256>,
+    root_minimum_receipt_slot: Option<u64>,
     native_wrapper_approval: Option<&gear_common::native_wrapper::ApprovedNativeWrapper>,
 ) -> anyhow::Result<(Arc<JSONBlockStorage>, std::fs::File, u64, Option<u64>)> {
     let signer_ownership = gear_common::signer_ownership::lock_signer(
@@ -64,6 +65,7 @@ async fn bind_runtime(
         &identity,
         cutover_seal,
         approved_manager_code,
+        root_minimum_receipt_slot,
         client,
         eth_api,
         native_wrapper_approval,

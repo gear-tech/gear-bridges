@@ -3,7 +3,7 @@ use crate::{
     protocol::*,
 };
 use parity_scale_codec::{Decode, Encode};
-use sp_consensus_beefy::{Payload, VersionedFinalityProof};
+use sp_consensus_beefy::{ecdsa_crypto::Signature, Payload, VersionedFinalityProof};
 use sp_core::crypto::UncheckedFrom;
 
 fn bytes(hex: &str) -> Vec<u8> {
@@ -264,13 +264,19 @@ fn signatures_are_canonical_positional_and_quorate() {
         .is_err());
         let mut duplicate = signed.signed.clone();
         duplicate.signatures[1] = duplicate.signatures[0].clone();
-        assert!(validate_signed_commitment(
+        let result = validate_signed_commitment(
             &VersionedFinalityProof::V1(duplicate).encode(),
             &keys,
             None,
-            None
-        )
-        .is_err());
+            None,
+        );
+        if keys.len() > quorum {
+            let valid = result.unwrap();
+            assert!(valid.signed.signatures[1].is_none());
+            assert!(!valid.signed_indices.contains(&1));
+        } else {
+            assert!(result.unwrap_err().is::<InsufficientSignatures>());
+        }
     }
     let mut trailing = raw.clone();
     trailing.push(0);
@@ -285,6 +291,95 @@ fn signatures_are_canonical_positional_and_quorate() {
     assert!(authority_address(&[0; 33]).is_err());
     assert!(validate_signed_commitment(&raw, &keys, Some(1), None).is_err());
     assert!(validate_signed_commitment(&raw, &keys, None, Some(2)).is_err());
+}
+
+#[test]
+fn normalized_quorum_retains_invalid_authority_positions() {
+    let fixtures = generate_fixtures().unwrap();
+    let fixture = fixtures
+        .cases
+        .iter()
+        .find(|case| case.validator_count == 59)
+        .unwrap();
+    let mut keys: Vec<[u8; 33]> = fixture
+        .authority_keys
+        .iter()
+        .map(|key| bytes(key).try_into().unwrap())
+        .collect();
+    let baseline =
+        validate_signed_commitment(&bytes(&fixture.signed_commitment), &keys, None, None).unwrap();
+    let mut high_s = baseline.signed.clone();
+    for signature in high_s.signatures.iter_mut().flatten() {
+        let raw_bytes: &[u8] = signature.as_ref();
+        let mut raw: [u8; 65] = raw_bytes.try_into().unwrap();
+        let parsed = k256::ecdsa::Signature::from_slice(&raw[..64]).unwrap();
+        let high =
+            k256::ecdsa::Signature::from_scalars(parsed.r().to_bytes(), (-*parsed.s()).to_bytes())
+                .unwrap();
+        raw[..64].copy_from_slice(&high.to_bytes());
+        raw[64] = (raw[64] ^ 1) + 27;
+        *signature = Signature::unchecked_from(raw);
+    }
+    let normalized = validate_signed_commitment(
+        &VersionedFinalityProof::V1(high_s.clone()).encode(),
+        &keys,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(normalized.signed, baseline.signed);
+    for (index, key) in keys[40..59].iter_mut().enumerate() {
+        high_s.signatures[40 + index] = high_s.signatures[0].clone();
+        *key = [0; 33];
+    }
+    let leaves = authority_leaves(&keys).unwrap();
+    // Pinned runtime conversion keeps empty bytes, not a zero-address leaf.
+    // Actual runtime-produced authority roots remain a separate qualification gate.
+    let runtime_leaves: Vec<Vec<u8>> = fixture
+        .authority_addresses
+        .iter()
+        .enumerate()
+        .map(|(index, address)| {
+            if index < 40 {
+                bytes(address)
+            } else {
+                Vec::new()
+            }
+        })
+        .collect();
+    let root = authority_root(&leaves).unwrap();
+    assert_eq!(
+        root,
+        binary_merkle_tree::merkle_root::<KeccakHasher, _>(runtime_leaves)
+    );
+    assert!(authority_proof(&leaves, 40).is_err());
+    let valid = validate_signed_commitment(
+        &VersionedFinalityProof::V1(high_s.clone()).encode(),
+        &keys,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(valid.signed_indices, (0..40).collect::<Vec<_>>());
+    assert!(valid.signed.signatures[40..].iter().all(Option::is_none));
+    assert!(verify_authority_proof(
+        &root,
+        &authority_proof(&leaves, 39).unwrap(),
+        59
+    ));
+    let raw_bytes: &[u8] = high_s.signatures[39].as_ref().unwrap().as_ref();
+    let mut invalid: [u8; 65] = raw_bytes.try_into().unwrap();
+    invalid[64] = 255;
+    high_s.signatures[39] = Some(Signature::unchecked_from(invalid));
+    let error = validate_signed_commitment(
+        &VersionedFinalityProof::V1(high_s).encode(),
+        &keys,
+        None,
+        None,
+    )
+    .unwrap_err();
+    let pending = error.downcast_ref::<InsufficientSignatures>().unwrap();
+    assert_eq!((pending.valid, pending.required), (39, 40));
 }
 
 #[test]
@@ -326,7 +421,7 @@ fn authority_proofs_cover_positions_and_size_bounds() {
             .iter()
             .map(|key| bytes(key).try_into().unwrap())
             .collect();
-        let addresses = authority_addresses(&keys).unwrap();
+        let addresses = authority_leaves(&keys).unwrap();
         let root = hash(&case.authority_root);
         assert_eq!(authority_root(&addresses).unwrap(), root);
         for index in [0, keys.len() / 2, keys.len() - 1] {
@@ -341,8 +436,8 @@ fn authority_proofs_cover_positions_and_size_bounds() {
             );
         }
     }
-    assert!(authority_addresses(&[]).is_err());
-    assert!(authority_addresses(&vec![[2; 33]; MAX_VALIDATORS + 1]).is_err());
+    assert!(authority_leaves(&[]).is_err());
+    assert!(authority_leaves(&vec![[2; 33]; MAX_VALIDATORS + 1]).is_err());
 }
 
 #[test]

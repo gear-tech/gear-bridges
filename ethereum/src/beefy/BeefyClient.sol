@@ -156,6 +156,11 @@ contract BeefyClient {
     /// @dev The block number in the relay chain in which the latest MMR root was emitted.
     uint64 public latestBeefyBlock;
 
+    /// @dev Bounded accepted history; bootstrap is deliberately not an accepted anchor.
+    mapping(uint64 blockNumber => bytes32 root) private acceptedAnchors;
+    uint64[64] private acceptedAnchorBlocks;
+    uint8 private nextAcceptedAnchor;
+
     /// @dev Immutable source and destination identity and MMR history start.
     bytes32 public immutable sourceDomain;
     bytes32 public immutable bridgeDomain;
@@ -401,17 +406,26 @@ contract BeefyClient {
     }
 
     /**
-     * @dev Verify that the supplied MMR leaf is included in the latest verified MMR root.
+     * @dev Verify a leaf against an exact retained accepted root while the client is live.
      * @param leafHash contains the merkle leaf to be verified
      * @param proof contains simplified mmr proof
      * @param proofOrder a bitfield describing the order of each item (left vs right)
      */
-    function verifyMMRLeafProof(bytes32 leafHash, bytes32[] calldata proof, uint256 proofOrder)
-        external
-        view
-        returns (bool)
-    {
-        return MMRProof.verifyLeafProof(latestMMRRoot, leafHash, proof, proofOrder);
+    function verifyMMRLeafProof(
+        uint64 anchorBlock,
+        bytes32 anchorRoot,
+        bytes32 leafHash,
+        bytes32[] calldata proof,
+        uint256 proofOrder
+    ) external view returns (bool) {
+        _requireLive();
+        return anchorRoot != bytes32(0) && acceptedAnchors[anchorBlock] == anchorRoot
+            && MMRProof.verifyLeafProof(anchorRoot, leafHash, proof, proofOrder);
+    }
+
+    /// @dev Membership is independent of freshness; proof admission additionally requires a live client.
+    function isAcceptedAnchor(uint64 blockNumber, bytes32 root) external view returns (bool) {
+        return root != bytes32(0) && acceptedAnchors[blockNumber] == root;
     }
 
     /**
@@ -555,9 +569,19 @@ contract BeefyClient {
             nextValidatorSet.length = leaf.nextAuthoritySetLen;
             nextValidatorSet.root = leaf.nextAuthoritySetRoot;
         }
+        _recordAcceptedAnchor(commitment.blockNumber, newMMRRoot);
         latestMMRRoot = newMMRRoot;
         latestBeefyBlock = commitment.blockNumber;
         lastAuthenticatedSourceTimestampMs = snapshot.sourceTimestampMs;
+    }
+
+    function _recordAcceptedAnchor(uint64 blockNumber, bytes32 root) internal {
+        if (blockNumber <= latestBeefyBlock) revert StaleCommitment();
+        if (root == bytes32(0)) revert InvalidCommitment();
+        delete acceptedAnchors[acceptedAnchorBlocks[nextAcceptedAnchor]];
+        acceptedAnchorBlocks[nextAcceptedAnchor] = blockNumber;
+        acceptedAnchors[blockNumber] = root;
+        nextAcceptedAnchor = uint8((uint256(nextAcceptedAnchor) + 1) % 64);
     }
 
     function _validateValidatorSet(ValidatorSet memory validatorSet) internal pure {

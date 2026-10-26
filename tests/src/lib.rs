@@ -147,7 +147,5 @@ pub fn create_receipt_rlp_with_logs(
         logs,
     });
     let receipt = ReceiptEnvelope::Eip2930(receipt);
-    let mut receipt_rlp = vec![];
-    alloy_rlp::Encodable::encode(&receipt, &mut receipt_rlp);
-    receipt_rlp
+    alloy::eips::eip2718::Encodable2718::encoded_2718(&receipt)
 }

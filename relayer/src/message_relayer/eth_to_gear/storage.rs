@@ -18,6 +18,15 @@ use tokio::{
 };
 use uuid::Uuid;
 
+#[path = "journal.rs"]
+mod journal;
+
+/// Read and validate the complete immutable inventory for explicit cutover/history qualification.
+/// Live scheduling uses only bounded hot references, never this materialized history view.
+pub fn read_journal_inventory(path: &Path) -> anyhow::Result<serde_json::Value> {
+    journal::inventory(path)
+}
+
 /// Storage type implementing
 /// storage for Ethereum blocks.
 pub struct BlockStorage {
@@ -237,6 +246,9 @@ pub trait Storage: Send + Sync {
     async fn save(&self, tx_manager: &TransactionManager) -> anyhow::Result<()>;
     async fn load(&self, tx_manager: &TransactionManager) -> anyhow::Result<()>;
     async fn save_blocks(&self) -> anyhow::Result<()>;
+    async fn cold_contains(&self, _tx: &TxHashWithSlot) -> anyhow::Result<bool> {
+        Ok(false)
+    }
 }
 
 #[cfg(test)]
@@ -317,6 +329,8 @@ pub(super) struct ManualInboundIdentity {
 #[derive(Serialize, Deserialize)]
 struct StoredState {
     schema_version: u32,
+    #[serde(default)]
+    archive_count: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     predecessor_cutover: Option<PredecessorCutover>,
     #[serde(default)]
@@ -329,8 +343,8 @@ struct StoredState {
 }
 
 const STATE_FILE: &str = "state.json";
-// Schemas5/6 retain original lanes; schema7 additionally binds successor lanes to an immutable seal.
-const STATE_SCHEMA_VERSION: u32 = 7;
+// Legacy schemas are read only for an evidence-preserving schema-8 migration.
+const STATE_SCHEMA_VERSION: u32 = 8;
 
 impl JSONStorage {
     pub fn new(path: impl AsRef<Path>) -> Self {
@@ -353,6 +367,8 @@ impl JSONStorage {
         self
     }
 
+    /// Validate an already-bound lane without rewriting its journal. Legacy schema
+    /// migration belongs to an explicit save, which retains the exact predecessor bytes.
     pub async fn bind_runtime_identity(
         &self,
         identity: InboundRuntimeIdentity,
@@ -438,6 +454,7 @@ impl JSONStorage {
         );
         let _guard = self.save_lock.lock().await;
         tokio::fs::create_dir_all(&self.path).await?;
+        journal::recover_write(&self.path).await?;
         anyhow::ensure!(
             !self.path.join(format!("{STATE_FILE}.new")).exists()
                 && !self.path.join("blocks.json.new").exists(),
@@ -472,6 +489,7 @@ impl JSONStorage {
             } else {
                 anyhow::ensure!(
                     manual.is_none()
+                        && state.archive_count == 0
                         && state.transactions.is_empty()
                         && state.completed.is_empty()
                         && state.failed.is_empty()
@@ -480,6 +498,70 @@ impl JSONStorage {
                 );
                 state.runtime_identity = Some(identity.clone());
                 self.write_state(serde_json::to_value(&state)?).await?;
+            }
+            // Validate the complete legacy ownership domain without rewriting original bytes.
+            anyhow::ensure!(
+                state
+                    .transactions
+                    .keys()
+                    .all(|uuid| !state.completed.contains_key(uuid)),
+                "HOLD: duplicate active/completed transaction owner"
+            );
+            anyhow::ensure!(
+                manual.is_none()
+                    || state
+                        .failed
+                        .keys()
+                        .all(|uuid| state.transactions.contains_key(uuid)
+                            || state.completed.contains_key(uuid)),
+                "HOLD: manual failure lost its original transaction"
+            );
+            for (uuid, tx) in state.transactions.iter().chain(&state.completed) {
+                anyhow::ensure!(*uuid == tx.uuid, "HOLD: transaction key/UUID changed");
+                journal::validate_attempts(tx)?;
+                if let Some(target) = &manual {
+                    anyhow::ensure!(
+                        state.transactions.len() + state.completed.len() <= 1
+                            && tx.tx.tx_hash == target.tx_hash
+                            && tx.tx.slot_number == target.slot_number,
+                        "HOLD: manual inbound original identity changed"
+                    );
+                    if let Some(receipt) = &tx.receipt {
+                        let event = tx.receipt_event()?;
+                        anyhow::ensure!(
+                            event.transaction_index == target.transaction_index
+                                && event.proof_block.block.body.execution_payload.block_number
+                                    == identity.ethereum_start_block
+                                && H256::from(
+                                    event
+                                        .proof_block
+                                        .block
+                                        .body
+                                        .execution_payload
+                                        .block_hash
+                                        .0
+                                         .0
+                                ) == target.ethereum_block_hash,
+                            "HOLD: manual inbound original inclusion changed"
+                        );
+                        for signed in receipt.signed_submission.iter().chain(
+                            receipt
+                                .submission_attempts
+                                .iter()
+                                .map(|a| &a.signed_submission),
+                        ) {
+                            anyhow::ensure!(signed.raw_hash_matches()
+                                && !signed.raw_extrinsic.is_empty()
+                                && signed.chain_genesis_hash.parse::<H256>().ok() == Some(identity.gear_genesis_hash)
+                                && signed.manager.parse::<H256>().ok() == Some(identity.vft_manager_address)
+                                && signed.historical_proxy.parse::<H256>().ok() == Some(identity.historical_proxy_address)
+                                && signed.sender.parse::<subxt::utils::AccountId32>().ok().map(|a| a.0) == Some(identity.gear_sender)
+                                && signed.receipt_key == receipt.receipt_key
+                                && signed.payload_hash.parse::<H256>().ok() == Some(H256(alloy_primitives::keccak256(&receipt.payload).0)),
+                                "HOLD: original manual signed submission identity or exact bytes changed");
+                        }
+                    }
+                }
             }
         } else {
             self.reject_legacy_journal().await?;
@@ -490,6 +572,7 @@ impl JSONStorage {
             self.block_storage.save(&self.path).await?;
             self.write_state(serde_json::to_value(StoredState {
                 schema_version: STATE_SCHEMA_VERSION,
+                archive_count: 0,
                 predecessor_cutover: predecessor.clone(),
                 runtime_identity: Some(identity.clone()),
                 manual_identity: manual.clone(),
@@ -549,29 +632,24 @@ impl JSONStorage {
             !state_new.exists(),
             "HOLD: interrupted inbound state snapshot"
         );
-        if state_old.exists() {
-            let previous: serde_json::Value =
-                serde_json::from_slice(&tokio::fs::read(&state_old).await?)?;
-            let known = serde_json::to_value(StoredState::deserialize(&previous)?)?;
-            // Preserve the original bytes (including unknown fields) when known records are unchanged.
-            if known == value {
-                return Ok(());
+        let previous = if state_old.exists() {
+            Some(serde_json::from_slice::<serde_json::Value>(
+                &tokio::fs::read(&state_old).await?,
+            )?)
+        } else {
+            None
+        };
+        if let Some(previous) = &previous {
+            if previous["schema_version"].as_u64().is_some_and(|v| v < 8) {
+                let known = serde_json::to_value(StoredState::deserialize(previous)?)?;
+                Self::preserve_unknown_json(&mut value, &known, previous);
             }
-            Self::preserve_unknown_json(&mut value, &known, &previous);
-            // Transaction IDs survive movement between pending/completed maps.
-            for section in ["transactions", "completed"] {
-                if let Some(rows) = value[section].as_object_mut() {
-                    for (id, row) in rows {
-                        for old_section in ["transactions", "completed"] {
-                            if let (Some(known), Some(previous)) =
-                                (known[old_section].get(id), previous[old_section].get(id))
-                            {
-                                Self::preserve_unknown_json(row, known, previous);
-                            }
-                        }
-                    }
-                }
-            }
+        }
+        journal::begin_write(&self.path, previous.as_ref(), &value)?;
+        let value = journal::encode_state(&self.path, value, previous.as_ref()).await?;
+        if previous.as_ref() == Some(&value) {
+            journal::finish_write(&self.path)?;
+            return Ok(());
         }
         let json = serde_json::to_string(&value)?;
         let mut file = tokio::fs::File::create(&state_new).await.with_context(|| {
@@ -624,10 +702,12 @@ impl JSONStorage {
                     self.path.display()
                 )
             })?;
+        journal::finish_write(&self.path)?;
         Ok(())
     }
 
     async fn read_state(&self) -> anyhow::Result<Option<StoredState>> {
+        journal::reject_interrupted(&self.path)?;
         let state_path = self.path.join(STATE_FILE);
         if !state_path.exists() {
             return Ok(None);
@@ -652,17 +732,16 @@ impl JSONStorage {
                 )
             })?;
         anyhow::ensure!(
-            matches!(schema_version, 5..=7),
+            matches!(schema_version, 5..=8),
             "Incompatible transaction journal schema in '{}': found {schema_version}, expected {STATE_SCHEMA_VERSION}",
             self.path.display()
         );
-        let mut state: StoredState =
-            serde_json::from_value(value).context("Failed to deserialize transaction journal")?;
+        let state: StoredState = serde_json::from_value(journal::decode_hot(&self.path, value)?)
+            .context("Failed to deserialize transaction journal")?;
         anyhow::ensure!(
-            schema_version == 7 || state.predecessor_cutover.is_none(),
+            schema_version >= 7 || state.predecessor_cutover.is_none(),
             "HOLD: original schema5/6 journal cannot be relabeled as a successor"
         );
-        state.schema_version = STATE_SCHEMA_VERSION;
         Ok(Some(state))
     }
 
@@ -686,6 +765,7 @@ impl JSONStorage {
             "HOLD: manual inbound target/route missing or changed before journal replay"
         );
         for (uuid, tx) in state.transactions.iter().chain(state.completed.iter()) {
+            journal::validate_attempts(tx)?;
             if let Some(receipt) = &tx.receipt {
                 for signed in receipt.signed_submission.iter().chain(
                     receipt
@@ -866,6 +946,10 @@ impl Storage for JSONStorage {
     }
 
     async fn save(&self, tx_manager: &TransactionManager) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            tx_manager.transactions.read().await.len() <= journal::HOT_LIMIT,
+            "HOLD: inbound active capacity exceeded"
+        );
         cutover::reject_sealed(&self.path)?;
         let _guard = self.save_lock.lock().await;
         let identity =
@@ -880,9 +964,9 @@ impl Storage for JSONStorage {
         );
 
         // Borrow the maps: cloning signed receipts and completed history is unnecessary.
-        let transactions = tx_manager.transactions.read().await;
-        let completed = tx_manager.completed.read().await;
-        let failed = tx_manager.failed.read().await;
+        let mut transactions = tx_manager.transactions.write().await;
+        let mut completed = tx_manager.completed.write().await;
+        let mut failed = tx_manager.failed.write().await;
         let mut state = serde_json::json!({
             "schema_version": STATE_SCHEMA_VERSION,
             "predecessor_cutover": self.predecessor_cutover.read().await.clone(),
@@ -900,8 +984,15 @@ impl Storage for JSONStorage {
                     .remove(field);
             }
         }
-        drop((transactions, completed, failed));
         self.write_state(state).await?;
+        // Cold records have durable ownership before the pointer above is committed.
+        // Only then release their RAM and scheduling references.
+        if self.manual_identity.read().await.is_none() {
+            completed.clear();
+            transactions.retain(|_, tx| !journal::is_cold(&tx.status));
+        }
+        failed.retain(|uuid, _| transactions.contains_key(uuid));
+        drop((transactions, completed, failed));
 
         self.block_storage.save(&self.path).await?;
         Ok(())
@@ -909,6 +1000,7 @@ impl Storage for JSONStorage {
 
     async fn load(&self, tx_manager: &TransactionManager) -> anyhow::Result<()> {
         cutover::reject_sealed(&self.path)?;
+        journal::recover_write(&self.path).await?;
         if !self.path.exists() {
             return Ok(());
         }
@@ -940,6 +1032,10 @@ impl Storage for JSONStorage {
             "HOLD: inbound block cursor cannot advance without intact bound transaction state"
         );
         self.block_storage().save(&self.path).await
+    }
+
+    async fn cold_contains(&self, tx: &TxHashWithSlot) -> anyhow::Result<bool> {
+        journal::cold_contains(&self.path, tx)
     }
 }
 
@@ -1054,8 +1150,8 @@ pub(super) mod tests {
         manager.failed.write().await.insert(uuid, diagnostic.into());
 
         storage.save(&manager).await.unwrap();
-        let mut extended: serde_json::Value =
-            serde_json::from_slice(&tokio::fs::read(path.join(STATE_FILE)).await.unwrap()).unwrap();
+        let mut extended = read_journal_inventory(&path).unwrap();
+        extended["schema_version"] = serde_json::json!(7);
         extended["operator_extension"] = serde_json::json!({ "owner": "original" });
         extended["transactions"][uuid.to_string()]["receipt"]["original_extension"] =
             serde_json::json!(["retain", 17]);
@@ -1065,6 +1161,18 @@ pub(super) mod tests {
         )
         .await
         .unwrap();
+        let original_bytes = tokio::fs::read(path.join(STATE_FILE)).await.unwrap();
+        storage
+            .bind_runtime_identity(runtime_identity())
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::fs::read(path.join(STATE_FILE)).await.unwrap(),
+            original_bytes,
+            "identity validation must not migrate or reserialize retained evidence"
+        );
+        // Reconstructed from HTML VB-10: migrate original schema bytes and unknown fields first.
+        storage.save(&manager).await.unwrap();
         use std::os::unix::fs::MetadataExt;
         let unchanged_bytes = tokio::fs::read(path.join(STATE_FILE)).await.unwrap();
         let unchanged_inode = tokio::fs::metadata(path.join(STATE_FILE))
@@ -1117,8 +1225,7 @@ pub(super) mod tests {
             .await
             .insert(uuid, latest_diagnostic.into());
         storage.save(&manager).await.unwrap();
-        let saved: serde_json::Value =
-            serde_json::from_slice(&tokio::fs::read(path.join(STATE_FILE)).await.unwrap()).unwrap();
+        let saved = read_journal_inventory(&path).unwrap();
         assert_eq!(saved["operator_extension"], extended["operator_extension"]);
         assert_eq!(
             saved["transactions"][uuid.to_string()]["receipt"]["original_extension"],

@@ -337,6 +337,7 @@ mod tests {
             let nonce = U256::from(7u64);
             let unseen = U256::from(999u64);
             let message = MessageInBlock {
+                queue_id: None,
                 message: gear_rpc_client::dto::Message {
                     nonce_be: nonce.to_big_endian(),
                     source: [1; 32],
@@ -467,6 +468,7 @@ mod tests {
             let nonce = U256::from(7u64);
             let first_hash = H256::repeat_byte(10);
             let queued = MessageInBlock {
+                queue_id: None,
                 message: gear_rpc_client::dto::Message {
                     nonce_be: nonce.to_big_endian(),
                     source: [1; 32],
@@ -599,6 +601,7 @@ mod tests {
                 .await
                 .unwrap();
             let queued = MessageInBlock {
+                queue_id: None,
                 message: gear_rpc_client::dto::Message {
                     nonce_be: later.to_big_endian(),
                     source: [1; 32],

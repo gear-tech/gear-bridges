@@ -21,7 +21,7 @@ import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
 import {ERC20GearSupply} from "src/erc20/managed/ERC20GearSupply.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandlerMock} from "src/interfaces/IMessageHandlerMock.sol";
-import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {GovernanceControl, IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
 import {
@@ -757,7 +757,7 @@ contract MainnetBridgeMigrationTest is Test, Base {
             messageNonce++,
             governancePauser.governance(),
             address(governancePauser),
-            PauseProxyMessage(address(messageQueue)).pack()
+            PauseProxyMessage(address(messageQueue)).pack(_control())
         );
         messages[1] = VaraMessage(
             messageNonce++,
@@ -771,19 +771,28 @@ contract MainnetBridgeMigrationTest is Test, Base {
                         (verifier, verifier, messageQueue.maxBlockNumber(), floor, beefyRecoveryTimelock)
                     )
                 )
-                .pack()
+                .pack(_control())
         );
         messages[2] = VaraMessage(
             messageNonce++,
             governanceAdmin.governance(),
             address(governanceAdmin),
-            UpgradeProxyMessage(address(messageQueue), replacement, "").pack()
+            UpgradeProxyMessage(address(messageQueue), replacement, "").pack(_control())
         );
         messages[3] = VaraMessage(
             messageNonce++,
             governancePauser.governance(),
             address(governancePauser),
-            UnpauseProxyMessage(address(messageQueue)).pack()
+            UnpauseProxyMessage(address(messageQueue))
+                .pack(
+                    GovernanceControl(
+                        uint64(messageNonce + 1),
+                        uint64(block.timestamp + 1 days),
+                        messageQueue.incidentEpoch(address(messageQueue)) + 1,
+                        messages[2].hash(),
+                        bytes32(0)
+                    )
+                )
         );
         uint256 firstBlock = currentBlockNumber;
         for (uint256 i; i < messages.length; ++i) {

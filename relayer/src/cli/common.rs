@@ -34,6 +34,51 @@ impl NativeWrapperApprovalArgs {
     }
 }
 
+#[derive(Args, Clone)]
+pub struct HistoricalReceiptApprovalArgs {
+    /// Existing approved coverage policy; only historicalReceipts authorize retained framing.
+    #[arg(long, requires = "historical_receipt_policy_keccak256")]
+    pub historical_receipt_policy: Option<PathBuf>,
+    #[arg(long, requires = "historical_receipt_policy")]
+    pub historical_receipt_policy_keccak256: Option<alloy::primitives::B256>,
+}
+
+impl HistoricalReceiptApprovalArgs {
+    pub fn load(
+        &self,
+        eth: &ethereum_client::PollingEthApi,
+    ) -> anyhow::Result<Vec<gear_common::receipt_framing::HistoricalReceiptApproval>> {
+        match (
+            &self.historical_receipt_policy,
+            self.historical_receipt_policy_keccak256,
+        ) {
+            (None, None) => Ok(Vec::new()),
+            (Some(path), Some(digest)) => {
+                let raw = gear_common::durable::committed_bytes(path)?;
+                anyhow::ensure!(
+                    alloy::primitives::keccak256(&raw) == digest,
+                    "HOLD: historical receipt policy differs from independent approval"
+                );
+                let policy: crate::message_relayer::eth_to_gear::cutover::preflight::CoveragePolicy =
+                    serde_json::from_slice(&raw)?;
+                policy.validate()?;
+                anyhow::ensure!(
+                    eth.finality_identity()?
+                        == (
+                            policy.ethereum_chain_id,
+                            policy.ethereum_genesis_hash.0.into()
+                        ),
+                    "HOLD: historical receipt policy belongs to another Ethereum chain"
+                );
+                Ok(policy.historical_receipts)
+            }
+            _ => anyhow::bail!(
+                "HOLD: historical receipt policy and independent Keccak-256 are required together"
+            ),
+        }
+    }
+}
+
 #[derive(Args)]
 pub struct LaneApprovalArgs {
     /// Independently approved outbound lane identities and immutable delivery policies.

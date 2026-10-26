@@ -15,7 +15,7 @@ use ethereum_common::SECONDS_PER_SLOT;
 use primitive_types::H160;
 use prometheus::IntCounter;
 use std::sync::Arc;
-use tokio::sync::mpsc::{unbounded_channel, Receiver, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 pub struct MessagePaidEventExtractor {
@@ -67,25 +67,21 @@ impl MessagePaidEventExtractor {
         }
     }
 
-    pub fn spawn(self, blocks: Receiver<EthereumBlockNumber>) -> UnboundedReceiver<TxHashWithSlot> {
-        let (sender, receiver) = unbounded_channel();
+    pub fn spawn(self, blocks: Receiver<EthereumBlockNumber>) -> Receiver<TxHashWithSlot> {
+        let (sender, receiver) = channel(128);
 
         tokio::task::spawn(self::task(self, blocks, sender));
 
         receiver
     }
 
-    pub fn spawn_into(
-        self,
-        blocks: Receiver<EthereumBlockNumber>,
-        sender: UnboundedSender<TxHashWithSlot>,
-    ) {
+    pub fn spawn_into(self, blocks: Receiver<EthereumBlockNumber>, sender: Sender<TxHashWithSlot>) {
         tokio::task::spawn(self::task(self, blocks, sender));
     }
 
     async fn run_inner(
         &self,
-        sender: &UnboundedSender<TxHashWithSlot>,
+        sender: &Sender<TxHashWithSlot>,
         blocks: &mut Receiver<EthereumBlockNumber>,
         missing_blocks: &mut Vec<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
@@ -113,7 +109,7 @@ impl MessagePaidEventExtractor {
     async fn process_block_events(
         &self,
         block: EthereumBlockNumber,
-        sender: &UnboundedSender<TxHashWithSlot>,
+        sender: &Sender<TxHashWithSlot>,
     ) -> anyhow::Result<()> {
         let header = finalized_block(&self.eth_api, block.0).await?;
         let cursor = BlockCursor {
@@ -159,10 +155,12 @@ impl MessagePaidEventExtractor {
                 hex::encode(tx_hash.0),
                 slot_number.0
             );
-            sender.send(TxHashWithSlot {
-                slot_number,
-                tx_hash,
-            })?;
+            sender
+                .send(TxHashWithSlot {
+                    slot_number,
+                    tx_hash,
+                })
+                .await?;
         }
         self.metrics.total_paid_messages_found.inc_by(total);
         Ok(())
@@ -172,7 +170,7 @@ impl MessagePaidEventExtractor {
 async fn task(
     mut this: MessagePaidEventExtractor,
     mut blocks: Receiver<EthereumBlockNumber>,
-    sender: UnboundedSender<TxHashWithSlot>,
+    sender: Sender<TxHashWithSlot>,
 ) {
     let mut unprocessed = Vec::new();
 

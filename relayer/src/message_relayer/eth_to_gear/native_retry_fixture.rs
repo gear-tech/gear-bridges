@@ -8,6 +8,7 @@
 //! NATIVE_RETRY_PROXY_WASM=<current historical_proxy.opt.wasm>
 //! NATIVE_RETRY_V1_WASM=<exact 83eafd9e vft_vara_v1.opt.wasm>
 //! NATIVE_RETRY_V1_SHA256=<independently supplied SHA256 of that Wasm, without 0x>.
+//! PR860_OWNED_GEAR_GAS_LIMIT=<positive independently approved fixture gas budget>.
 //! The parent builds and executes serially. No endpoint fallback or skip-success exists.
 use super::{
     super::{
@@ -32,7 +33,7 @@ use std::{
     path::{Path, PathBuf},
     str::FromStr,
 };
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use vft_manager_client::{
     traits::{VftManager as _, VftManagerFactory as _},
     vft_manager::io::SubmitReceipt,
@@ -138,25 +139,25 @@ fn event(
             cumulative_gas_used: 100_000,
             logs,
         }));
-    event.receipt_rlp = alloy_rlp::encode(receipt);
+    event.receipt_rlp = alloy::eips::Encodable2718::encoded_2718(&receipt);
     event
 }
 
 struct Driver {
     sender: MessageSender,
     io: MessageSenderIo,
-    requests: UnboundedReceiver<Request>,
-    _response_transport: tokio::sync::mpsc::UnboundedSender<Response>,
+    requests: Receiver<Request>,
+    _response_transport: Sender<Response>,
     composer: ProofComposerIo,
     directory: PathBuf,
     turn: usize,
 }
 impl Driver {
     fn new(sender: MessageSender, directory: PathBuf) -> Self {
-        let (requests, received) = unbounded_channel();
-        let (response_transport, responses) = unbounded_channel();
-        let (proof_requests, _unused) = unbounded_channel();
-        let (_proof_responses, proof_responses) = unbounded_channel();
+        let (requests, received) = channel(128);
+        let (response_transport, responses) = channel(128);
+        let (proof_requests, _unused) = channel(128);
+        let (_proof_responses, proof_responses) = channel(128);
         Self {
             sender,
             io: MessageSenderIo::new(requests, responses),
@@ -444,9 +445,18 @@ async fn wait_original(
 }
 
 async fn persist_copy(storage_dir: &Path, directory: &Path, label: &str) -> Result<()> {
-    let value: serde_json::Value =
-        serde_json::from_slice(&fs::read(storage_dir.join("state.json"))?)?;
+    let value = super::super::storage::read_journal_inventory(storage_dir)?;
     immutable_json(&directory.join(format!("{label}-journal.json")), &value)
+}
+
+fn archived_completion(storage_dir: &Path, uuid: Uuid) -> Result<Option<Transaction>> {
+    let inventory = super::super::storage::read_journal_inventory(storage_dir)?;
+    inventory["completed"]
+        .get(uuid.to_string())
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .context("archived completion lost its original transaction evidence")
 }
 
 #[tokio::test]
@@ -461,6 +471,14 @@ async fn run() -> Result<()> {
     ensure!(
         std::env::var("NATIVE_RETRY_OWNED")? == "alice-only-local-fixture",
         "explicit fixture ownership required"
+    );
+    let approved_gas = std::env::var("PR860_OWNED_GEAR_GAS_LIMIT")
+        .context("explicit owned-fixture Gear gas approval required")?
+        .parse::<u64>()
+        .context("PR860_OWNED_GEAR_GAS_LIMIT must be a positive u64")?;
+    ensure!(
+        approved_gas > 0,
+        "owned-fixture Gear gas approval must be positive"
     );
     let source = loopback("NATIVE_RETRY_SOURCE")?;
     let witness = loopback("NATIVE_RETRY_WITNESS")?;
@@ -503,13 +521,24 @@ async fn run() -> Result<()> {
     let remoting = GClientRemoting::new(api.clone());
     let gas = api.block_gas_limit()? / 100 * 95;
     let alice: ActorId = <[u8; 32]>::from(api.account_id().clone()).into();
+    let minimum_receipt_slot = super::tests::receipt_fixtures()
+        .next()
+        .context("native fixture receipt missing")?
+        .1
+        .proof_block
+        .block
+        .slot;
+    ensure!(
+        minimum_receipt_slot > 0,
+        "native fixture checkpoint floor must be positive"
+    );
     let proxy = historical_proxy_client::HistoricalProxyFactory::new(remoting.clone())
         .new()
         .with_gas_limit(gas)
         .send_recv(proxy_code, Uuid::now_v7().as_bytes().to_vec())
         .await?;
     historical_proxy_client::HistoricalProxy::new(remoting.clone())
-        .add_endpoint(0, alice)
+        .add_endpoint(minimum_receipt_slot, alice)
         .with_gas_limit(gas)
         .send_recv(proxy)
         .await?;
@@ -537,6 +566,7 @@ async fn run() -> Result<()> {
             .0
             .into(),
             historical_proxy_address: proxy,
+            minimum_receipt_slot,
             config: vft_manager_client::Config {
                 gas_for_token_ops: 15_000_000_000,
                 gas_for_reply_deposit: 15_000_000_000,
@@ -666,7 +696,8 @@ async fn run() -> Result<()> {
         "//Alice".into(),
         Some(ethereum_manager),
     )
-    .with_native_wrapper_approval(Some(approved.clone()));
+    .with_native_wrapper_approval(Some(approved.clone()))
+    .with_approved_gear_gas_limit(approved_gas)?;
     let mut driver = Driver::new(sender, directory.clone());
     let initial = event(701, alice, &[native_eth], ethereum_manager);
     // Missing/wrong capability must fail before a signature is allocated.
@@ -998,7 +1029,7 @@ async fn run() -> Result<()> {
     ensure!(claimed == RAW, "wrong original payout value claimed");
     // Poll the actual sender. It prepares and journals ReconcileReceipt before broadcasting it.
     tokio::time::timeout(Duration::from_secs(180), async {
-        while !txm.completed.read().await.contains_key(&uuid) {
+        while archived_completion(&journal_dir, uuid)?.is_none() {
             driver.step(&api, &txm).await?;
             tokio::time::sleep(Duration::from_secs(3)).await;
         }
@@ -1025,7 +1056,8 @@ async fn run() -> Result<()> {
             .all(|(m, _)| m.id() != paid.child),
         "original payout remains claimable"
     );
-    let complete = txm.completed.read().await[&uuid].clone();
+    let complete = archived_completion(&journal_dir, uuid)?
+        .context("settlement did not archive the original transaction")?;
     let evidence = complete.receipt.as_ref().unwrap();
     ensure!(
         evidence.submission_attempts.len() == 1
@@ -1040,37 +1072,47 @@ async fn run() -> Result<()> {
     drop(txm);
     let restart_nonce = nonce(&driver.sender, &api).await?;
     let restored = restart(&storage).await?;
-    {
-        let pending = restored.transactions.read().await;
-        let original = pending
-            .get(&uuid)
-            .context("saved original disappeared on restart")?;
-        ensure!(
-            matches!(original.status, TxStatus::NeedsReconciliation { .. })
-                && original.saved_settlement_observation == complete.saved_settlement_observation,
-            "restart did not preserve the historical settlement fence"
-        );
-    }
-    // Loaded completions deliberately remain provisional until the actual sender
-    // reauthenticates the original dispatch, replies and saved settlement pin.
-    driver.step(&api, &restored).await?;
-    {
-        let completed = restored.completed.read().await;
-        let original = completed
-            .get(&uuid)
-            .context("completion did not reauthenticate after restart")?;
-        let receipt = original
-            .receipt
-            .as_ref()
-            .context("reauthenticated completion lost receipt")?;
-        ensure!(
-            receipt.signed_submission == evidence.signed_submission
-                && receipt.submission_attempts.len() == 1
-                && receipt.submission_attempts[0].signed_submission == qualified
-                && original.saved_settlement_observation == complete.saved_settlement_observation,
-            "restart replaced original transactions or settlement evidence"
-        );
-    }
+    ensure!(
+        restored.transactions.read().await.is_empty() && restored.completed.read().await.is_empty(),
+        "cold completion was rehydrated into the active scheduler"
+    );
+    let saved = evidence
+        .signed_submission
+        .as_ref()
+        .context("archived completion omitted original signed submission")?;
+    let settlement_pin = complete
+        .saved_settlement_observation
+        .clone()
+        .or_else(|| complete.receipt_observation.clone())
+        .context("archived completion omitted historical settlement pin")?;
+    // Explicit offline requalification invokes the sender with retained evidence;
+    // ordinary scheduler restart must not resurrect lifetime completion history.
+    let requalified = driver
+        .process(
+            &api,
+            &Request::SubmitPrepared {
+                prepared: Box::new((complete.receipt_event()?, saved.clone())),
+                settlement_pin: Some(settlement_pin),
+                tx_hash: complete.tx.tx_hash,
+                tx_uuid: uuid,
+            },
+        )
+        .await?;
+    ensure!(
+        matches!(requalified.status, MessageStatus::Success { .. })
+            && requalified
+                .signed_submission
+                .as_ref()
+                .is_some_and(|signed| signed.same_request(saved)
+                    && signed.raw_extrinsic == saved.raw_extrinsic),
+        "archived original did not reauthenticate without replacement"
+    );
+    let retained = archived_completion(&journal_dir, uuid)?
+        .context("explicit requalification lost archived completion")?;
+    ensure!(
+        serde_json::to_value(&retained)? == serde_json::to_value(&complete)?,
+        "explicit requalification rewrote original transactions or settlement evidence"
+    );
     ensure!(
         nonce(&driver.sender, &api).await? == restart_nonce,
         "completion restart allocated a fresh nonce"
@@ -1218,7 +1260,7 @@ async fn run() -> Result<()> {
         "healed original created a retry"
     );
     ensure!(
-        healed_txm.completed.read().await.contains_key(&healed_uuid),
+        archived_completion(&directory.join("healed-journal"), healed_uuid)?.is_some(),
         "healed original did not complete"
     );
     ensure!(
@@ -1232,7 +1274,8 @@ async fn run() -> Result<()> {
             && escrow.redemption(row.operation_id).recv(native).await? == Some(paid.clone()),
         "healing changed an unrelated original native payout"
     );
-    let healed_completed = healed_txm.completed.read().await[&healed_uuid].clone();
+    let healed_completed = archived_completion(&directory.join("healed-journal"), healed_uuid)?
+        .context("healed completion was not archived")?;
     let healed_receipt = healed_completed
         .receipt
         .as_ref()

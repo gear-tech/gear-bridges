@@ -7,6 +7,7 @@ use gear_common::{
     native_wrapper::{
         native_wrapper_at, ApprovedNativeWrapper, NativeWrapperBinding, NativeWrapperMode,
     },
+    receipt_framing::{validate_historical_receipts, HistoricalReceiptApproval},
     UNITS,
 };
 use gsdk::{
@@ -27,7 +28,7 @@ use sails_rs::{
 use serde::{Deserialize, Serialize};
 use std::{ops::Deref, str::FromStr, sync::Arc};
 use tokio::{
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{channel, Receiver, Sender},
     task::spawn_blocking,
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
@@ -39,22 +40,19 @@ use vft_manager_client::{
 };
 
 pub struct MessageSenderIo {
-    requests_channel: UnboundedSender<Request>,
-    responses_channel: UnboundedReceiver<Response>,
+    requests_channel: Sender<Request>,
+    responses_channel: Receiver<Response>,
 }
 
 impl MessageSenderIo {
-    pub fn new(
-        requests_channel: UnboundedSender<Request>,
-        responses_channel: UnboundedReceiver<Response>,
-    ) -> Self {
+    pub fn new(requests_channel: Sender<Request>, responses_channel: Receiver<Response>) -> Self {
         Self {
             requests_channel,
             responses_channel,
         }
     }
 
-    pub fn prepare_message(
+    pub async fn prepare_message(
         &mut self,
         tx_uuid: Uuid,
         tx_hash: FixedBytes<32>,
@@ -68,11 +66,12 @@ impl MessageSenderIo {
                 payload: Box::new(payload),
                 retry_original: retry_original.map(Box::new),
             })
+            .await
             .inspect_err(|err| log::error!("Message sender failed: {err:?}"))
             .is_ok()
     }
 
-    pub fn submit_prepared(
+    pub async fn submit_prepared(
         &mut self,
         tx_uuid: Uuid,
         tx_hash: FixedBytes<32>,
@@ -87,16 +86,18 @@ impl MessageSenderIo {
                 prepared: Box::new((payload, signed_submission)),
                 settlement_pin,
             })
+            .await
             .inspect_err(|err| log::error!("Message sender failed: {err:?}"))
             .is_ok()
     }
 
-    pub fn reconcile_receipt(&mut self, tx_uuid: Uuid, receipt_key: (u64, u64)) -> bool {
+    pub async fn reconcile_receipt(&mut self, tx_uuid: Uuid, receipt_key: (u64, u64)) -> bool {
         self.requests_channel
             .send(Request::ReceiptStatus {
                 tx_uuid,
                 receipt_key,
             })
+            .await
             .inspect_err(|err| log::error!("Message sender failed: {err:?}"))
             .is_ok()
     }
@@ -168,6 +169,8 @@ pub struct SignedSubmission {
     pub native_wrapper_approval: Option<ApprovedNativeWrapper>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_retry_qualification: Option<FinalizedReceiptObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_qualification: Option<RetryQualification>,
 }
 
 impl SignedSubmission {
@@ -187,6 +190,12 @@ impl SignedSubmission {
     }
 
     pub fn validate_native_reconciliation(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.native_reconciliation_attempts.len()
+                + usize::from(self.native_reconciliation.is_some())
+                <= 128,
+            "HOLD: receipt continuation capacity exhausted; original evidence retained"
+        );
         let call = ReconcileReceipt::encode_call(self.receipt_key.0, self.receipt_key.1);
         let mut nonce = self.nonce;
         for (index, continuation) in self
@@ -314,24 +323,33 @@ impl SignedSubmission {
                 !reply.payload.is_empty() && !reply.observation.finalized_block_hash.is_empty()
             })
     }
+    pub(super) fn has_finalized_original_disposition(&self) -> bool {
+        self.has_finalized_dispatch_reply()
+            || (self.inclusion_block_number.is_some()
+                && self.inclusion_block_hash.is_some()
+                && self.message_id.is_none()
+                && self.finalized_dispatch_error.is_some()
+                && self.finalized_reply.is_none())
+    }
     pub(super) fn validate_settlement_order(
         &self,
         pin: &FinalizedReceiptObservation,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
-            self.has_finalized_dispatch_reply(),
-            "HOLD: saved completion lacks original finalized proof reply"
+            self.has_finalized_original_disposition(),
+            "HOLD: saved completion lacks original finalized disposition"
         );
         let number = pin
             .finalized_block_number
             .ok_or_else(|| anyhow::anyhow!("HOLD: saved settlement has no height"))?;
         for original in std::iter::once(self).chain(self.native_reconciliation.as_deref()) {
             anyhow::ensure!(
-                original.has_finalized_dispatch_reply()
+                original.has_finalized_original_disposition()
                     && original
                         .finalized_reply
                         .as_ref()
                         .and_then(|reply| reply.observation.finalized_block_number)
+                        .or(original.inclusion_block_number)
                         .is_some_and(|reply| number >= reply),
                 "HOLD: saved settlement pin predates an original finalized reply"
             );
@@ -461,6 +479,19 @@ pub struct FinalizedReplyEvidence {
     pub observation: FinalizedReceiptObservation,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum RetryReason {
+    DispatchBeforeMessage,
+    PausedBeforeAdmission,
+    NativeOriginalNoEffect,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct RetryQualification {
+    pub reason: RetryReason,
+    pub observation: FinalizedReceiptObservation,
+}
+
 #[derive(Clone, Debug)]
 pub enum MessageStatus {
     Prepared,
@@ -472,13 +503,28 @@ pub enum MessageStatus {
     RetryableNoop {
         receipt_key: (u64, u64),
         diagnostic: String,
-        receipt_observation: Option<FinalizedReceiptObservation>,
+        qualification: RetryQualification,
     },
     NeedsReconciliation {
         receipt_key: (u64, u64),
         diagnostic: String,
         receipt_observation: Option<FinalizedReceiptObservation>,
     },
+    Unprocessable {
+        encoded_envelope_bytes: u64,
+        required_gas: Option<u64>,
+        approved_gas: Option<u64>,
+        diagnostic: String,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{diagnostic}; encoded envelope {encoded_envelope_bytes} bytes, required gas {required_gas:?}, approved gas {approved_gas:?}")]
+struct UnprocessableSubmission {
+    encoded_envelope_bytes: u64,
+    required_gas: Option<u64>,
+    approved_gas: Option<u64>,
+    diagnostic: &'static str,
 }
 
 #[derive(Debug)]
@@ -513,8 +559,8 @@ pub fn now_ms() -> u64 {
         .expect("Unix milliseconds fit u64")
 }
 
-fn send_reconciliation_response(
-    responses: &mut UnboundedSender<Response>,
+async fn send_reconciliation_response(
+    responses: &mut Sender<Response>,
     tx_uuid: Uuid,
     receipt_key: (u64, u64),
     diagnostic: String,
@@ -536,6 +582,7 @@ fn send_reconciliation_response(
                 receipt_observation: None,
             },
         })
+        .await
         .is_ok()
 }
 
@@ -660,6 +707,7 @@ fn custom_consumer_status(
     }
 }
 
+#[cfg(test)]
 fn validate_deposit_evidence(
     receipt_rlp: &[u8],
     receipt_key: (u64, u64),
@@ -668,16 +716,36 @@ fn validate_deposit_evidence(
     proxy: H256,
     deposits: Option<&[vft_manager_client::ReceiptDepositState]>,
 ) -> anyhow::Result<()> {
+    let receipt = ethereum_common::utils::decode_canonical_receipt(receipt_rlp)?;
+    validate_decoded_deposit_evidence(
+        receipt_rlp,
+        &receipt,
+        receipt_key,
+        ethereum_manager,
+        manager,
+        proxy,
+        deposits,
+    )
+}
+
+fn validate_decoded_deposit_evidence(
+    receipt_rlp: &[u8],
+    receipt: &ethereum_common::utils::ReceiptEnvelope,
+    receipt_key: (u64, u64),
+    ethereum_manager: H160,
+    manager: H256,
+    proxy: H256,
+    deposits: Option<&[vft_manager_client::ReceiptDepositState]>,
+) -> anyhow::Result<()> {
     use alloy::sol_types::SolEvent;
-    use alloy_rlp::Decodable;
     use ethereum_client::abi::IERC20Manager::BridgingRequested;
     use sails_rs::ActorId;
-
-    let mut input = receipt_rlp;
-    let receipt = ethereum_common::utils::ReceiptEnvelope::decode(&mut input)?;
     anyhow::ensure!(
-        input.is_empty() && receipt.is_success(),
-        "Original receipt framing or execution status is invalid"
+        receipt
+            .as_receipt()
+            .and_then(|receipt| receipt.status.as_eip658())
+            == Some(true),
+        "Original receipt execution status is not explicitly successful"
     );
     let receipt_hash = H256::from(alloy_primitives::keccak256(receipt_rlp).0);
     let mut expected = 0;
@@ -718,9 +786,21 @@ fn validate_deposit_evidence(
                 && row.receiver == ActorId::from(event.to.0)
                 && row.amount == sails_rs::U256::from_little_endian(event.amount.as_le_slice())
                 && row.operation_id.0 == operation_id.0
-                && !row.token_id.is_zero()
-                && row.child.is_none_or(|child| !child.is_zero())
-                && (!row.native || matches!(row.supply, vft_manager_client::TokenSupply::Gear)),
+                && match (row.token_id, row.supply.as_ref()) {
+                    (Some(token), Some(supply)) =>
+                        !token.is_zero()
+                            && (!row.native
+                                || matches!(supply, vft_manager_client::TokenSupply::Gear)),
+                    (None, None) =>
+                        !row.native
+                            && row.child.is_none()
+                            && matches!(
+                                row.outcome,
+                                vft_manager_client::ReceiptDepositOutcome::Rejected
+                            ),
+                    _ => false,
+                }
+                && row.child.is_none_or(|child| !child.is_zero()),
             "Economic outcome differs from original receipt deposit {log_index}"
         );
         expected += 1;
@@ -878,7 +958,11 @@ fn validate_rejection(
     match reason {
         Reason::InvalidRecipient => {
             anyhow::ensure!(
-                row.child.is_none() && row.receiver.is_zero(),
+                row.child.is_none()
+                    && (row.receiver.is_zero()
+                        || (row.native
+                            && row.receiver
+                                == sails_rs::ActorId::from(*b"geargeargeargeargeargeargeargear"))),
                 "InvalidRecipient requires an undispatched matching frozen input"
             );
         }
@@ -888,18 +972,13 @@ fn validate_rejection(
                 "InvalidAmount requires an undispatched matching frozen input"
             );
         }
-        Reason::NativeAmountOverflow => {
-            anyhow::ensure!(
-                row.child.is_none()
-                    && row.native
-                    && row.amount > (sails_rs::U256::one() << 80) - sails_rs::U256::one(),
-                "NativeAmountOverflow requires an undispatched matching frozen input"
-            );
+        Reason::NativeAmountOverflow | Reason::UnmappedToken => {
+            anyhow::bail!("Unpaid native overflow or unmapped-token liability cannot be excluded");
         }
         Reason::UnlockFalse { child } => {
             anyhow::ensure!(
                 !row.native
-                    && matches!(row.supply, TokenSupply::Gear)
+                    && matches!(row.supply, Some(TokenSupply::Gear))
                     && !child.is_zero()
                     && row.child == Some(*child),
                 "UnlockFalse differs from original unlock child"
@@ -991,6 +1070,8 @@ pub struct MessageSender {
     pub suri: String,
     ethereum_manager_address: Option<H160>,
     pub(super) native_wrapper_approval: Option<Arc<ApprovedNativeWrapper>>,
+    historical_receipt_approvals: Vec<HistoricalReceiptApproval>,
+    approved_gear_gas_limit: Option<u64>,
 
     metrics: Metrics,
     // The actual detached worker owns the signer fence until its last original call exits.
@@ -1023,6 +1104,8 @@ impl MessageSender {
             metrics: Metrics::new(),
             _signer_ownership: None,
             native_wrapper_approval: None,
+            historical_receipt_approvals: Vec::new(),
+            approved_gear_gas_limit: None,
         }
     }
 
@@ -1039,9 +1122,102 @@ impl MessageSender {
         self
     }
 
+    pub fn with_historical_receipt_approvals(
+        mut self,
+        approvals: Vec<HistoricalReceiptApproval>,
+    ) -> anyhow::Result<Self> {
+        validate_historical_receipts(&approvals)?;
+        self.historical_receipt_approvals = approvals;
+        Ok(self)
+    }
+
+    async fn receipt_at(
+        &self,
+        api: &GearApi,
+        proof: &EthToVaraEvent,
+        at: H256,
+    ) -> anyhow::Result<(ethereum_common::utils::ReceiptEnvelope, bool)> {
+        use historical_proxy_client::traits::HistoricalProxy as _;
+        let raw = ethereum_common::utils::decode_canonical_receipt(&proof.receipt_rlp);
+        let slot = proof.proof_block.block.slot;
+        let mut historical = false;
+        if !self.historical_receipt_approvals.is_empty() {
+            let endpoint =
+                historical_proxy_client::HistoricalProxy::new(GClientRemoting::new(api.clone()))
+                    .endpoint_for(slot)
+                    .with_gas_limit(api.block_gas_limit()?)
+                    .at_block(at.0.into())
+                    .recv(self.historical_proxy_address.0.into())
+                    .await?
+                    .map_err(|error| {
+                        anyhow::anyhow!("Historical endpoint is unavailable: {error:?}")
+                    })?;
+            let (manager, endpoint_program) = tokio::try_join!(
+                api.program_at(self.receiver_address.0.into(), Some(at)),
+                api.program_at(endpoint, Some(at)),
+            )?;
+            historical = manager.state == gear_core::program::ProgramState::Initialized
+                && endpoint_program.state == gear_core::program::ProgramState::Initialized
+                && self.historical_receipt_approvals.iter().any(|approval| {
+                    approval.matches(
+                        self.receiver_address,
+                        H256(manager.code_id.into_bytes()),
+                        H256(endpoint.into_bytes()),
+                        H256(endpoint_program.code_id.into_bytes()),
+                        slot,
+                    )
+                });
+        }
+        match raw {
+            Ok(receipt) => Ok((receipt, historical)),
+            Err(error) if !historical => Err(error).map_err(|error| anyhow::anyhow!(
+                "HOLD: non-raw receipt lacks exact independently approved historical manager/endpoint CodeIds and slot range: {error}"
+            )),
+            Err(_) => Ok((ethereum_common::utils::decode_canonical_network_receipt(&proof.receipt_rlp)?, true)),
+        }
+    }
+
+    /// Read-only qualification of original framing; never rewrite proof or payout identity.
+    pub async fn authenticate_retained_receipt_framing(
+        &self,
+        api: &GearApi,
+        proof: &EthToVaraEvent,
+        original: &SignedSubmission,
+    ) -> anyhow::Result<()> {
+        let chain = self.api_provider.client();
+        anyhow::ensure!(
+            gsdk::signer::Signer::from(api.clone())
+                .api()
+                .genesis_hash()
+                .as_ref()
+                == chain.api.genesis_hash().as_ref()
+                && H256::from_str(&original.chain_genesis_hash)? == chain.api.genesis_hash()
+                && H256::from_str(&original.manager)? == self.receiver_address
+                && H256::from_str(&original.historical_proxy)? == self.historical_proxy_address
+                && original.receipt_key == (proof.proof_block.block.slot, proof.transaction_index)
+                && original.payload_hash
+                    == format!("{:#x}", alloy_primitives::keccak256(proof.encode())),
+            "HOLD: retained receipt framing request differs from its original chain/payload"
+        );
+        let pin = FinalizedReceiptObservation {
+            finalized_block_number: Some(original.prepared_finalized_number),
+            finalized_block_hash: original.prepared_finalized_hash.clone(),
+        };
+        self.recheck_receipt_pin(&pin).await?;
+        self.receipt_at(api, proof, H256::from_str(&pin.finalized_block_hash)?)
+            .await?;
+        Ok(())
+    }
+
+    pub fn with_approved_gear_gas_limit(mut self, limit: u64) -> anyhow::Result<Self> {
+        anyhow::ensure!(limit > 0, "Approved Gear gas limit must be positive");
+        self.approved_gear_gas_limit = Some(limit);
+        Ok(self)
+    }
+
     pub fn run(self) -> MessageSenderIo {
-        let (requests_tx, requests_rx) = unbounded_channel();
-        let (responses_tx, responses_rx) = unbounded_channel();
+        let (requests_tx, requests_rx) = channel(128);
+        let (responses_tx, responses_rx) = channel(128);
 
         spawn_blocking(move || block_on(task(self, requests_rx, responses_tx)));
 
@@ -1050,8 +1226,8 @@ impl MessageSender {
 
     async fn run_inner(
         &mut self,
-        requests: &mut UnboundedReceiver<Request>,
-        responses: &mut UnboundedSender<Response>,
+        requests: &mut Receiver<Request>,
+        responses: &mut Sender<Response>,
     ) -> anyhow::Result<()> {
         let gear_api = self.api_provider.gclient_client(&self.suri)?;
         self.update_balance_metric(&gear_api).await?;
@@ -1075,6 +1251,7 @@ impl MessageSender {
                         submission: None,
                         signed_submission: None,
                     })
+                    .await
                     .is_ok(),
                 Request::SubmitPrepared {
                     tx_uuid,
@@ -1091,18 +1268,22 @@ impl MessageSender {
                         Some(self.submission_evidence(&gear_api, Some(diagnostic.clone()), None)),
                         Some(signed_submission.clone()),
                     )
+                    .await
                 }
                 Request::ReceiptStatus {
                     tx_uuid,
                     receipt_key,
-                } => send_reconciliation_response(
-                    responses,
-                    *tx_uuid,
-                    *receipt_key,
-                    format!("Receipt status query failed: {diagnostic}"),
-                    None,
-                    None,
-                ),
+                } => {
+                    send_reconciliation_response(
+                        responses,
+                        *tx_uuid,
+                        *receipt_key,
+                        format!("Receipt status query failed: {diagnostic}"),
+                        None,
+                        None,
+                    )
+                    .await
+                }
             };
             if !sent {
                 return Ok(());
@@ -1115,7 +1296,7 @@ impl MessageSender {
 
     async fn process(
         &mut self,
-        responses: &mut UnboundedSender<Response>,
+        responses: &mut Sender<Response>,
         gear_api: &GearApi,
         request: &Request,
     ) -> anyhow::Result<bool> {
@@ -1162,12 +1343,27 @@ impl MessageSender {
                                 }),
                                 signed_submission: Some(original),
                             })
+                            .await
                             .is_ok());
                     }
                 }
                 let (status, signed_submission) =
                     match self.prepare_submission(gear_api, payload).await {
                         Ok(signed_submission) => (MessageStatus::Prepared, Some(signed_submission)),
+                        Err(error) if error.downcast_ref::<UnprocessableSubmission>().is_some() => {
+                            let admission = error
+                                .downcast_ref::<UnprocessableSubmission>()
+                                .expect("checked error");
+                            (
+                                MessageStatus::Unprocessable {
+                                    encoded_envelope_bytes: admission.encoded_envelope_bytes,
+                                    required_gas: admission.required_gas,
+                                    approved_gas: admission.approved_gas,
+                                    diagnostic: error.to_string(),
+                                },
+                                None,
+                            )
+                        }
                         Err(error) => (
                             MessageStatus::PrepareFailed(format!(
                                 "Could not prepare signed submission for {tx_hash:?}: {error:#}"
@@ -1220,6 +1416,9 @@ impl MessageSender {
                     MessageStatus::Success { .. } => None,
                     MessageStatus::Failure(error)
                     | MessageStatus::PrepareFailed(error)
+                    | MessageStatus::Unprocessable {
+                        diagnostic: error, ..
+                    }
                     | MessageStatus::NeedsReconciliation {
                         diagnostic: error, ..
                     }
@@ -1245,7 +1444,7 @@ impl MessageSender {
                 }
             }
         };
-        Ok(responses.send(response).is_ok())
+        Ok(responses.send(response).await.is_ok())
     }
 
     pub async fn prepare_submission(
@@ -1253,7 +1452,13 @@ impl MessageSender {
         gear_api: &GearApi,
         payload: &EthToVaraEvent,
     ) -> anyhow::Result<SignedSubmission> {
+        ethereum_common::utils::decode_canonical_receipt(&payload.receipt_rlp)?;
         if self.receiver_route == SubmitReceipt::ROUTE {
+            let pin = self.api_provider.client().latest_finalized_block().await?;
+            anyhow::ensure!(
+                self.receipt_running_at(gear_api, pin).await?,
+                "HOLD: manager is paused; do not sign another receipt attempt"
+            );
             super::cutover::ensure_receipt_domain(
                 gear_api,
                 self.receiver_address,
@@ -1304,21 +1509,97 @@ impl MessageSender {
             )
             .await?;
         }
+        let gas_limit = self.approved_gear_gas_limit.ok_or_else(|| {
+            anyhow::anyhow!("HOLD: fresh Gear signing requires an explicit approved gas ceiling")
+        })?;
+        anyhow::ensure!(
+            gas_limit <= gear_api.block_gas_limit()?,
+            "HOLD: approved Gear gas ceiling exceeds the runtime block allowance"
+        );
+        let payload_bytes = call_payload.len();
+        let call = gear::tx().gear().send_message(
+            destination.0.into(),
+            call_payload.clone(),
+            gas_limit,
+            0,
+            false,
+        );
+        // Length-only encoding: no private-key operation, persistence or submission.
+        // A maximum-width nonce bounds the final envelope before choosing its nonce.
+        let envelope_bytes = chain
+            .api
+            .tx()
+            .create_partial_offline(
+                &call,
+                PolkadotExtrinsicParamsBuilder::new()
+                    .immortal()
+                    .nonce(u64::MAX)
+                    .build(),
+            )?
+            .sign_with_account_and_signature(
+                signer.account_id(),
+                &gclient::ext::sp_runtime::MultiSignature::Sr25519([0; 64].into()),
+            )
+            .encoded()
+            .len();
+        let maximum = chain
+            .api
+            .constants()
+            .at(&gear::constants().system().block_length())?
+            .max
+            .normal as usize;
+        if payload_bytes > gear_core::buffer::MAX_PAYLOAD_SIZE || envelope_bytes > maximum {
+            return Err(UnprocessableSubmission {
+                encoded_envelope_bytes: envelope_bytes as u64,
+                required_gas: None,
+                approved_gas: Some(gas_limit),
+                diagnostic:
+                    "Full Gear proof envelope exceeds the runtime payload/extrinsic allowance",
+            }
+            .into());
+        }
+        let quote = gear_api
+            .calculate_handle_gas_at(
+                Some(H256::from_slice(signer.account_id().as_ref())),
+                destination.0.into(),
+                call_payload,
+                0,
+                false,
+                Some(finalized_hash),
+            )
+            .await?;
+        if quote.min_limit > gas_limit {
+            return Err(UnprocessableSubmission {
+                encoded_envelope_bytes: envelope_bytes as u64,
+                required_gas: Some(quote.min_limit),
+                approved_gas: Some(gas_limit),
+                diagnostic: "Full Gear proof gas quote exceeds the explicit approved ceiling",
+            }
+            .into());
+        }
+        self.recheck_receipt_pin(&FinalizedReceiptObservation {
+            finalized_block_number: Some(finalized_number),
+            finalized_block_hash: format!("{finalized_hash:#x}"),
+        })
+        .await?;
         let nonce = chain.api.tx().account_nonce(signer.account_id()).await?;
-        let gas_limit = gear_api.block_gas_limit()? / 100 * 95;
-        let call =
-            gear::tx()
-                .gear()
-                .send_message(destination.0.into(), call_payload, gas_limit, 0, false);
         let signed = chain
             .api
             .tx()
             .create_signed(
                 &call,
                 signer.signer(),
-                PolkadotExtrinsicParamsBuilder::new().nonce(nonce).build(),
+                // Recovery rebroadcasts this exact original; it must not expire in the queue.
+                PolkadotExtrinsicParamsBuilder::new()
+                    .immortal()
+                    .nonce(nonce)
+                    .build(),
             )
             .await?;
+        anyhow::ensure!(
+            signed.encoded().len() <= envelope_bytes,
+            "HOLD: signed Gear envelope exceeds its admitted pre-signing bound"
+        );
         let finalized_hash = format!("{finalized_hash:#x}");
         Ok(SignedSubmission {
             chain_genesis_hash: format!("{:#x}", chain.api.genesis_hash()),
@@ -1347,6 +1628,187 @@ impl MessageSender {
             finalized_reply_error: None,
             native_wrapper_approval: self.native_wrapper_approval.as_deref().cloned(),
             native_retry_qualification: None,
+            retry_qualification: None,
+        })
+    }
+
+    async fn receipt_running_at(&self, api: &GearApi, hash: H256) -> anyhow::Result<bool> {
+        let manager = VftManager::new(GClientRemoting::new(api.clone()));
+        let gas = api.block_gas_limit()?;
+        let (paused, stopped) = tokio::try_join!(
+            manager
+                .is_paused()
+                .with_gas_limit(gas)
+                .at_block(hash.0.into())
+                .recv(self.receiver_address.0.into()),
+            manager
+                .is_emergency_stopped()
+                .with_gas_limit(gas)
+                .at_block(hash.0.into())
+                .recv(self.receiver_address.0.into()),
+        )?;
+        Ok(!paused && !stopped)
+    }
+
+    /// Authenticate a sealed retry decision using reads only, never a new submission.
+    pub async fn verify_retry_qualification(
+        &self,
+        api: &GearApi,
+        payload: &EthToVaraEvent,
+        original: &SignedSubmission,
+        qualification: &RetryQualification,
+    ) -> anyhow::Result<()> {
+        self.authenticate_retained_receipt_framing(api, payload, original)
+            .await?;
+        original.validate_native_reconciliation()?;
+        anyhow::ensure!(
+            original
+                .retry_qualification
+                .as_ref()
+                .is_none_or(|saved| saved == qualification),
+            "HOLD: original typed retry qualification changed"
+        );
+        self.recheck_receipt_pin(&qualification.observation).await?;
+        let mut retained = original.clone();
+        let call = Redirect::encode_call(
+            original.receipt_key.0,
+            payload.encode(),
+            self.receiver_address.0.into(),
+            self.receiver_route.clone(),
+        );
+        anyhow::ensure!(
+            self.find_signed_extrinsic(&mut retained, self.historical_proxy_address, &call)
+                .await?,
+            "HOLD: retry original has no canonical finalized inclusion"
+        );
+        match qualification.reason {
+            RetryReason::DispatchBeforeMessage => {
+                anyhow::ensure!(
+                    retained.message_id.is_none()
+                        && retained.finalized_dispatch_error.is_some()
+                        && retained.finalized_reply.is_none()
+                        && retained.inclusion_block_number
+                            == qualification.observation.finalized_block_number
+                        && retained.inclusion_block_hash.as_ref()
+                            == Some(&qualification.observation.finalized_block_hash),
+                    "HOLD: retry does not prove original dispatch failure before MessageId"
+                );
+            }
+            RetryReason::PausedBeforeAdmission | RetryReason::NativeOriginalNoEffect => {
+                anyhow::ensure!(
+                    self.receiver_route == SubmitReceipt::ROUTE,
+                    "HOLD: manager retry reason cannot authorize a custom consumer"
+                );
+                let message = retained
+                    .message_id
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("HOLD: retry has no original message"))?;
+                let message = H256::from_str(message)?;
+                let (reply, observation) = self
+                    .find_finalized_reply(&mut retained, message, self.historical_proxy_address)
+                    .await?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("HOLD: retry has no original finalized reply")
+                    })?;
+                let (receipt, receiver) =
+                    decode_complete_reply::<Redirect>(&reply)?.map_err(|error| {
+                        anyhow::anyhow!("HOLD: original proxy rejected receipt: {error:?}")
+                    })?;
+                anyhow::ensure!(
+                    receipt == payload.receipt_rlp,
+                    "HOLD: original proxy receipt changed"
+                );
+                let result = decode_complete_reply::<SubmitReceipt>(&receiver)?;
+                if qualification.reason == RetryReason::PausedBeforeAdmission {
+                    anyhow::ensure!(
+                        matches!(result, Err(vft_manager_client::Error::Paused))
+                            && observation == qualification.observation,
+                        "HOLD: paused retry lacks exact original typed paused reply"
+                    );
+                } else {
+                    anyhow::ensure!(
+                        matches!(
+                            result,
+                            Ok(())
+                                | Err(vft_manager_client::Error::NativeSettlementPending)
+                                | Err(vft_manager_client::Error::ReplyFailure(_))
+                                | Err(vft_manager_client::Error::Paused)
+                        ),
+                        "HOLD: original reply does not authorize native reconciliation"
+                    );
+                    retained.validate_settlement_order(&qualification.observation)?;
+                    anyhow::ensure!(self.receipt_retry_qualification(api, payload, Some(&qualification.observation)).await?
+                        .as_ref() == Some(&qualification.observation),
+                        "HOLD: exact native child error and complete sibling cohort do not qualify retry");
+                }
+            }
+        }
+        if qualification.reason != RetryReason::NativeOriginalNoEffect
+            && self.receiver_route == SubmitReceipt::ROUTE
+        {
+            let evidence = self
+                .receipt_evidence(api, payload, Some(&qualification.observation))
+                .await?;
+            anyhow::ensure!(
+                matches!(evidence.status, vft_manager_client::ReceiptStatus::Unknown)
+                    && evidence.deposits.is_empty(),
+                "HOLD: no-admission retry pin already has a receipt cohort"
+            );
+        }
+        Ok(())
+    }
+
+    async fn no_effect_retry_status(
+        &self,
+        api: &GearApi,
+        payload: &EthToVaraEvent,
+        original: &mut SignedSubmission,
+        qualification: RetryQualification,
+        settlement_pin: Option<&FinalizedReceiptObservation>,
+    ) -> anyhow::Result<MessageStatus> {
+        if self.receiver_route == SubmitReceipt::ROUTE {
+            let evidence = self.receipt_evidence(api, payload, settlement_pin).await?;
+            if settlement_pin.is_some()
+                || !matches!(evidence.status, vft_manager_client::ReceiptStatus::Unknown)
+                || !evidence.deposits.is_empty()
+            {
+                let status = self
+                    .settlement_status(api, payload, settlement_pin)
+                    .await?
+                    .0;
+                if let MessageStatus::Success {
+                    receipt_observation: Some(pin),
+                } = &status
+                {
+                    original.validate_settlement_order(pin)?;
+                }
+                return Ok(status);
+            }
+            self.verify_retry_qualification(api, payload, original, &qualification)
+                .await?;
+            original.retry_qualification = Some(qualification.clone());
+            if !self.receipt_running_at(api, evidence.hash).await? {
+                return Ok(MessageStatus::NeedsReconciliation {
+                    receipt_key: original.receipt_key,
+                    diagnostic:
+                        "Manager remains paused; qualified original retained without a new nonce"
+                            .into(),
+                    receipt_observation: Some(evidence.observation),
+                });
+            }
+        } else {
+            anyhow::ensure!(
+                settlement_pin.is_none(),
+                "HOLD: custom failed dispatch is not completion"
+            );
+            self.verify_retry_qualification(api, payload, original, &qualification)
+                .await?;
+            original.retry_qualification = Some(qualification.clone());
+        }
+        Ok(MessageStatus::RetryableNoop {
+            receipt_key: original.receipt_key,
+            diagnostic: "Exact finalized original proves no admission; complete current cohort permits retry".into(),
+            qualification,
         })
     }
 
@@ -1404,6 +1866,12 @@ impl MessageSender {
             signed.raw_hash_matches(),
             "Stored signed transaction bytes do not match their recorded hash"
         );
+        self.authenticate_retained_receipt_framing(gear_api, payload, signed)
+            .await?;
+        if let Some(qualification) = &signed.retry_qualification {
+            self.verify_retry_qualification(gear_api, payload, signed, qualification)
+                .await?;
+        }
 
         for archived in &signed.native_reconciliation_attempts {
             self.authenticate_archived_continuation(archived).await?;
@@ -1450,27 +1918,27 @@ impl MessageSender {
                 .await?;
         }
         if signed.message_id.is_none() {
-            if let Some(error) = &signed.finalized_dispatch_error {
-                anyhow::ensure!(
-                    settlement_pin.is_none(),
-                    "HOLD: saved completion original proof failed before message dispatch"
-                );
-                return Ok((
-                    MessageStatus::RetryableNoop {
-                        receipt_key,
-                        diagnostic: format!(
-                            "Finalized signed transaction failed before queuing a message: {error}"
-                        ),
-                        receipt_observation: Some(FinalizedReceiptObservation {
-                            finalized_block_number: signed.inclusion_block_number,
-                            finalized_block_hash: signed
-                                .inclusion_block_hash
-                                .clone()
-                                .expect("Finalized dispatch failure has an inclusion hash"),
-                        }),
+            if let Some(error) = signed.finalized_dispatch_error.clone() {
+                let qualification = RetryQualification {
+                    reason: RetryReason::DispatchBeforeMessage,
+                    observation: FinalizedReceiptObservation {
+                        finalized_block_number: signed.inclusion_block_number,
+                        finalized_block_hash: signed.inclusion_block_hash.clone().ok_or_else(
+                            || anyhow::anyhow!("HOLD: dispatch failure has no inclusion hash"),
+                        )?,
                     },
-                    Some(Err(error.clone())),
-                ));
+                };
+                let status = self
+                    .no_effect_retry_status(
+                        gear_api,
+                        payload,
+                        signed,
+                        qualification,
+                        settlement_pin,
+                    )
+                    .await?;
+                // Financial settlement by another submission never rewrites this dispatch error.
+                return Ok((status, Some(Err(error))));
             }
         }
         let Some(message_id) = signed
@@ -1563,9 +2031,43 @@ impl MessageSender {
                 observation,
             )
         } else {
+            if matches!(
+                decode_complete_reply::<SubmitReceipt>(&receiver_reply),
+                Ok(Err(vft_manager_client::Error::Paused))
+            ) {
+                let at_reply = self
+                    .receipt_evidence(gear_api, payload, Some(&observation))
+                    .await?;
+                if matches!(at_reply.status, vft_manager_client::ReceiptStatus::Unknown)
+                    && at_reply.deposits.is_empty()
+                {
+                    let status = self
+                        .no_effect_retry_status(
+                            gear_api,
+                            payload,
+                            signed,
+                            RetryQualification {
+                                reason: RetryReason::PausedBeforeAdmission,
+                                observation,
+                            },
+                            settlement_pin,
+                        )
+                        .await?;
+                    return Ok((status, Some(Ok(receiver_reply))));
+                }
+            }
             match decode_complete_reply::<SubmitReceipt>(&receiver_reply) {
+                Ok(Err(
+                    vft_manager_client::Error::AlreadyProcessed
+                    | vft_manager_client::Error::ReceiptLeaseActive,
+                )) => {
+                    self.settlement_status(gear_api, payload, settlement_pin)
+                        .await?
+                        .0
+                }
                 Ok(Ok(()))
                 | Ok(Err(vft_manager_client::Error::NativeSettlementPending))
+                | Ok(Err(vft_manager_client::Error::Paused))
                 | Ok(Err(vft_manager_client::Error::ReplyFailure(_))) => {
                     let (status, native_ready) = self
                         .settlement_status(gear_api, payload, settlement_pin)
@@ -1608,6 +2110,13 @@ impl MessageSender {
                             settlement_pin.is_none(),
                             "HOLD: historical completion cannot create a continuation"
                         );
+                        anyhow::ensure!(signed.native_reconciliation_attempts.len() < 128,
+                            "HOLD: receipt continuation capacity exhausted; original evidence retained");
+                        let pin = self.api_provider.client().latest_finalized_block().await?;
+                        anyhow::ensure!(
+                            self.receipt_running_at(gear_api, pin).await?,
+                            "HOLD: paused manager cannot admit another continuation"
+                        );
                         let call = ReconcileReceipt::encode_call(receipt_key.0, receipt_key.1);
                         let hash = format!("{:#x}", alloy_primitives::keccak256(&call));
                         let continuation = self
@@ -1644,10 +2153,26 @@ impl MessageSender {
                             );
                             let pin = signed.native_retry_qualification.get_or_insert(pin).clone();
                             signed.validate_settlement_order(&pin)?;
+                            let qualification =
+                                signed
+                                    .retry_qualification
+                                    .clone()
+                                    .unwrap_or(RetryQualification {
+                                        reason: RetryReason::NativeOriginalNoEffect,
+                                        observation: pin.clone(),
+                                    });
+                            self.verify_retry_qualification(
+                                gear_api,
+                                payload,
+                                signed,
+                                &qualification,
+                            )
+                            .await?;
+                            signed.retry_qualification = Some(qualification.clone());
                             MessageStatus::RetryableNoop {
                                 receipt_key,
                                 diagnostic: "Exact original native error and complete sibling cohort qualify same-operation retry".into(),
-                                receipt_observation: Some(pin),
+                                qualification,
                             }
                         } else {
                             status
@@ -1846,12 +2371,76 @@ impl MessageSender {
             self.native_wrapper_approval.as_deref(),
         )
         .await?;
-        let deposits = manager
-            .receipt_deposits(key.0, key.1)
-            .with_gas_limit(gas)
-            .at_block(hash.0.into())
-            .recv(self.receiver_address.0.into())
-            .await?;
+        let (receipt, historical) = self.receipt_at(gear_api, payload, hash).await?;
+        let deposits = if historical {
+            use vft_manager_client::vft_manager::io::ReceiptDeposits;
+            let reply = gear_api
+                .calculate_reply_for_handle_at(
+                    None,
+                    self.receiver_address.0.into(),
+                    ReceiptDeposits::encode_call(key.0, key.1),
+                    gas,
+                    0,
+                    Some(hash),
+                )
+                .await?;
+            anyhow::ensure!(
+                reply.code.is_success(),
+                "HOLD: historical receipt state query failed"
+            );
+            let mut body = reply
+                .payload
+                .strip_prefix(ReceiptDeposits::ROUTE)
+                .ok_or_else(|| anyhow::anyhow!("HOLD: historical receipt state route changed"))?;
+            // These exact approved old CodeIds use concrete token/supply fields.
+            // Convert query evidence only; receipt bytes and operation IDs stay original.
+            let count = parity_scale_codec::Compact::<u32>::decode(&mut body)?.0 as usize;
+            anyhow::ensure!(
+                count <= receipt.logs().len(),
+                "HOLD: historical cohort exceeds original receipt logs"
+            );
+            let mut rows = Vec::with_capacity(count);
+            for _ in 0..count {
+                let (
+                    log_index,
+                    sender,
+                    receiver,
+                    token_id,
+                    eth_token_id,
+                    amount,
+                    supply,
+                    native,
+                    operation_id,
+                    child,
+                    outcome,
+                ) = Decode::decode(&mut body)?;
+                rows.push(vft_manager_client::ReceiptDepositState {
+                    log_index,
+                    sender,
+                    receiver,
+                    token_id: Some(token_id),
+                    eth_token_id,
+                    amount,
+                    supply: Some(supply),
+                    native,
+                    operation_id,
+                    child,
+                    outcome,
+                });
+            }
+            anyhow::ensure!(
+                body.is_empty(),
+                "HOLD: historical receipt state has trailing bytes"
+            );
+            rows
+        } else {
+            manager
+                .receipt_deposits(key.0, key.1)
+                .with_gas_limit(gas)
+                .at_block(hash.0.into())
+                .recv(self.receiver_address.0.into())
+                .await?
+        };
         let mappings = manager
             .vara_to_eth_addresses()
             .with_gas_limit(gas)
@@ -1869,8 +2458,9 @@ impl MessageSender {
         let retained = (!deposits.is_empty()
             || !matches!(status, vft_manager_client::ReceiptStatus::Unknown))
         .then_some(deposits.as_slice());
-        validate_deposit_evidence(
+        validate_decoded_deposit_evidence(
             &payload.receipt_rlp,
+            &receipt,
             key,
             H160::from(ethereum_manager.0),
             self.receiver_address,
@@ -1880,9 +2470,10 @@ impl MessageSender {
         for row in &deposits {
             anyhow::ensure!(
                 row.native
-                    == native_wrapper.as_ref().is_some_and(
-                        |binding| row.token_id == sails_rs::ActorId::from(binding.actor_id.0)
-                    )
+                    == native_wrapper
+                        .as_ref()
+                        .is_some_and(|binding| row.token_id
+                            == Some(sails_rs::ActorId::from(binding.actor_id.0)))
                     && (!row.native
                         || native_wrapper
                             .as_ref()
@@ -1890,11 +2481,18 @@ impl MessageSender {
                 "Original native wrapper policy differs from receipt economic evidence"
             );
             anyhow::ensure!(
-                mappings
-                    .iter()
-                    .any(|(token, eth, supply)| *token == row.token_id
-                        && *eth == row.eth_token_id
-                        && supply == &row.supply),
+                (row.token_id.is_none()
+                    && row.supply.is_none()
+                    && row.child.is_none()
+                    && matches!(
+                        row.outcome,
+                        vft_manager_client::ReceiptDepositOutcome::Rejected
+                    ))
+                    || mappings
+                        .iter()
+                        .any(|(token, eth, supply)| Some(*token) == row.token_id
+                            && *eth == row.eth_token_id
+                            && Some(supply) == row.supply.as_ref()),
                 "Original receipt token mapping is unavailable or changed"
             );
         }
@@ -1974,7 +2572,9 @@ impl MessageSender {
                         .redemption(row.operation_id)
                         .with_gas_limit(gas)
                         .at_block(hash.0.into())
-                        .recv(row.token_id)
+                        .recv(row.token_id.ok_or_else(|| {
+                            anyhow::anyhow!("Native payout has no authenticated token mapping")
+                        })?)
                         .await?;
                 effects_resolved &= payout.as_ref().is_some_and(|payout| {
                     native_payout_reconciliation_ready(
@@ -2046,7 +2646,9 @@ impl MessageSender {
                     .redemption(row.operation_id)
                     .with_gas_limit(gas)
                     .at_block(hash.0.into())
-                    .recv(row.token_id)
+                    .recv(row.token_id.ok_or_else(|| {
+                        anyhow::anyhow!("Native payout has no authenticated token mapping")
+                    })?)
                     .await?
                     .is_some()
                 {
@@ -2061,7 +2663,9 @@ impl MessageSender {
                         .held_redemption(row.operation_id)
                         .with_gas_limit(gas)
                         .at_block(hash.0.into())
-                        .recv(row.token_id)
+                        .recv(row.token_id.ok_or_else(|| {
+                            anyhow::anyhow!("Native payout has no authenticated token mapping")
+                        })?)
                         .await?
                         .is_some()
                 {
@@ -2073,7 +2677,9 @@ impl MessageSender {
                     .redemption(row.operation_id)
                     .with_gas_limit(gas)
                     .at_block(hash.0.into())
-                    .recv(row.token_id)
+                    .recv(row.token_id.ok_or_else(|| {
+                        anyhow::anyhow!("Native payout has no authenticated token mapping")
+                    })?)
                     .await?;
                 if !payout.as_ref().is_some_and(|payout| {
                     native_payout_reconciliation_ready(
@@ -2145,13 +2751,17 @@ impl MessageSender {
                         .held_redemption(row.operation_id)
                         .with_gas_limit(gas)
                         .at_block(hash.0.into())
-                        .recv(row.token_id)
+                        .recv(row.token_id.ok_or_else(|| {
+                            anyhow::anyhow!("Native payout has no authenticated token mapping")
+                        })?)
                         .await?;
                     let live = wrapper
                         .redemption(row.operation_id)
                         .with_gas_limit(gas)
                         .at_block(hash.0.into())
-                        .recv(row.token_id)
+                        .recv(row.token_id.ok_or_else(|| {
+                            anyhow::anyhow!("Native payout has no authenticated token mapping")
+                        })?)
                         .await?;
                     if live.as_ref().is_some_and(|payout| {
                         payout.status == vft_vara_client::PayoutStatus::Delivered
@@ -2181,7 +2791,9 @@ impl MessageSender {
                             .redemption(row.operation_id)
                             .with_gas_limit(gas)
                             .at_block(hash.0.into())
-                            .recv(row.token_id)
+                            .recv(row.token_id.ok_or_else(|| {
+                                anyhow::anyhow!("Native payout has no authenticated token mapping")
+                            })?)
                             .await?;
                         anyhow::ensure!(
                             payout.as_ref().is_some_and(|payout| {
@@ -2535,8 +3147,8 @@ impl MessageSender {
 
 async fn task(
     mut this: MessageSender,
-    mut requests: UnboundedReceiver<Request>,
-    mut responses: UnboundedSender<Response>,
+    mut requests: Receiver<Request>,
+    mut responses: Sender<Response>,
 ) {
     loop {
         if requests.is_closed() || responses.is_closed() {
@@ -2569,7 +3181,7 @@ pub(super) async fn process_native_fixture(
     api: &GearApi,
     request: &Request,
 ) -> anyhow::Result<Response> {
-    let (mut responses, mut received) = unbounded_channel();
+    let (mut responses, mut received) = channel(128);
     anyhow::ensure!(
         sender.process(&mut responses, api, request).await?,
         "fixture response channel closed"
@@ -2743,6 +3355,7 @@ mod tests {
             finalized_reply_error: None,
             native_wrapper_approval: None,
             native_retry_qualification: None,
+            retry_qualification: None,
         };
         let reader = MessageSender::new(target, vec![], target, connection, "//Alice".into(), None);
         let payload = hex::decode(record["payload"].as_str().unwrap().trim_start_matches("0x"))?;
@@ -2949,10 +3562,10 @@ mod tests {
                 log_index: i as u64,
                 sender: event.from.0 .0.into(),
                 receiver: event.to.0.into(),
-                token_id: ActorId::from([7 + i as u8; 32]),
+                token_id: Some(ActorId::from([7 + i as u8; 32])),
                 eth_token_id: event.token.0 .0.into(),
                 amount: sails_rs::U256::from_little_endian(event.amount.as_le_slice()),
-                supply: TokenSupply::Gear,
+                supply: Some(TokenSupply::Gear),
                 native: false,
                 operation_id: alloy_primitives::keccak256(
                     (
@@ -3007,22 +3620,9 @@ mod tests {
             )
         };
         assert!(identity(&rows).is_ok());
-        for reason in [
-            Reason::InvalidRecipient,
-            Reason::InvalidAmount,
-            Reason::NativeAmountOverflow,
-        ] {
-            let encoded = reason.encode();
-            let decoded = Reason::decode(&mut &encoded[..]).unwrap();
-            assert_eq!(decoded, reason);
-        }
-        for (i, reason) in [
-            Reason::InvalidRecipient,
-            Reason::InvalidAmount,
-            Reason::NativeAmountOverflow,
-        ]
-        .iter()
-        .enumerate()
+        for (i, reason) in [Reason::InvalidRecipient, Reason::InvalidAmount]
+            .iter()
+            .enumerate()
         {
             assert!(validate_rejection(&rows[i], reason).is_ok());
             for native in [false, true] {
@@ -3044,6 +3644,17 @@ mod tests {
                 }
             }
         }
+        assert!(validate_rejection(&rows[2], &Reason::NativeAmountOverflow).is_err());
+        let mut unmapped = rows[1].clone();
+        unmapped.token_id = None;
+        unmapped.supply = None;
+        assert!(validate_rejection(&unmapped, &Reason::UnmappedToken).is_err());
+        let mut system = rows[0].clone();
+        system.receiver = sails_rs::ActorId::from(*b"geargeargeargeargeargeargeargear");
+        system.native = true;
+        assert!(validate_rejection(&system, &Reason::InvalidRecipient).is_ok());
+        system.native = false;
+        assert!(validate_rejection(&system, &Reason::InvalidRecipient).is_err());
         let mut representable = rows[2].clone();
         representable.amount -= sails_rs::U256::one();
         assert!(validate_rejection(&representable, &Reason::NativeAmountOverflow).is_err());
@@ -3070,9 +3681,9 @@ mod tests {
         rows[0].native = false;
         let unlock = Reason::UnlockFalse { child };
         assert!(validate_rejection(&rows[0], &unlock).is_ok());
-        rows[0].supply = vft_manager_client::TokenSupply::Ethereum;
+        rows[0].supply = Some(vft_manager_client::TokenSupply::Ethereum);
         assert!(validate_rejection(&rows[0], &unlock).is_err());
-        rows[0].supply = vft_manager_client::TokenSupply::Gear;
+        rows[0].supply = Some(vft_manager_client::TokenSupply::Gear);
         rows[0].native = true;
         assert!(validate_rejection(&rows[0], &unlock).is_err());
         rows[0].native = false;
@@ -3362,6 +3973,53 @@ mod tests {
         rows[0].outcome = Outcome::Settled;
         rows[1].outcome = Outcome::Settled;
         assert!(resolution_cohort(&ReceiptStatus::Resolved, &rows).is_err());
+    }
+
+    // VB-20 reconstructed from HTML; audited revision 7fe1b032.
+    #[test]
+    fn fresh_deposit_evidence_rejects_historical_wrappers_and_post_state() {
+        use alloy_eips::eip2718::Encodable2718;
+        use ethereum_common::utils::{decode_canonical_receipt, ReceiptEnvelope};
+
+        let (legacy, _) = receipt_fixture(&[(6, 123u64.into())]);
+        let body = decode_canonical_receipt(&legacy)
+            .unwrap()
+            .as_receipt_with_bloom()
+            .unwrap()
+            .clone();
+        for receipt in [
+            ReceiptEnvelope::Legacy(body.clone()),
+            ReceiptEnvelope::Eip2930(body.clone()),
+            ReceiptEnvelope::Eip1559(body.clone()),
+            ReceiptEnvelope::Eip4844(body.clone()),
+            ReceiptEnvelope::Eip7702(body),
+        ] {
+            let valid = |bytes: &[u8]| {
+                validate_deposit_evidence(
+                    bytes,
+                    (17, 4),
+                    H160::repeat_byte(1),
+                    H256::repeat_byte(2),
+                    H256::repeat_byte(3),
+                    None,
+                )
+                .is_ok()
+            };
+            let raw = receipt.encoded_2718();
+            assert!(valid(&raw));
+            let wrapped = alloy_rlp::encode(raw.as_slice());
+            assert!(!valid(&wrapped));
+            let mut trailing = raw;
+            trailing.push(0);
+            assert!(!valid(&trailing));
+            let mut post_state = receipt;
+            post_state
+                .as_receipt_with_bloom_mut()
+                .unwrap()
+                .receipt
+                .status = alloy_primitives::B256::repeat_byte(42).into();
+            assert!(!valid(&post_state.encoded_2718()));
+        }
     }
 
     #[test]
@@ -3760,20 +4418,22 @@ mod tests {
             "//Alice".into(),
             None,
         );
-        let (requests_tx, mut requests_rx) = unbounded_channel();
-        let (mut responses_tx, mut responses_rx) = unbounded_channel();
+        let (requests_tx, mut requests_rx) = channel(128);
+        let (mut responses_tx, mut responses_rx) = channel(128);
         let tx_uuid = Uuid::now_v7();
         // The injected balance error must occur before any proof processing or signing.
         let payload = super::super::tx_manager::tests::receipt_fixtures()
             .next()
             .unwrap()
             .1;
-        requests_tx.send(Request::PrepareMessage {
-            tx_uuid,
-            tx_hash: FixedBytes::ZERO,
-            payload: Box::new(payload),
-            retry_original: None,
-        })?;
+        requests_tx
+            .send(Request::PrepareMessage {
+                tx_uuid,
+                tx_hash: FixedBytes::ZERO,
+                payload: Box::new(payload),
+                retry_original: None,
+            })
+            .await?;
         drop(requests_tx);
 
         let error = tokio::time::timeout(

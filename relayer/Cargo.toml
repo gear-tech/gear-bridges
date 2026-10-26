@@ -54,6 +54,7 @@ tokio.workspace = true
 utils-prometheus.workspace = true
 url.workspace = true
 subxt.workspace = true
+subxt-rpcs.workspace = true
 gsdk.workspace = true
 uuid.workspace = true
 chrono.workspace = true
@@ -61,6 +62,7 @@ zeroize.workspace = true
 actix-web.workspace = true
 async-trait.workspace = true
 sp-consensus-grandpa = { workspace = true, features = ["std"] }
+sc-consensus-grandpa.workspace = true
 
 [dev-dependencies]
 ethereum-client = { workspace = true, features = ["test-fixtures"] }

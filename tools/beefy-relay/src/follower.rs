@@ -6,8 +6,7 @@ use crate::{
     Hash32,
 };
 use alloy::{
-    consensus::{Transaction, TxEnvelope},
-    eips::Decodable2718,
+    consensus::Transaction,
     primitives::{Address, B256},
     providers::Provider,
     rpc::types::Filter,
@@ -55,6 +54,38 @@ fn lock_state(output: &Path) -> Result<File> {
     Ok(lock)
 }
 
+fn lock_actor(output: &Path) -> Result<File> {
+    let owner = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(output.join("actor.lock"))?;
+    owner
+        .try_lock()
+        .context("another process owns this actor journal")?;
+    Ok(owner)
+}
+
+fn validate_actor_role(state: &Value, resumed: bool, heartbeat_only: bool) -> Result<&'static str> {
+    let role = if heartbeat_only {
+        "heartbeat"
+    } else {
+        "follower"
+    };
+    ensure!(
+        !resumed || state["actorRole"].as_str().unwrap_or("follower") == role,
+        "journal cannot change actor role; HOLD"
+    );
+    ensure!(
+        !heartbeat_only
+            || state["roots"]
+                .as_object()
+                .is_some_and(|roots| roots.is_empty()),
+        "heartbeat journal contains root inventory; HOLD"
+    );
+    Ok(role)
+}
 pub(crate) fn read_state_file(path: &Path) -> Result<Value> {
     let directory = path
         .parent()
@@ -96,8 +127,26 @@ pub fn commitment_transaction(entry: &Value) -> Result<&Value> {
         .or_else(|| entry["clientAddress"].as_str())
         .context("transaction client missing; HOLD")?
         .parse()?;
-    let (signed, identity) =
-        crate::ethereum::signed_transaction(&raw, hash, number(&transaction["nonce"])?, client)?;
+    let (signed, identity) = if entry["origin"] == "external" {
+        let chain = transaction["destinationChainId"]
+            .as_u64()
+            .or_else(|| transaction["chainId"].as_u64())
+            .context("external destination chain missing; HOLD")?;
+        let parsed = crate::ethereum::external_transaction(&raw, hash, chain)?;
+        ensure!(
+            parsed.1.nonce == number(&transaction["nonce"])?,
+            "external nonce changed; HOLD"
+        );
+        if let Some(recorded_to) = transaction.get("to") {
+            ensure!(
+                *recorded_to == json!(parsed.1.to.map(|to| format!("{to:#x}"))),
+                "external destination changed; HOLD"
+            );
+        }
+        parsed
+    } else {
+        crate::ethereum::signed_transaction(&raw, hash, number(&transaction["nonce"])?, client)?
+    };
     if entry["origin"] == "external" || !transaction["sender"].is_null() {
         ensure!(
             transaction["sender"] == format!("{:#x}", identity.from),
@@ -106,7 +155,7 @@ pub fn commitment_transaction(entry: &Value) -> Result<&Value> {
     }
     if entry["origin"] == "external" || !transaction["chainId"].is_null() {
         ensure!(
-            signed.chain_id() == Some(number(&transaction["chainId"])?),
+            json!(signed.chain_id()) == transaction["chainId"],
             "transaction chain conflicts with signed bytes; HOLD"
         );
     }
@@ -130,7 +179,7 @@ fn journal_chain_id(state: &Value) -> Result<u64> {
 /// Validate legacy evidence before assigning ownership provenance; never relabel bytes.
 pub(crate) fn migrate_commitment_journal(state: &mut Value) -> Result<()> {
     ensure!(
-        matches!(state["schemaVersion"].as_u64(), Some(3 | 4)),
+        matches!(state["schemaVersion"].as_u64(), Some(3..=5)),
         "unsupported follower schema; HOLD"
     );
     let legacy = state["schemaVersion"] == 3;
@@ -165,29 +214,41 @@ pub(crate) fn migrate_commitment_journal(state: &mut Value) -> Result<()> {
             "commitment identity conflicts; HOLD"
         );
         let raw = decode(&transaction["rawTransaction"])?;
-        let (signed, identity) = crate::ethereum::signed_transaction(
-            &raw,
-            B256::from(array::<32>(&entry["txHash"])?),
-            number(&transaction["nonce"])?,
-            client,
-        )?;
-        ensure!(
-            signed.chain_id() == Some(chain),
-            "commitment transaction chain differs; HOLD"
-        );
+        let own = legacy || entry["origin"] == "own";
+        let (signed, identity) = if own {
+            let parsed = crate::ethereum::signed_transaction(
+                &raw,
+                B256::from(array::<32>(&entry["txHash"])?),
+                number(&transaction["nonce"])?,
+                client,
+            )?;
+            ensure!(
+                parsed.0.chain_id() == Some(chain),
+                "own commitment chain differs; HOLD"
+            );
+            parsed
+        } else {
+            crate::ethereum::external_transaction(
+                &raw,
+                B256::from(array::<32>(&entry["txHash"])?),
+                chain,
+            )?
+        };
         if !transaction["sender"].is_null() {
             ensure!(
                 transaction["sender"] == format!("{:#x}", identity.from),
                 "commitment sender differs; HOLD"
             );
         }
-        if !transaction["chainId"].is_null() {
+        if transaction.get("chainId").is_some() {
             ensure!(
-                transaction["chainId"] == chain,
+                transaction["chainId"] == json!(signed.chain_id()),
                 "commitment chain metadata differs; HOLD"
             );
         }
-        crate::ethereum::validate_commitment_call(&signed, &decode(&entry["rawScale"])?)?;
+        if own {
+            crate::ethereum::validate_commitment_call(&signed, &decode(&entry["rawScale"])?)?;
+        }
         if legacy || entry["origin"] == "own" {
             ensure!(
                 signer.is_none_or(|signer| signer == identity.from),
@@ -225,7 +286,7 @@ pub(crate) fn migrate_commitment_journal(state: &mut Value) -> Result<()> {
 
 pub(crate) fn validate_token_follower_journal(state: &Value, deployment: &Value) -> Result<()> {
     ensure!(
-        matches!(state["schemaVersion"].as_u64(), Some(3 | 4))
+        matches!(state["schemaVersion"].as_u64(), Some(3..=5))
             && ((deployment["mode"] == "mainnet-token-stack"
                 && state["mode"] == "mainnet-token-follow")
                 || (deployment["mode"] == "hoodi-token-stack"
@@ -240,6 +301,94 @@ pub(crate) fn validate_token_follower_journal(state: &Value, deployment: &Value)
         state["activeEthereum"] == deployment["ethereum"],
         "follower client differs from immutable deployment manifest"
     );
+    if let Some(roots) = state["roots"].as_object() {
+        for root in roots.values() {
+            ensure!(
+                matches!(
+                    root["status"].as_str(),
+                    Some("pending" | "mined" | "accepted" | "observed" | "covered")
+                ),
+                "unknown root inventory status; HOLD"
+            );
+            if root["status"] == "covered" {
+                ensure!(
+                    state["schemaVersion"] == 5,
+                    "coverage requires schema 5; HOLD"
+                );
+                validate_covered_root(&state["roots"], root)?;
+            }
+        }
+    } else {
+        ensure!(
+            state["schemaVersion"] != 5,
+            "schema-5 root inventory missing; HOLD"
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_covered_root(roots: &Value, root: &Value) -> Result<()> {
+    let covered = &root["coveredBy"];
+    ensure!(
+        root["status"] == "covered" && root["kind"] == "merkleRoot",
+        "invalid covered root; HOLD"
+    );
+    let selected = roots
+        .as_object()
+        .context("missing root inventory")?
+        .values()
+        .find(|candidate| candidate["publication"] == covered["publication"])
+        .context("coverage publication absent from inventory; HOLD")?;
+    ensure!(
+        selected == covered
+            && matches!(selected["status"].as_str(), Some("accepted" | "observed"))
+            && selected["kind"] == "merkleRoot"
+            && number(&selected["queueId"])? == number(&root["queueId"])?
+            && number(&selected["block"])? > number(&root["block"])?
+            && !Path::new(root["publication"].as_str().context("root path missing")?)
+                .try_exists()?,
+        "coverage changed identity or owns an original; HOLD"
+    );
+    Ok(())
+}
+
+fn retain_original_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    match OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(mut file) => {
+            file.write_all(bytes)?;
+            file.sync_all()?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            ensure!(
+                fs::read(path)? == bytes,
+                "retained original bytes conflict; HOLD"
+            );
+        }
+        Err(error) => return Err(error.into()),
+    }
+    File::open(path.parent().context("original directory missing")?)?.sync_all()?;
+    Ok(())
+}
+
+pub(crate) fn preserve_owned_scratch(path: &Path, committed: Option<&Value>) -> Result<()> {
+    if !path.try_exists()? {
+        return Ok(());
+    }
+    ensure!(
+        fs::symlink_metadata(path)?.file_type().is_file(),
+        "scratch is not an owned regular file; HOLD"
+    );
+    let raw = fs::read(path)?;
+    let digest = alloy::primitives::keccak256(&raw);
+    let archive = path.with_extension(format!("retained-{digest:x}"));
+    retain_original_bytes(&archive, &raw)?;
+    if let Ok(value) = serde_json::from_slice::<Value>(&raw) {
+        ensure!(
+            committed == Some(&value),
+            "complete scratch contradicts committed evidence; HOLD"
+        );
+    }
+    // The retained bytes are evidence, never a source of transaction authority.
     Ok(())
 }
 
@@ -262,6 +411,16 @@ fn save_state(output: &Path, state: &mut Value, ethereum: Option<&Ethereum>) -> 
         state["transactions"] = json!(ethereum.transactions);
     }
     let temp = output.join("state.json.tmp");
+    if temp.try_exists()? {
+        let committed = if output.join("state.json").try_exists()? {
+            Some(serde_json::from_slice::<Value>(&fs::read(
+                output.join("state.json"),
+            )?)?)
+        } else {
+            None
+        };
+        preserve_owned_scratch(&temp, committed.as_ref())?;
+    }
     let mut file = std::io::BufWriter::new(File::create(&temp)?);
     serde_json::to_writer_pretty(&mut file, state)?;
     file.write_all(b"\n")?;
@@ -513,7 +672,6 @@ async fn revalidate_finalized_commitments(
     state: &Value,
     proof_directory: &Path,
 ) -> Result<()> {
-    use std::collections::BTreeMap;
     revalidate_terminal_submissions(source, witness, ethereum, state, proof_directory).await?;
     if !state["submission"].is_null() {
         let submission = &state["submission"];
@@ -558,115 +716,323 @@ async fn revalidate_finalized_commitments(
             );
         }
     }
-    tokio::time::timeout(Duration::from_secs(300), async {
+    let entries = state["commitments"]
+        .as_array()
+        .context("missing commitment journal")?;
+    let mut previous = client_bootstrap(state, ethereum.client_address)?;
+    let mut previous_batch = Value::Null;
+    for batch in entries.chunks(32) {
+        revalidate_commitment_batch(
+            source,
+            witness,
+            ethereum,
+            state,
+            proof_directory,
+            batch,
+            previous,
+        )
+        .await?;
+        let identity = B256::from(keccak256(&serde_json::to_vec(batch)?));
+        let directory = proof_directory.join("qualified-batches");
+        fs::create_dir_all(&directory)?;
+        gear_common::durable::immutable_json(
+            &directory.join(format!("{identity:x}.json")),
+            &json!({"entriesDigest":identity,"previousBatch":previous_batch,
+                "firstBlock":batch[0]["block"],"lastBlock":batch[batch.len()-1]["block"]}),
+        )?;
+        previous_batch = json!(identity);
+        previous = batch.last().context("empty history batch")?;
+        tokio::task::yield_now().await;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn revalidate_commitment_batch<'a>(
+    source: &Source,
+    witness: &Source,
+    ethereum: &Ethereum,
+    state: &Value,
+    proof_directory: &Path,
+    entries: &'a [Value],
+    mut previous: &'a Value,
+) -> Result<()> {
+    use std::collections::BTreeMap;
+    async {
         let legacy = deployment_client(state)?;
         let mut targets = BTreeMap::new();
         let mut checkpoints = Vec::new();
         let mut source_targets = BTreeMap::new();
         let mut source_records = BTreeMap::<u64, &Value>::new();
         let mut original_inclusions = BTreeMap::new();
-        let mut inclusions = BTreeMap::<(u64, B256), Vec<crate::ethereum::OriginalCommitmentReceipt>>::new();
+        let mut inclusions =
+            BTreeMap::<(u64, B256), Vec<crate::ethereum::OriginalCommitmentReceipt>>::new();
         let bind = |targets: &mut BTreeMap<u64, B256>, number, hash| -> Result<()> {
-            ensure!(targets.insert(number, hash).is_none_or(|old| old == hash), "original history contains conflicting block identities; HOLD");
+            ensure!(
+                targets.insert(number, hash).is_none_or(|old| old == hash),
+                "original history contains conflicting block identities; HOLD"
+            );
             Ok(())
         };
-        let mut previous = client_bootstrap(state,ethereum.client_address)?;
-        for entry in state["commitments"].as_array().context("missing commitment journal")? {
+        for entry in entries {
             let client = journal_client(entry, legacy)?;
-            ensure!(client == legacy && entry["finalized"].is_boolean(), "retained commitment client or finality marker changed; HOLD");
-            ensure!(number(&entry["block"])? > number(&previous["block"])?, "retained destination commitments are not in source order; HOLD");
+            ensure!(
+                client == legacy && entry["finalized"].is_boolean(),
+                "retained commitment client or finality marker changed; HOLD"
+            );
+            ensure!(
+                number(&entry["block"])? > number(&previous["block"])?,
+                "retained destination commitments are not in source order; HOLD"
+            );
             let current: AuthoritySet = serde_json::from_value(entry["current"].clone())?;
-            require_authority_successor(previous,&current)?;
+            require_authority_successor(previous, &current)?;
             previous = entry;
             let recorded_transaction = commitment_transaction(entry)?;
             require_submission_client(recorded_transaction, client, legacy)?;
             let hash = B256::from(array::<32>(&entry["txHash"])?);
             let raw = decode(&recorded_transaction["rawTransaction"])?;
-            let (transaction, identity) = crate::ethereum::signed_transaction(&raw, hash, number(&recorded_transaction["nonce"])?, client)?;
-            if entry["origin"] == "own" && !state["followerSigner"].is_null() {ensure!(state["followerSigner"] == format!("{:#x}",identity.from), "own finalized transaction changed follower signer; HOLD");}
-            ensure!(transaction.chain_id() == Some(journal_chain_id(state)?)
-                && recorded_transaction["txHash"] == entry["txHash"] && identity.to == Some(client),
-                "original finalized signed transaction changed chain, hash or client binding; HOLD");
-            let included = (number(&entry["destinationBlock"])? , B256::from(array::<32>(&entry["destinationHash"])?));
+            let (transaction, identity) = if entry["origin"] == "own" {
+                let parsed = crate::ethereum::signed_transaction(
+                    &raw,
+                    hash,
+                    number(&recorded_transaction["nonce"])?,
+                    client,
+                )?;
+                ensure!(
+                    parsed.0.chain_id() == Some(journal_chain_id(state)?),
+                    "own finalized transaction changed chain; HOLD"
+                );
+                if !state["followerSigner"].is_null() {
+                    ensure!(
+                        state["followerSigner"] == format!("{:#x}", parsed.1.from),
+                        "own finalized transaction changed follower signer; HOLD"
+                    );
+                }
+                parsed
+            } else {
+                crate::ethereum::external_transaction(&raw, hash, journal_chain_id(state)?)?
+            };
+            ensure!(
+                recorded_transaction["txHash"] == entry["txHash"]
+                    && identity.nonce == number(&recorded_transaction["nonce"])?,
+                "finalized signed identity changed; HOLD"
+            );
+            let included = (
+                number(&entry["destinationBlock"])?,
+                B256::from(array::<32>(&entry["destinationHash"])?),
+            );
             if entry["finalized"] == true {
-                ensure!(number(&entry["finalizedBlock"])? >= included.0, "saved finality predates original inclusion; HOLD");
-                bind(&mut targets,included.0,included.1)?;
-                bind(&mut targets,number(&entry["finalizedBlock"])?,B256::from(array::<32>(&entry["finalizedHash"])?))?;
+                ensure!(
+                    number(&entry["finalizedBlock"])? >= included.0,
+                    "saved finality predates original inclusion; HOLD"
+                );
+                bind(&mut targets, included.0, included.1)?;
+                bind(
+                    &mut targets,
+                    number(&entry["finalizedBlock"])?,
+                    B256::from(array::<32>(&entry["finalizedHash"])?),
+                )?;
                 if let Some(checkpoint) = entry.get("checkpoint") {
                     checkpoints.push(serde_json::from_value(checkpoint.clone())?);
                 }
             }
-            let source_block: u32 = number(&entry["block"] )?.try_into()?;
-            bind(&mut source_targets, u64::from(source_block), B256::from(array::<32>(&entry["blockHash"])?))?;
-            if let Some(previous) = source_records.insert(u64::from(source_block), entry) {
-                ensure!(previous["rawScale"] == entry["rawScale"] && previous["current"] == entry["current"] && previous["next"] == entry["next"],
-                    "duplicate original source proof identity changed; HOLD");
-            }
-            crate::ethereum::validate_commitment_call(&transaction, &decode(&entry["rawScale"] )?)?;
-            if entry["finalized"] != true {continue;}
-            let original = crate::ethereum::OriginalCommitmentReceipt { hash, raw, source_block,
-                mmr_root: array::<32>(&recorded_transaction["root"] )?, client };
-            if let Some(previous) = original_inclusions.insert(hash, included) {
-                ensure!(previous == included, "original transaction changed canonical inclusion; HOLD");
-            } else { inclusions.entry(included).or_default().push(original); }
-        }
-        let mut view = ethereum.api.verified_finalized_view_with_archive(&proof_directory.join("headers"),
-            ethereum.finality_genesis().await?).await?;
-        view.verify_checkpoints_with_blocks(ethereum.api.raw_provider(), &checkpoints, &targets).await?;
-        let (source_finalized, witness_finalized) = tokio::try_join!(
-            async { source.api.block_hash_to_number(source.api.latest_finalized_block().await?).await },
-            async { witness.api.block_hash_to_number(witness.api.latest_finalized_block().await?).await },
-        )?;
-        let identity = state.get("deployment").map(|deployment| &deployment["anchor"]).unwrap_or(state);
-        ensure!(source.source_genesis == witness.source_genesis && source.bridge_domain == witness.bridge_domain
-            && source.source_genesis == array::<32>(&identity["sourceGenesis"])?
-            && source.bridge_domain == array::<32>(&identity["bridgeDomain"])?,
-            "history source/witness identity differs from the immutable deployment; HOLD");
-        let source_records = &source_records;
-        let mut source_checks = stream::iter(source_targets.iter().map(|(&block, &hash)| async move {
-            let block: u32 = block.try_into()?;
-            ensure!(block <= source_finalized && block <= witness_finalized, "original source history is ahead of a finalized witness; HOLD");
-            let entry = source_records.get(&u64::from(block)).context("original source proof is missing")?;
-            let (captured, (current, next), first, second) = tokio::try_join!(
-                source.recapture_at_finalized(block, decode(&entry["rawScale"] )?, source_finalized),
-                witness.checkpoint_at(block), source.api.block_number_to_hash(block), witness.api.block_number_to_hash(block),
+            let source_block: u32 = number(&entry["block"])?.try_into()?;
+            bind(
+                &mut source_targets,
+                u64::from(source_block),
+                B256::from(array::<32>(&entry["blockHash"])?),
             )?;
-            ensure!(first.0 == hash.0 && second == first && captured.block_hash == hash.0,
-                "original finalized source commitment changed on source/witness; HOLD");
-            ensure!(captured.current == current && captured.next == next
-                && entry["current"] == serde_json::to_value(&current)? && entry["next"] == serde_json::to_value(&next)?,
-                "original source proof authority history changed on source/witness; HOLD");
-            require_saved_submission(commitment_transaction(entry)?, &captured, array(&entry["txHash"] )?, journal_client(entry, legacy)?, legacy)?;
-            Ok::<_, anyhow::Error>(())
-        })).buffer_unordered(32);
-        while let Some(result) = source_checks.next().await { result?; }
+            if let Some(previous) = source_records.insert(u64::from(source_block), entry) {
+                ensure!(
+                    previous["rawScale"] == entry["rawScale"]
+                        && previous["current"] == entry["current"]
+                        && previous["next"] == entry["next"],
+                    "duplicate original source proof identity changed; HOLD"
+                );
+            }
+            if entry["origin"] == "own" {
+                crate::ethereum::validate_commitment_call(
+                    &transaction,
+                    &decode(&entry["rawScale"])?,
+                )?;
+            }
+            if entry["finalized"] != true {
+                continue;
+            }
+            let original = crate::ethereum::OriginalCommitmentReceipt {
+                hash,
+                raw,
+                source_block,
+                mmr_root: array::<32>(&recorded_transaction["root"])?,
+                client,
+            };
+            if let Some(previous) = original_inclusions.insert(hash, included) {
+                ensure!(
+                    previous == included,
+                    "original transaction changed canonical inclusion; HOLD"
+                );
+            } else {
+                inclusions.entry(included).or_default().push(original);
+            }
+        }
+        let mut view = ethereum
+            .api
+            .verified_finalized_view_with_archive(
+                &proof_directory.join("headers"),
+                ethereum.finality_genesis().await?,
+            )
+            .await?;
+        view.verify_checkpoints_with_blocks(ethereum.api.raw_provider(), &checkpoints, &targets)
+            .await?;
+        let (source_finalized, witness_finalized) = tokio::try_join!(
+            async {
+                source
+                    .api
+                    .block_hash_to_number(source.api.latest_finalized_block().await?)
+                    .await
+            },
+            async {
+                witness
+                    .api
+                    .block_hash_to_number(witness.api.latest_finalized_block().await?)
+                    .await
+            },
+        )?;
+        let identity = state
+            .get("deployment")
+            .map(|deployment| &deployment["anchor"])
+            .unwrap_or(state);
+        ensure!(
+            source.source_genesis == witness.source_genesis
+                && source.bridge_domain == witness.bridge_domain
+                && source.source_genesis == array::<32>(&identity["sourceGenesis"])?
+                && source.bridge_domain == array::<32>(&identity["bridgeDomain"])?,
+            "history source/witness identity differs from the immutable deployment; HOLD"
+        );
+        let source_records = &source_records;
+        let mut source_checks =
+            stream::iter(source_targets.iter().map(|(&block, &hash)| async move {
+                let block: u32 = block.try_into()?;
+                ensure!(
+                    block <= source_finalized && block <= witness_finalized,
+                    "original source history is ahead of a finalized witness; HOLD"
+                );
+                let entry = source_records
+                    .get(&u64::from(block))
+                    .context("original source proof is missing")?;
+                let (captured, (current, next), first, second) = tokio::try_join!(
+                    source.recapture_at_finalized(
+                        block,
+                        decode(&entry["rawScale"])?,
+                        source_finalized
+                    ),
+                    witness.checkpoint_at(block),
+                    source.api.block_number_to_hash(block),
+                    witness.api.block_number_to_hash(block),
+                )?;
+                ensure!(
+                    first.0 == hash.0 && second == first && captured.block_hash == hash.0,
+                    "original finalized source commitment changed on source/witness; HOLD"
+                );
+                ensure!(
+                    captured.current == current
+                        && captured.next == next
+                        && entry["current"] == serde_json::to_value(&current)?
+                        && entry["next"] == serde_json::to_value(&next)?,
+                    "original source proof authority history changed on source/witness; HOLD"
+                );
+                if entry["origin"] == "own" {
+                    require_saved_submission(
+                        commitment_transaction(entry)?,
+                        &captured,
+                        array(&entry["txHash"])?,
+                        journal_client(entry, legacy)?,
+                        legacy,
+                    )?;
+                } else {
+                    ensure!(
+                        commitment_transaction(entry)?["root"]
+                            == bytes(captured.validated.mmr_root),
+                        "external source root changed; HOLD"
+                    );
+                    let proof = source.proof(captured.block - 1, &captured).await?;
+                    let inclusion = ethereum
+                        .verify_accepted_commitment(
+                            B256::from(array::<32>(&entry["txHash"])?),
+                            &captured,
+                            &proof.snapshot,
+                        )
+                        .await?;
+                    ensure!(
+                        inclusion
+                            == (
+                                number(&entry["destinationBlock"])?,
+                                B256::from(array::<32>(&entry["destinationHash"])?)
+                            ),
+                        "external accepted effect inclusion changed; HOLD"
+                    );
+                }
+                Ok::<_, anyhow::Error>(())
+            }))
+            .buffer_unordered(32);
+        while let Some(result) = source_checks.next().await {
+            result?;
+        }
         let receipts_directory = proof_directory.join("receipts");
-        for entry in state["commitments"].as_array().context("missing commitment journal")?
-            .iter().filter(|entry| entry["finalized"] == true) {
+        for entry in entries.iter().filter(|entry| entry["finalized"] == true) {
             if let Some(retained) = entry.get("receiptProof") {
                 let hash = B256::from(array::<32>(&entry["txHash"])?);
-                let included = (number(&entry["destinationBlock"])?,
-                    B256::from(array::<32>(&entry["destinationHash"])?));
-                let proof = crate::ethereum::recover_receipt_proof(ethereum.api.raw_provider(),
-                    &mut view, included, hash, Some(retained), None, &receipts_directory).await?;
-                proof.verify_original_inclusion(&view,
-                    &decode(&commitment_transaction(entry)?["rawTransaction"])?, hash)?;
+                let included = (
+                    number(&entry["destinationBlock"])?,
+                    B256::from(array::<32>(&entry["destinationHash"])?),
+                );
+                let proof = crate::ethereum::recover_receipt_proof(
+                    ethereum.api.raw_provider(),
+                    &mut view,
+                    included,
+                    hash,
+                    Some(retained),
+                    None,
+                    &receipts_directory,
+                )
+                .await?;
+                proof.verify_original_inclusion(
+                    &view,
+                    &decode(&commitment_transaction(entry)?["rawTransaction"])?,
+                    hash,
+                )?;
                 fs::create_dir_all(&receipts_directory)?;
-                gear_common::durable::immutable_json(&receipts_directory.join(format!("{hash:x}.json")), &proof)?;
+                gear_common::durable::immutable_json(
+                    &receipts_directory.join(format!("{hash:x}.json")),
+                    &proof,
+                )?;
             }
         }
-        let mut receipts = stream::iter(inclusions.iter().map(|(&(block, hash), originals)|
-            crate::ethereum::authenticate_recorded_receipts(ethereum, &view, block, hash, originals, &receipts_directory)))
-            .buffer_unordered(32);
-        while let Some(result) = receipts.next().await { result?; }
+        let mut receipts = stream::iter(inclusions.iter().map(|(&(block, hash), originals)| {
+            crate::ethereum::authenticate_recorded_receipts(
+                ethereum,
+                &view,
+                block,
+                hash,
+                originals,
+                &receipts_directory,
+            )
+        }))
+        .buffer_unordered(32);
+        while let Some(result) = receipts.next().await {
+            result?;
+        }
         view.recheck(ethereum.api.raw_provider()).await?;
-        for entry in state["commitments"].as_array().context("missing commitment journal")?
-            .iter().filter(|entry| entry["finalized"] == true) {
-            crate::ethereum::retain_proof_qualification(proof_directory, entry,
-                &json!({"transactionHash":entry["txHash"],"checkpoint":view.checkpoint()}))?;
+        for entry in entries.iter().filter(|entry| entry["finalized"] == true) {
+            crate::ethereum::retain_proof_qualification(
+                proof_directory,
+                entry,
+                &json!({"transactionHash":entry["txHash"],"checkpoint":view.checkpoint()}),
+            )?;
         }
         Ok(())
-    }).await.context("saved finalized history did not revalidate within 300 seconds; HOLD; retain authenticated partial proof progress")?
+    }
+    .await
 }
 
 /// Operational audit: never signs, broadcasts, changes actor status or rewrites
@@ -714,7 +1080,14 @@ pub async fn audit_history(
             public_network
         ),
     )?;
+    if let Some(approval) =
+        crate::execution::ExecutionAuthority::load(deployment_manifest, finality)?
+    {
+        approval.verify_source(&source).await?;
+        approval.verify_source(&witness).await?;
+    }
     source.validate_attachment(&deployment["anchor"]).await?;
+    witness.validate_attachment(&deployment["anchor"]).await?;
     let started = std::time::Instant::now();
     let (bootstrap, proof) =
         authenticated_token_anchor(&mut source, &mut witness, &deployment["anchor"]).await?;
@@ -737,6 +1110,12 @@ pub async fn audit_history(
         "immutable deployment bootstrap changed; HOLD"
     );
     revalidate_finalized_commitments(&source, &witness, &ethereum, &state, proof_directory).await?;
+    crate::root_publication::validate_registered_root_publications(
+        &ethereum,
+        &state["roots"],
+        &proof_directory.join("roots"),
+    )
+    .await?;
     let entries = state["commitments"]
         .as_array()
         .context("missing commitments")?;
@@ -761,6 +1140,31 @@ pub(crate) fn validate_root_publication_inventory(
             if file_type.is_dir() && entry.file_name() == "finality-history" {
                 continue;
             }
+            let name = path.to_str().context("non-UTF8 publication path; HOLD")?;
+            if let Some(original) = name.strip_suffix(".tmp") {
+                let original = Path::new(original);
+                ensure!(
+                    registered_paths.contains(original),
+                    "unowned scratch evidence; HOLD"
+                );
+                let committed = if original.try_exists()? {
+                    Some(serde_json::from_slice::<Value>(&fs::read(original)?)?)
+                } else {
+                    None
+                };
+                preserve_owned_scratch(&path, committed.as_ref())?;
+                continue;
+            }
+            if let Some((original, digest)) = name.rsplit_once(".retained-") {
+                ensure!(
+                    file_type.is_file()
+                        && registered_paths.contains(Path::new(original))
+                        && format!("{:x}", alloy::primitives::keccak256(fs::read(&path)?))
+                            == digest,
+                    "retained scratch identity changed; HOLD"
+                );
+                continue;
+            }
             ensure!(
                 file_type.is_file()
                     && path.extension().and_then(|extension| extension.to_str()) == Some("json")
@@ -781,7 +1185,7 @@ async fn authenticate_reinclusion(
     anchor: &CapturedCommitment,
     finalized: &ethereum_client::FinalizedTransactionReceipt,
 ) -> Result<()> {
-    tokio::time::timeout(Duration::from_secs(300), async {
+    async {
         let hash = finalized.receipt.transaction_hash;
         let hash_text = format!("{hash:#x}");
         let recorded = state["transactions"]
@@ -835,7 +1239,7 @@ async fn authenticate_reinclusion(
                 ensure!(
                     matches!(
                         root["status"].as_str(),
-                        Some("pending" | "mined" | "accepted" | "observed")
+                        Some("pending" | "mined" | "accepted" | "observed" | "covered")
                     ),
                     "malformed root registration status; HOLD"
                 );
@@ -849,6 +1253,10 @@ async fn authenticate_reinclusion(
                     "root publication lies outside its owned inventory; HOLD"
                 );
                 registered_paths.insert(path);
+                if root["status"] == "covered" {
+                    validate_covered_root(roots, root)?;
+                    continue;
+                }
                 let saved = match fs::read(path) {
                     Ok(saved) => saved,
                     Err(error)
@@ -912,11 +1320,8 @@ async fn authenticate_reinclusion(
             &original,
             &directory.join("receipts"),
         )
-    })
+    }
     .await
-    .context(
-        "reinclusion authentication did not finish within 300 seconds; HOLD original evidence",
-    )?
 }
 
 async fn finalized_receipt_view(
@@ -1120,6 +1525,7 @@ async fn promote_finality(
                     finalized_receipt_view(ethereum, &directory, &finalized).await?;
                     let receipt = &finalized.inclusion;
                     ensure!(receipt.raw_transaction == raw && !receipt.receipt.status(), "failed reincluded original proof changed; HOLD");
+                    ethereum.finalize_commitment_spend(&submission, &finalized).await?;
                     json!({"submission":submission,"outcome":"finalized-revert","minedObservation":entry,
                         "failureEvidence":{"receipt":finalized.receipt,"includedBlock":finalized.included_block_number,"includedBlockHash":bytes(finalized.included_block_hash),"finalizedBlock":finalized.finalized_block_number,"finalizedBlockHash":bytes(finalized.finalized_block_hash),"inclusion":finalized.inclusion,"checkpoint":finalized.checkpoint}})
                 } else {
@@ -1160,7 +1566,10 @@ async fn promote_finality(
             .await?;
         }
         let raw = decode(&commitment_transaction(entry)?["rawTransaction"])?;
-        crate::ethereum::recorded_commitment_transaction(&raw,&anchor.raw)?;
+        if entry["origin"] == "own" {
+            crate::ethereum::recorded_commitment_transaction(&raw,&anchor.raw)?;
+            ethereum.finalize_commitment_spend(commitment_transaction(entry)?, &finalized).await?;
+        }
         let directory = output.join("finality-history");
         let view = finalized_receipt_view(ethereum, &directory, &finalized).await?;
         let original = crate::ethereum::OriginalCommitmentReceipt {hash:hash.into(),raw,source_block:anchor.block,mmr_root:anchor.validated.mmr_root,client:ethereum.client_address};
@@ -1369,22 +1778,17 @@ async fn authenticate_external_commitment(
     let directory = output.join("finality-history");
     let view = finalized_receipt_view(ethereum, &directory, &finalized).await?;
     let receipt = &finalized.inclusion;
-    let mut encoded = receipt.raw_transaction.as_slice();
-    let signed = TxEnvelope::decode_2718(&mut encoded)?;
-    let (_, identity) = crate::ethereum::signed_transaction(
+    let (signed, identity) = crate::ethereum::external_transaction(
         &receipt.raw_transaction,
         hash.into(),
-        signed.nonce(),
-        ethereum.client_address,
+        journal_chain_id(state)?,
     )?;
     ensure!(
-        signed.chain_id() == Some(journal_chain_id(state)?)
-            && finalized.receipt.from == identity.from
+        finalized.receipt.from == identity.from
             && finalized.receipt.to == identity.to
             && receipt.receipt.status(),
         "external signed receipt domain or status changed; HOLD"
     );
-    crate::ethereum::validate_commitment_call(&signed, &anchor.raw)?;
     let original = crate::ethereum::OriginalCommitmentReceipt {
         hash: hash.into(),
         raw: receipt.raw_transaction.clone(),
@@ -1409,7 +1813,7 @@ async fn authenticate_external_commitment(
             ),
         "external accepted checkpoint inclusion changed; HOLD"
     );
-    let transaction = json!({"clientAddress":format!("{:#x}",ethereum.client_address),"block":anchor.block,"blockHash":bytes(anchor.block_hash),"root":bytes(anchor.validated.mmr_root),"txHash":bytes(hash),"nonce":identity.nonce,"rawTransaction":bytes(&receipt.raw_transaction),"sender":format!("{:#x}",identity.from),"chainId":signed.chain_id()});
+    let transaction = json!({"clientAddress":format!("{:#x}",ethereum.client_address),"block":anchor.block,"blockHash":bytes(anchor.block_hash),"root":bytes(anchor.validated.mmr_root),"txHash":bytes(hash),"nonce":identity.nonce,"rawTransaction":bytes(&receipt.raw_transaction),"sender":format!("{:#x}",identity.from),"chainId":signed.chain_id(),"to":identity.to.map(|to| format!("{to:#x}")),"destinationChainId":journal_chain_id(state)?});
     let entry = json!({"origin":"external","acceptedTransaction":transaction,"clientAddress":format!("{:#x}",ethereum.client_address),
         "block":anchor.block,"blockHash":bytes(anchor.block_hash),"rawScale":bytes(&anchor.raw),"current":anchor.current,"next":anchor.next,"freshnessProof":freshness_evidence(proof)?,
         "txHash":bytes(hash),"destinationBlock":destination.0,"destinationHash":bytes(destination.1),"finalized":true,
@@ -1523,10 +1927,6 @@ async fn record_mined_commitment(
     proof: &SourceProof,
     hash: [u8; 32],
 ) -> Result<()> {
-    if state["roots"].is_object() {
-        crate::root_publication::validate_registered_root_publications(ethereum, &state["roots"])
-            .await?;
-    }
     require_saved_submission(
         &state["submission"],
         anchor,
@@ -1728,6 +2128,9 @@ async fn reconcile_original_submission(
             receipt.raw_transaction == raw && !receipt.receipt.status(),
             "original failed receipt proof differs; HOLD"
         );
+        ethereum
+            .finalize_commitment_spend(&terminal["submission"], &finalized)
+            .await?;
         terminal["outcome"] = json!("finalized-revert");
         terminal["failureEvidence"] = json!({"receipt":finalized.receipt,"includedBlock":finalized.included_block_number,"includedBlockHash":bytes(finalized.included_block_hash),"finalizedBlock":finalized.finalized_block_number,"finalizedBlockHash":bytes(finalized.finalized_block_hash),"inclusion":finalized.inclusion,"checkpoint":finalized.checkpoint});
     } else {
@@ -1945,7 +2348,8 @@ async fn advance(
                     state["follower"]["status"] = json!("catching-up");
                     state["follower"]["lastError"] = json!(error.to_string());
                     save(output, state, Some(ethereum))?;
-                    if root_witness.is_some()
+                    if state["actorRole"] != "heartbeat"
+                        && root_witness.is_some()
                         && handover_only
                         && state["submission"].is_null()
                         && covered_root_ready_for_publication(
@@ -1985,7 +2389,7 @@ async fn advance(
                 handover_only = !client_heartbeat_due(before.source_timestamp_ms, timestamp_ms);
                 freshness_check = Some(std::time::Instant::now());
             }
-            if let Some(witness) = root_witness {
+            if let Some(witness) = root_witness.filter(|_| state["actorRole"] != "heartbeat") {
                 scan_token_roots(source, witness, output, state).await?;
                 let pending = pending_token_root_block(state)?;
                 if handover_only
@@ -2150,13 +2554,6 @@ async fn advance(
             }
         };
         promote_finality(source, ethereum, output, state).await?;
-        if state["roots"].is_object() {
-            crate::root_publication::validate_registered_root_publications(
-                ethereum,
-                &state["roots"],
-            )
-            .await?;
-        }
         if !state["submission"]["rawTransaction"].is_null()
             && state["submission"]["block"] != anchor.block
         {
@@ -2233,6 +2630,11 @@ async fn advance(
             return Ok(Some(anchor));
         }
         let proof = source.proof(anchor.block - 1, &anchor).await?;
+        ethereum.execution_signer_role(if state["actorRole"] == "heartbeat" {
+            "heartbeat"
+        } else {
+            "commitment"
+        })?;
         let prior = (!state["submission"].is_null()).then(|| state["submission"].clone());
         let client_address = ethereum.client_address;
         let submission_result = ethereum
@@ -2387,6 +2789,68 @@ fn pending_token_root_block(state: &Value) -> Result<Option<u32>> {
     Ok(latest)
 }
 
+fn coalesced_root_keys(state: &Value, anchor: Option<u64>) -> Result<Vec<(u64, String)>> {
+    let mut selected = std::collections::BTreeMap::<u64, (u64, String)>::new();
+    let mut originals = Vec::new();
+    for (key, root) in state["roots"].as_object().context("missing roots")? {
+        if root["status"] != "pending" && root["status"] != "mined" {
+            continue;
+        }
+        let block = number(&root["block"])?;
+        let path = Path::new(root["publication"].as_str().context("root path missing")?);
+        // Existing intent files retain even unsigned proof evidence and reservations.
+        if path.try_exists()? || root["kind"] == "emptyProgress" {
+            originals.push((block, key.clone()));
+        } else if anchor.is_some_and(|anchor| block < anchor)
+            && state["rootScanTarget"].as_u64().is_none_or(|target| {
+                state["rootScan"]["block"]
+                    .as_u64()
+                    .is_some_and(|cursor| cursor >= target)
+            })
+        {
+            let queue = number(&root["queueId"])?;
+            let entry = selected
+                .entry(queue)
+                .or_insert_with(|| (block, key.clone()));
+            if block > entry.0 {
+                *entry = (block, key.clone());
+            }
+        }
+    }
+    originals.extend(selected.into_values());
+    originals.sort_unstable();
+    Ok(originals)
+}
+
+fn mark_covered_roots(state: &mut Value, key: &str) -> Result<()> {
+    let selected = state["roots"][key].clone();
+    ensure!(
+        selected["status"] == "accepted" || selected["status"] == "observed",
+        "coverage requires finalized publication; HOLD"
+    );
+    if selected["kind"] == "emptyProgress" {
+        return Ok(());
+    }
+    let block = number(&selected["block"])?;
+    for root in state["roots"]
+        .as_object_mut()
+        .context("missing roots")?
+        .values_mut()
+    {
+        if root["status"] == "pending"
+            && root["queueId"] == selected["queueId"]
+            && root["kind"] != "emptyProgress"
+            && number(&root["block"])? < block
+            && !Path::new(root["publication"].as_str().context("root path missing")?)
+                .try_exists()?
+        {
+            root["status"] = json!("covered");
+            root["coveredBy"] = selected.clone();
+        }
+    }
+    Ok(())
+}
+
 async fn scan_token_roots(
     source: &Source,
     witness: &Source,
@@ -2401,10 +2865,10 @@ async fn scan_token_roots(
         source.api.block_hash_to_number(source_head),
         witness.api.block_hash_to_number(witness_head)
     )?;
-    let limit = source_height.min(witness_height);
+    let finalized_limit = source_height.min(witness_height);
     let cursor: u32 = number(&state["rootScan"]["block"])?.try_into()?;
     ensure!(
-        limit >= cursor,
+        finalized_limit >= cursor,
         "source or witness has not recovered the saved finalized cursor"
     );
     let saved_hash = H256(array(&state["rootScan"]["blockHash"])?);
@@ -2413,9 +2877,29 @@ async fn scan_token_roots(
             && witness.api.block_number_to_hash(cursor).await? == saved_hash,
         "saved root-scan cursor is no longer canonical on both authorities"
     );
+    let target = state["rootScanTarget"]
+        .as_u64()
+        .filter(|target| *target > u64::from(cursor))
+        .map(u32::try_from)
+        .transpose()?
+        .unwrap_or(finalized_limit);
+    ensure!(
+        finalized_limit >= target,
+        "source finalized discovery target regressed; HOLD"
+    );
+    state["rootScanTarget"] = json!(target);
+    let limit = target.min(cursor.saturating_add(32));
     if cursor == limit {
         return Ok(());
     }
+    let (mut previous, witnessed_previous) = tokio::try_join!(
+        source.queue_snapshot_at(saved_hash),
+        witness.queue_snapshot_at(saved_hash)
+    )?;
+    ensure!(
+        previous == witnessed_previous,
+        "source and witness disagree at root-scan predecessor; HOLD"
+    );
     for block in cursor
         .checked_add(1)
         .context("source scan cursor overflow")?..=limit
@@ -2425,39 +2909,25 @@ async fn scan_token_roots(
             witness.api.block_number_to_hash(block).await? == hash,
             "source and witness disagree at finalized root-scan block {block}"
         );
-        let (registration, witnessed_registration) = tokio::try_join!(
-            source::has_event(&source.api, hash, "GearEthBridge", "QueueMerkleRootChanged"),
-            source::has_event(
-                &witness.api,
-                hash,
-                "GearEthBridge",
-                "QueueMerkleRootChanged"
-            )
+        let (current, witnessed_current) = tokio::try_join!(
+            source.queue_snapshot_at(hash),
+            witness.queue_snapshot_at(hash)
         )?;
         ensure!(
-            registration == witnessed_registration,
-            "source and witness disagree on the finalized queue registration event at block {block}"
+            current == witnessed_current,
+            "finalized queue snapshot differs between authorities; HOLD"
+        );
+        ensure!(
+            previous.is_none() || current.is_some(),
+            "initialized queue storage disappeared; HOLD"
         );
         let at_floor = u64::from(block) == number(&state["rootMinimum"])?;
-        if registration || at_floor {
-            let (first, second) = tokio::try_join!(
-                source::queue_snapshot_at(&source.api, hash),
-                source::queue_snapshot_at(&witness.api, hash)
-            )?;
-            ensure!(
-                first == second,
-                "finalized queue registration differs between authorities"
-            );
-            ensure!(
-                !registration || first.is_some(),
-                "queue registration precedes bridge initialization at block {block}; HOLD"
-            );
-            if let Some((queue_id, root)) = first {
-                if registration || root.0 != [0; 32] {
-                    retain_token_root(output, state, block, hash.0, queue_id, root.0)?;
-                }
+        if let Some((queue_id, root)) = current {
+            if root.0 != [0; 32] && (at_floor || previous != current) {
+                retain_token_root(output, state, block, hash.0, queue_id, root.0)?;
             }
         }
+        previous = current;
         state["rootScan"] = json!({"block":block, "blockHash":bytes(hash.0)});
         if block % 32 == 0 {
             save(output, state, None)?;
@@ -2613,20 +3083,13 @@ async fn publish_token_roots(
     output: &Path,
     state: &mut Value,
     reconcile_only: bool,
+    publisher_session: &mut Option<crate::root_publication::RootPublicationSession>,
 ) -> Result<bool> {
     let mut max_block = ethereum.queue_max_block_number().await?;
     loop {
         if !reconcile_only {
             schedule_queue_progress(source, witness, max_block, output, state).await?;
         }
-        let mut pending = state["roots"]
-            .as_object()
-            .context("missing root registration journal")?
-            .iter()
-            .filter(|(_, root)| root["status"] == "pending" || root["status"] == "mined")
-            .map(|(key, root)| Ok((number(&root["block"])?, key.clone())))
-            .collect::<Result<Vec<_>>>()?;
-        pending.sort_unstable();
         let active_client = state["activeEthereum"]["client"]
             .as_str()
             .or_else(|| state["deployment"]["ethereum"]["client"].as_str())
@@ -2639,7 +3102,9 @@ async fn publish_token_roots(
             .find(|entry| entry["clientAddress"].as_str() == Some(active_client))
             .map(|last| number(&last["block"]))
             .transpose()?;
-        let mut uncovered = false;
+        let pending = coalesced_root_keys(state, anchor)?;
+        let mut uncovered = pending_token_root_block(state)?
+            .is_some_and(|block| anchor.is_none_or(|anchor| u64::from(block) >= anchor));
         let mut progressed = false;
         for (block, key) in pending {
             let registration = &state["roots"][&key];
@@ -2656,7 +3121,7 @@ async fn publish_token_roots(
             if !has_publication && root_requires_empty_progress(max_block, block) {
                 continue;
             }
-            let publication_state = match crate::root_publication::publish_root_locked(
+            let publication_state = match crate::root_publication::publish_root_in_session(
                 source_rpc,
                 witness_rpc,
                 ethereum_rpc,
@@ -2668,11 +3133,15 @@ async fn publish_token_roots(
                 publication,
                 ethereum.owned_fixture_network.as_ref(),
                 ethereum.public_network,
+                publisher_session,
             )
             .await
             {
                 Ok(status) => status,
                 Err(error) => {
+                    if is_transient_follower_error(&error) {
+                        *publisher_session = None;
+                    }
                     record_root_publication_error(output, state, &key, error)?;
                     return Ok(uncovered);
                 }
@@ -2689,6 +3158,9 @@ async fn publish_token_roots(
             max_block = max_block.max(block);
             progressed |= state["roots"][&key]["status"] != status;
             state["roots"][&key]["status"] = json!(status);
+            if matches!(status, "accepted" | "observed") {
+                mark_covered_roots(state, &key)?;
+            }
             state["rootPublication"] = Value::Null;
             save(output, state, None)?;
         }
@@ -2849,7 +3321,7 @@ pub async fn follow_tokens(
     ethereum_rpc: &str,
     finality: &cli_utils::EthereumFinalityArgs,
     wallet: &Path,
-    root_wallet: &Path,
+    root_wallet: Option<&Path>,
     deployment_manifest: &Path,
     output: &Path,
     reconcile_once: bool,
@@ -2858,6 +3330,7 @@ pub async fn follow_tokens(
     client_deployment_transaction: Option<B256>,
     public_network: crate::ethereum::PublicEthereumNetwork,
 ) -> Result<()> {
+    let heartbeat_only = root_wallet.is_none();
     let deployment: Value = serde_json::from_slice(&fs::read(deployment_manifest)?)?;
     let fixture = crate::ethereum::approved_fixture_network(
         owned_fixture_network,
@@ -2895,10 +3368,17 @@ pub async fn follow_tokens(
         deployment["localRehearsal"] == local_rehearsal,
         "deployment rehearsal mode differs from actor mode"
     );
-    let _owner = crate::root_publication::lock_token_deployment(deployment_manifest)?;
+    let _owner = if heartbeat_only {
+        None
+    } else {
+        Some(crate::root_publication::lock_token_deployment(
+            deployment_manifest,
+        )?)
+    };
     fs::create_dir_all(output)?;
     let output_directory = fs::canonicalize(output)?;
     let output = output_directory.as_path();
+    let _actor_owner = lock_actor(output)?;
     let state_path = output.join("state.json");
     let progressed = Cell::new(false);
     run_token_sessions(output, reconcile_once, &progressed, || async {
@@ -2906,6 +3386,9 @@ pub async fn follow_tokens(
     let mut state = if resumed {
         let state = read_state_file(&state_path)?;
         validate_token_follower_journal(&state, &deployment)?;
+        if state["schemaVersion"] != 5 {
+            retain_original_bytes(&output.join("state.pre-schema5.json"), &fs::read(&state_path)?)?;
+        }
         state
     } else {
         json!({"schemaVersion":4, "mode":public_network.follower_mode(), "deployment":deployment,
@@ -2914,23 +3397,23 @@ pub async fn follow_tokens(
             "startupSequence":0, "rootScan":null, "localRehearsal":local_rehearsal})
     };
     migrate_commitment_journal(&mut state)?;
+    state["schemaVersion"] = json!(5);
+    let role = validate_actor_role(&state, resumed, heartbeat_only)?;
+    state["actorRole"] = json!(role);
     let selected_ethereum_manifest = &deployment["ethereum"];
     ensure!(
         state["localRehearsal"] == local_rehearsal,
         "cannot change an actor between local rehearsal and live mode"
     );
     let follower_signer = crate::ethereum::hoodi_wallet_address(wallet)?;
-    let publisher_signer = crate::ethereum::hoodi_wallet_address(root_wallet)?;
-    ensure!(
-        follower_signer != publisher_signer,
-        "follower and root publisher must use separate accounts"
-    );
+    let publisher_signer = root_wallet.map(crate::ethereum::hoodi_wallet_address).transpose()?;
+    ensure!(publisher_signer != Some(follower_signer), "follower and root publisher must use separate accounts");
     let follower_signer = format!("{follower_signer:#x}");
-    let publisher_signer = format!("{publisher_signer:#x}");
+    let publisher_signer = publisher_signer.map(|signer| format!("{signer:#x}"));
     ensure!(
         !resumed
             || (state["followerSigner"] == follower_signer
-                && state["rootPublisherSigner"] == publisher_signer),
+                && state["rootPublisherSigner"] == json!(publisher_signer)),
         "actor signing identities changed across restart"
     );
     state["followerSigner"] = json!(follower_signer);
@@ -2945,7 +3428,18 @@ pub async fn follow_tokens(
         GearApi::new(witness_rpc, 3).await?,
     )
     .await?;
+    let mut ethereum = if heartbeat_only {
+        Ethereum::connect_heartbeat(ethereum_rpc, finality, wallet, selected_ethereum_manifest,
+            fixture.as_ref(), public_network).await?
+    } else {
+        Ethereum::connect(ethereum_rpc, finality, wallet, selected_ethereum_manifest,
+            fixture.as_ref(), public_network).await?
+    };
+    ethereum.load_execution_approval(deployment_manifest, finality).await?;
+    ethereum.qualify_execution_source(&source).await?;
+    ethereum.qualify_execution_source(&witness).await?;
     source.validate_attachment(&deployment["anchor"]).await?;
+    witness.validate_attachment(&deployment["anchor"]).await?;
     ensure!(
         source.source_genesis == witness.source_genesis
             && source.bridge_domain == witness.bridge_domain
@@ -2963,18 +3457,6 @@ pub async fn follow_tokens(
     let (anchor, first) =
         authenticated_token_anchor(&mut source, &mut witness, &deployment["anchor"]).await?;
     let anchor_block = anchor.block;
-    let mut ethereum = Ethereum::connect(
-        ethereum_rpc,
-        finality,
-        wallet,
-        selected_ethereum_manifest,
-        fixture.as_ref(),
-        public_network,
-    )
-    .await?;
-    ethereum.load_execution_approval(deployment_manifest, finality).await?;
-    ethereum.qualify_execution_source(&source).await?;
-    ethereum.qualify_execution_source(&witness).await?;
     ethereum.api.enable_finality_archive(
         &output.join("finality-history/headers"), ethereum.api.finality_identity()?.1,
     ).await?;
@@ -2982,9 +3464,11 @@ pub async fn follow_tokens(
         decode(&deployment["manager"])?.as_slice() == ethereum.receiver_address.as_slice(),
         "declared ERC20 manager differs from client receiver"
     );
-    ethereum
-        .verify_token_bindings(array(&deployment["gearManager"])?)
-        .await?;
+    if heartbeat_only {
+        ethereum.verify_heartbeat_bindings().await?;
+    } else {
+        ethereum.verify_token_bindings(array(&deployment["gearManager"])?).await?;
+    }
     let bootstrap = bootstrap_record(&anchor, &first)?;
     ensure!(
         state["bootstrap"].is_null() || state["bootstrap"] == bootstrap,
@@ -3011,6 +3495,10 @@ pub async fn follow_tokens(
             && checkpoint.next_root == anchor.next.root,
         "token client bootstrap does not equal authenticated source checkpoint"
     );
+    if heartbeat_only {
+        state["bootstrap"] = bootstrap;
+        save(output, &mut state, Some(&ethereum))?;
+    } else {
     let floor = ethereum.queue_root_minimum(source.mmr_start_block).await?;
     if state["bootstrap"].is_null() {
         state["bootstrap"] = bootstrap;
@@ -3040,6 +3528,7 @@ pub async fn follow_tokens(
         state["rootMinimum"] = json!(floor);
         state["rootScan"] = json!({"block":cursor,"blockHash":bytes(hash.0)});
         save(output, &mut state, None)?;
+    }
     }
     let legacy_client = deployment_client(&state)?;
     if !state["submission"].is_null() {
@@ -3073,7 +3562,7 @@ pub async fn follow_tokens(
         "following isolated token client",
     )?;
     let result: Result<()> = async {
-        tokio::time::timeout(Duration::from_secs(300), async {
+        async {
             revalidate_finalized_commitments(
                 &source,
                 &witness,
@@ -3097,11 +3586,21 @@ pub async fn follow_tokens(
             follow_external_progress(&mut source, &witness, &mut ethereum, output, &mut state)
                 .await?;
             Ok::<_, anyhow::Error>(())
-        })
-        .await
-        .context(
-            "startup history authentication exceeded its original 300-second deadline; HOLD",
-        )??;
+        }.await?;
+        if heartbeat_only {
+            if reconcile_once {
+                return finish_commitment_finality(&mut source, &mut ethereum, output, &mut state).await;
+            }
+            loop {
+                promote_finality(&mut source, &mut ethereum, output, &mut state).await?;
+                follow_external_progress(&mut source, &witness, &mut ethereum, output, &mut state).await?;
+                if advance(&mut source, &mut ethereum, output, &mut state, true, Some(&witness)).await?.is_some() {
+                    progressed.set(true);
+                }
+            }
+        }
+        let root_wallet = root_wallet.context("root publisher wallet missing")?;
+        let mut publisher_session = None;
         if reconcile_once {
             finish_commitment_finality(&mut source, &mut ethereum, output, &mut state).await?;
             loop {
@@ -3109,13 +3608,13 @@ pub async fn follow_tokens(
                 ensure!(
                     roots.values().all(|root| matches!(
                         root["status"].as_str(),
-                        Some("pending" | "mined" | "accepted" | "observed")
+                        Some("pending" | "mined" | "accepted" | "observed" | "covered")
                     )),
                     "invalid root reconciliation status"
                 );
                 if roots
                     .values()
-                    .all(|root| root["status"] == "accepted" || root["status"] == "observed")
+                    .all(|root| matches!(root["status"].as_str(), Some("accepted" | "observed" | "covered")))
                 {
                     break;
                 }
@@ -3132,6 +3631,7 @@ pub async fn follow_tokens(
                     output,
                     &mut state,
                     true,
+                    &mut publisher_session,
                 )
                 .await?;
                 ensure!(
@@ -3160,6 +3660,7 @@ pub async fn follow_tokens(
             output,
             &mut state,
             false,
+            &mut publisher_session,
         )
         .await?;
 
@@ -3185,6 +3686,7 @@ pub async fn follow_tokens(
                 output,
                 &mut state,
                 false,
+                &mut publisher_session,
             )
             .await?;
             let handover_only = !uncovered;
@@ -3216,6 +3718,101 @@ pub async fn follow_tokens(
 mod tests {
     use super::*;
     use anyhow::bail;
+
+    // Reconstructed from supplied HTML VB-14 (audited 7fe1b032), not the missing PoC bundle.
+    #[test]
+    fn cumulative_roots_coalesce_2048_without_changing_reserved_originals() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let mut state = json!({"roots":{}});
+        for block in 1..=2048u64 {
+            state["roots"][block.to_string()] = json!({
+                "block":block,"blockHash":bytes([1;32]),"queueId":9,"queueRoot":bytes([2;32]),
+                "kind":"merkleRoot","status":"pending",
+                "publication":directory.path().join(format!("{block}.json"))
+            });
+        }
+        assert_eq!(
+            coalesced_root_keys(&state, Some(2049))?,
+            vec![(2048, "2048".into())]
+        );
+        state["rootScanTarget"] = json!(2048);
+        state["rootScan"] = json!({"block":32});
+        assert!(coalesced_root_keys(&state, Some(2049))?.is_empty());
+        state["rootScan"]["block"] = json!(2048);
+        assert_eq!(
+            coalesced_root_keys(&state, Some(2049))?,
+            vec![(2048, "2048".into())]
+        );
+        let reserved = state["roots"]["1"].clone();
+        fs::write(directory.path().join("1.json"), b"retained original")?;
+        state["roots"]["2049"] = json!({"block":2049,"queueId":10,"kind":"merkleRoot",
+            "queueRoot":bytes([3;32]),"status":"pending","publication":directory.path().join("2049.json")});
+        assert_eq!(
+            coalesced_root_keys(&state, Some(2050))?,
+            vec![
+                (1, "1".into()),
+                (2048, "2048".into()),
+                (2049, "2049".into())
+            ]
+        );
+        assert!(mark_covered_roots(&mut state, "2048").is_err());
+        state["roots"]["2048"]["status"] = json!("accepted");
+        mark_covered_roots(&mut state, "2048")?;
+        assert_eq!(state["roots"]["1"], reserved);
+        assert_eq!(
+            fs::read(directory.path().join("1.json"))?,
+            b"retained original"
+        );
+        assert_eq!(state["roots"]["2049"]["status"], "pending");
+        assert_eq!(
+            state["roots"]
+                .as_object()
+                .unwrap()
+                .values()
+                .filter(|root| root["status"] == "covered")
+                .count(),
+            2046
+        );
+        let restarted: Value = serde_json::from_slice(&serde_json::to_vec(&state)?)?;
+        validate_covered_root(&restarted["roots"], &restarted["roots"]["2"])?;
+        let mut forged = restarted["roots"]["2"].clone();
+        forged["queueId"] = json!(10);
+        assert!(validate_covered_root(&restarted["roots"], &forged).is_err());
+        Ok(())
+    }
+
+    // Reconstructed from HTML VB-03/VB-36; lock isolation is not a 48-hour runtime qualification.
+    #[test]
+    fn heartbeat_owner_is_independent_and_cannot_reuse_root_journal() -> Result<()> {
+        let publisher = tempfile::tempdir()?;
+        let heartbeat = tempfile::tempdir()?;
+        let _publisher = lock_actor(publisher.path())?;
+        let _heartbeat = lock_actor(heartbeat.path())?;
+        assert!(lock_actor(publisher.path()).is_err());
+        assert!(lock_actor(heartbeat.path()).is_err());
+        let state = json!({"actorRole":"heartbeat","roots":{}});
+        assert_eq!(validate_actor_role(&state, true, true)?, "heartbeat");
+        assert!(validate_actor_role(&state, true, false).is_err());
+        assert!(validate_actor_role(&json!({"roots":{"pending":{}}}), false, true).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn incomplete_owned_scratch_is_retained_but_complete_conflict_holds() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("root.json.tmp");
+        fs::write(&path, b"{\"rawTransaction\":")?;
+        preserve_owned_scratch(&path, None)?;
+        let digest = alloy::primitives::keccak256(fs::read(&path)?);
+        assert_eq!(
+            fs::read(path.with_extension(format!("retained-{digest:x}")))?,
+            fs::read(&path)?
+        );
+        fs::write(&path, br#"{"rawTransaction":"0x01"}"#)?;
+        assert!(preserve_owned_scratch(&path, Some(&json!({"rawTransaction":"0x02"}))).is_err());
+        assert_eq!(fs::read(&path)?, br#"{"rawTransaction":"0x01"}"#);
+        Ok(())
+    }
 
     fn accepted_log(number: u64, hash: u8) -> alloy::rpc::types::Log {
         let mut data = vec![7; 32];
@@ -3426,7 +4023,8 @@ mod tests {
             RawRpcFuture, RawRpcSubscription, RawValue, RpcClient, RpcClientT,
         };
 
-        // Forward the existing archive, changing only the pinned event-storage response.
+        // Reconstructed from HTML VB-03 (audited 7fe1b032); no original PoC bundle.
+        // Forward the real archive, poisoning only the irrelevant full-events response.
         struct EventRpc {
             upstream: RpcClient,
             hash: H256,
@@ -3455,8 +4053,11 @@ mod tests {
                         self.observations.fetch_add(1, Ordering::SeqCst);
                         match self.hide {
                             Some(true) => {
-                                return serde_json::value::to_raw_value("0x00")
-                                    .map_err(subxt_rpcs::Error::Deserialization)
+                                return serde_json::value::to_raw_value(&format!(
+                                    "0x{}",
+                                    "00".repeat(8 * 1024 * 1024)
+                                ))
+                                .map_err(subxt_rpcs::Error::Deserialization)
                             }
                             None => {
                                 return Err(subxt_rpcs::Error::User(
@@ -3498,22 +4099,14 @@ mod tests {
         let witness_api = witness.api.clone();
         let hash = primary_api.block_number_to_hash(queued).await?;
         let previous = primary_api.block_number_to_hash(queued - 1).await?;
-        ensure!(
-            source::has_event(
-                &primary_api,
-                hash,
-                "GearEthBridge",
-                "QueueMerkleRootChanged"
-            )
+        let snapshot = source::queue_snapshot_at(&primary_api, hash)
             .await?
-                && source::has_event(
-                    &witness_api,
-                    hash,
-                    "GearEthBridge",
-                    "QueueMerkleRootChanged"
-                )
-                .await?,
-            "fixture requires a genuine finalized queue registration"
+            .context("fixture requires an initialized nonzero queue")?;
+        ensure!(
+            snapshot.1 != H256::zero()
+                && Some(snapshot) == source::queue_snapshot_at(&witness_api, hash).await?
+                && Some(snapshot) != source::queue_snapshot_at(&primary_api, previous).await?,
+            "fixture requires a genuine finalized queue storage transition"
         );
         let events_key =
             bytes([sp_core::twox_128(b"System"), sp_core::twox_128(b"Events")].concat());
@@ -3543,31 +4136,23 @@ mod tests {
                 let directory = tempfile::tempdir()?;
                 let mut state = json!({"rootMinimum":if at_floor {queued} else {1},"rootScan":{"block":queued - 1,"blockHash":bytes(previous.0)},"roots":{}});
                 save(directory.path(), &mut state, None)?;
-                let original = state.clone();
-                let disk = fs::read(directory.path().join("state.json"))?;
-                let error = scan_token_roots(&source, &witness, directory.path(), &mut state)
-                    .await
-                    .unwrap_err();
+                scan_token_roots(&source, &witness, directory.path(), &mut state).await?;
                 ensure!(
-                    observations.load(Ordering::SeqCst) > 0,
-                    "fault did not reach actual event RPC"
+                    observations.load(Ordering::SeqCst) == 0,
+                    "root discovery fetched full System.Events"
                 );
-                if primary.is_some() && secondary.is_some() {
-                    ensure!(
-                        error
-                            .to_string()
-                            .contains("disagree on the finalized queue registration event"),
-                        "unexpected scan failure: {error:#}"
-                    );
-                    ensure!(
-                        observations.load(Ordering::SeqCst) == 2,
-                        "both event observations were not requested"
-                    );
-                }
                 ensure!(
-                    state == original && fs::read(directory.path().join("state.json"))? == disk,
-                    "fault advanced cursor or retained a root"
+                    state["rootScan"]["block"] == queued
+                        && state["roots"]
+                            .as_object()
+                            .context("roots")?
+                            .values()
+                            .any(|root| root["block"] == queued),
+                    "irrelevant events blocked storage-root discovery"
                 );
+                let mut restarted = read_state_file(&directory.path().join("state.json"))?;
+                scan_token_roots(&source, &witness, directory.path(), &mut restarted).await?;
+                ensure!(restarted == state, "restart duplicated root observation");
             }
         }
         for (target, upstream) in [(&mut source, &primary_api), (&mut witness, &witness_api)] {
@@ -3633,8 +4218,8 @@ mod tests {
                 "native boundary fork"
             );
             let (first, second) = tokio::try_join!(
-                source::queue_snapshot_at(&source.api, hash),
-                source::queue_snapshot_at(&witness.api, hash)
+                source.queue_snapshot_at(hash),
+                witness.queue_snapshot_at(hash)
             )?;
             ensure!(first == second, "native boundary snapshot differs");
             if block < initialized {
@@ -3654,11 +4239,15 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let mut state =
             json!({"rootMinimum":1,"rootScan":{"block":0,"blockHash":bytes(genesis)},"roots":{}});
-        scan_token_roots(&source, &witness, directory.path(), &mut state).await?;
-        ensure!(
-            number(&state["rootScan"]["block"])? >= u64::from(queued),
-            "scan did not cover the genuine queued block"
-        );
+        while number(&state["rootScan"]["block"])? < u64::from(queued) {
+            let before = number(&state["rootScan"]["block"])?;
+            scan_token_roots(&source, &witness, directory.path(), &mut state).await?;
+            let after = number(&state["rootScan"]["block"])?;
+            ensure!(
+                after > before && after - before <= 32,
+                "root discovery exceeded bounded turn or stalled"
+            );
+        }
         let roots = state["roots"]
             .as_object()
             .context("root inventory missing")?;
@@ -4015,6 +4604,58 @@ mod tests {
         Ok(())
     }
 
+    // Reconstructed VB-01 accessor regression; authenticating the effect remains a separate step.
+    #[tokio::test]
+    async fn external_accessor_preserves_create_forwarder_and_pre_eip155_identity() -> Result<()> {
+        use alloy::{
+            consensus::{SignableTransaction, TxEnvelope, TxLegacy},
+            eips::Encodable2718,
+            network::TxSigner,
+            primitives::TxKind,
+            signers::local::PrivateKeySigner,
+        };
+        let signer = PrivateKeySigner::from_bytes(&B256::repeat_byte(7))?;
+        let client = Address::repeat_byte(3);
+        for chain_id in [None, Some(560_048)] {
+            for to in [TxKind::Create, TxKind::Call(Address::repeat_byte(4))] {
+                let mut transaction = TxLegacy {
+                    chain_id,
+                    nonce: 36,
+                    gas_price: 10,
+                    gas_limit: 100_000,
+                    to,
+                    input: vec![0x60, 0x00].into(),
+                    ..Default::default()
+                };
+                let signature = signer.sign_transaction(&mut transaction).await?;
+                let raw = TxEnvelope::Legacy(transaction.into_signed(signature)).encoded_2718();
+                let recorded_to = match to {
+                    TxKind::Create => None,
+                    TxKind::Call(address) => Some(format!("{address:#x}")),
+                };
+                let accepted = json!({"clientAddress":format!("{client:#x}"),"block":420,
+                    "blockHash":bytes([8;32]),"root":bytes([9;32]),"txHash":bytes(keccak256(&raw)),
+                    "nonce":36,"rawTransaction":bytes(&raw),"sender":format!("{:#x}",signer.address()),
+                    "chainId":chain_id,"destinationChainId":560_048,"to":recorded_to});
+                let external = json!({"origin":"external","block":420,"blockHash":bytes([8;32]),
+                    "txHash":accepted["txHash"],"acceptedTransaction":accepted});
+                assert_eq!(commitment_transaction(&external)?, &accepted);
+                let mut changed = external.clone();
+                changed["acceptedTransaction"]["to"] = json!(format!("{client:#x}"));
+                assert!(commitment_transaction(&changed).is_err());
+                if chain_id.is_some() {
+                    changed = external.clone();
+                    changed["acceptedTransaction"]["destinationChainId"] = json!(1);
+                    assert!(commitment_transaction(&changed).is_err());
+                }
+                let own = json!({"origin":"own","block":420,"blockHash":bytes([8;32]),
+                    "txHash":accepted["txHash"],"submission":accepted});
+                assert!(commitment_transaction(&own).is_err());
+            }
+        }
+        Ok(())
+    }
+
     #[tokio::test]
     async fn provenance_accessor_preserves_original_and_rejects_mixed_external_identity(
     ) -> Result<()> {
@@ -4318,6 +4959,14 @@ mod tests {
             "activeEthereum": deployment["ethereum"].clone(),
         });
         assert!(validate_token_follower_journal(&valid, &deployment).is_ok());
+        let mut current = valid.clone();
+        current["schemaVersion"] = json!(5);
+        current["roots"] = json!({});
+        assert!(validate_token_follower_journal(&current, &deployment).is_ok());
+        current["roots"]["1"] = json!({"status":"unrecognized"});
+        assert!(validate_token_follower_journal(&current, &deployment).is_err());
+        current["schemaVersion"] = json!(6);
+        assert!(validate_token_follower_journal(&current, &deployment).is_err());
         let mut changed_client = valid.clone();
         changed_client["activeEthereum"] = json!({"chainId": 31_337});
         assert!(validate_token_follower_journal(&changed_client, &deployment).is_err());
@@ -4438,7 +5087,7 @@ mod tests {
     #[ignore = "requires an explicitly owned Hoodi-history Anvil fork and copied public evidence; no native source writes"]
     async fn authenticated_competing_root_unfences_only_independent_follower() -> Result<()> {
         use alloy::{
-            consensus::{SignableTransaction, TxEip1559},
+            consensus::{SignableTransaction, TxEip1559, TxEnvelope},
             eips::Encodable2718,
             network::TxSigner,
             primitives::TxKind,
@@ -4564,6 +5213,7 @@ mod tests {
                         &captured_anchor,
                         &newest.snapshot,
                     ),
+                    &mut Default::default(),
                 ),
             )
             .await
@@ -4599,8 +5249,12 @@ mod tests {
                 "observation rewrote original {field}"
             );
         }
-        crate::root_publication::validate_registered_root_publications(&ethereum, &state["roots"])
-            .await?;
+        crate::root_publication::validate_registered_root_publications(
+            &ethereum,
+            &state["roots"],
+            &evidence.join("root-audit"),
+        )
+        .await?;
         // Replay an authentic already-public next commitment only on this owned fork.
         // This is an EVM actor/barrier regression, not fresh native-source traffic.
         let next = journal["commitments"]
@@ -4688,6 +5342,7 @@ mod tests {
                 &captured_anchor,
                 &newest.snapshot,
             ),
+            &mut Default::default(),
         )
         .await?;
         ensure!(
@@ -5474,7 +6129,12 @@ mod tests {
             "kind":"merkleRoot", "queueRoot":bytes(expected_root)
         }});
         fs::write(&root_path, serde_json::to_vec(&root_intent)?)?;
-        crate::root_publication::validate_registered_root_publications(&ethereum, &roots).await?;
+        crate::root_publication::validate_registered_root_publications(
+            &ethereum,
+            &roots,
+            &root_path.with_extension("audit"),
+        )
+        .await?;
         ensure!(
             root_provider.get_transaction_count(root_sender).await? == 0,
             "barrier broadcast a pending root itself"
@@ -5500,7 +6160,12 @@ mod tests {
                 .is_none(),
             "root fixture finalized before testing the mined barrier"
         );
-        crate::root_publication::validate_registered_root_publications(&ethereum, &roots).await?;
+        crate::root_publication::validate_registered_root_publications(
+            &ethereum,
+            &roots,
+            &root_path.with_extension("audit"),
+        )
+        .await?;
         ensure!(
             fs::read(&root_path)? == original_root_intent,
             "mined barrier changed original publication evidence"
@@ -5519,7 +6184,12 @@ mod tests {
                 && finalized_root.receipt.block_hash == receipt.block_hash,
             "finality replaced root identity or inclusion"
         );
-        crate::root_publication::validate_registered_root_publications(&ethereum, &roots).await?;
+        crate::root_publication::validate_registered_root_publications(
+            &ethereum,
+            &roots,
+            &root_path.with_extension("audit"),
+        )
+        .await?;
         state["roots"] = roots.clone();
         let advanced = loop {
             let candidate = source.next_commitment().await?;
@@ -5757,6 +6427,7 @@ mod tests {
                             &root_anchor,
                             &anchor_newest.snapshot
                         ),
+                        &mut Default::default(),
                     )
                     .await?
                         == crate::root_publication::RootPublicationState::Accepted,
@@ -6586,11 +7257,13 @@ mod tests {
         ensure!(
             reverted
                 && crate::root_publication::validate_registered_root_publications(
-                    &ethereum, &roots
+                    &ethereum,
+                    &roots,
+                    &root_path.with_extension("audit")
                 )
                 .await
-                .is_err(),
-            "disappeared root inclusion must hold the next commitment"
+                .is_ok(),
+            "missing unfinalized root must remain pending without fencing client maintenance"
         );
         ensure!(
             root_provider.get_transaction_count(root_sender).await? == 0
@@ -6621,10 +7294,14 @@ mod tests {
             "identical root did not succeed in a different inclusion"
         );
         ensure!(
-            crate::root_publication::validate_registered_root_publications(&ethereum, &roots)
-                .await
-                .is_err(),
-            "re-included root silently changed its pinned inclusion"
+            crate::root_publication::validate_registered_root_publications(
+                &ethereum,
+                &roots,
+                &root_path.with_extension("audit")
+            )
+            .await
+            .is_err(),
+            "the explicit rewind across authenticated finality must not admit a moved root"
         );
         ensure!(
             fs::read(&root_path)? == original_root_intent,

@@ -534,7 +534,21 @@ fn finalized_receipt_has_required_confirmations(included: u64, head: u64, requir
         .checked_add(required.saturating_sub(1))
         .is_some_and(|confirmed| head >= confirmed)
 }
-fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxWatch {
+fn watch_tx(api: EthApi, request: TrackedRequest, confirmations: u64) -> TxWatch {
+    watch_tx_with_recheck(api, request, confirmations, |_| {
+        tokio::time::sleep(TX_VISIBILITY_RECHECK_DELAY.max(BASE_RETRY_DELAY))
+    })
+}
+
+// Keep the recheck boundary explicit so tests can advance finality only after a
+// complete observation, without canceling authentication or racing wall time.
+// Some((included, finalized)) distinguishes insufficient confirmations from errors.
+fn watch_tx_with_recheck<F: std::future::Future<Output = ()> + Send + 'static>(
+    mut api: EthApi,
+    request: TrackedRequest,
+    confirmations: u64,
+    mut recheck: impl FnMut(Option<(u64, u64)>) -> F + Send + 'static,
+) -> TxWatch {
     Box::pin(async move {
         let hold = |diagnostic: String| SubmissionOutcome::NeedsReconciliation {
             diagnostic,
@@ -579,6 +593,7 @@ fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxW
             return (request, hold(error.to_string()));
         }
         loop {
+            let mut awaiting_confirmations = None;
             match api.get_finalized_receipt(request.tx_hash).await {
                 Ok(Some(receipt)) => {
                     if finalized_receipt_has_required_confirmations(
@@ -610,6 +625,11 @@ fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxW
                                 return (request, hold(diagnostic));
                             }
                         }
+                    } else {
+                        awaiting_confirmations = Some((
+                            receipt.included_block_number,
+                            receipt.finalized_block_number,
+                        ));
                     }
                 }
                 Ok(None) => {
@@ -656,7 +676,7 @@ fn watch_tx(mut api: EthApi, request: TrackedRequest, confirmations: u64) -> TxW
                     }
                 }
             }
-            tokio::time::sleep(TX_VISIBILITY_RECHECK_DELAY.max(BASE_RETRY_DELAY)).await;
+            recheck(awaiting_confirmations).await;
         }
     })
 }
@@ -701,6 +721,7 @@ pub(crate) mod tests {
             evm_manager: token_delivery.then_some(Address::from(message.destination)),
             token_delivery_required: token_delivery,
             original_hash: None,
+            max_gas_per_message: Some(1_000_000),
         }
     }
 
@@ -1502,6 +1523,7 @@ pub(crate) mod tests {
         )
         .await?;
         let api = api
+            .with_max_gas_per_message(Some(1_000_000))
             .with_beacon_finality(beacon.config.clone(), &beacon.directory.join("store"))
             .await?
             .with_data_witness(&witness_url, 31337, state.chain[0].header.hash)
@@ -1684,7 +1706,7 @@ pub(crate) mod tests {
         *rpc.state.receipt.lock().unwrap() = rpc.state.canonical_receipt.clone();
         let request = &rpc.state.request;
         let signed = request.submission.as_ref().unwrap();
-        let guard = rpc.api.reserve_submission().await;
+        let guard = rpc.api.reserve_submission().await?;
         for fault in [
             RpcFault::Governance,
             RpcFault::Manager,
@@ -1833,7 +1855,7 @@ pub(crate) mod tests {
         forged["cumulativeGasUsed"] = json!("0x9999");
         *rpc.state.receipt.lock().unwrap() = forged;
         rpc.state.finalized_height.store(107, Ordering::SeqCst);
-        let guard = rpc.api.reserve_submission().await;
+        let guard = rpc.api.reserve_submission().await?;
         let result = tokio::time::timeout(
             Duration::from_millis(250),
             watch_tx(rpc.api.clone(), request.clone(), 8),
@@ -1861,39 +1883,76 @@ pub(crate) mod tests {
         for valid in [true, false] {
             let rpc = watch_rpc_with_policy(true, valid).await?;
             let request = rpc.state.request.clone();
-            let signed = request.submission.as_ref().unwrap();
-            let mut receipt =
-                serde_json::to_value(evidence(&request.message, signed, true).receipt)?;
-            receipt["blockHash"] = json!(rpc.state.chain[100].header.hash);
-            for log in receipt["logs"].as_array_mut().unwrap() {
-                log["blockHash"] = json!(rpc.state.chain[100].header.hash);
+            *rpc.state.receipt.lock().unwrap() = rpc.state.canonical_receipt.clone();
+            let ownership = rpc.api.reserve_submission().await?;
+            let (rechecks, mut waiting) = mpsc::unbounded_channel();
+            let mut watcher =
+                watch_tx_with_recheck(rpc.api.clone(), request.clone(), 8, move |observation| {
+                    let (resume, wait) = tokio::sync::oneshot::channel::<()>();
+                    rechecks
+                        .send((observation, resume))
+                        .expect("test must observe every recheck");
+                    async move { wait.await.expect("test must release the recheck") }
+                });
+
+            // One uninterrupted original reaches the real pending boundary at
+            // both one and seven finalized confirmations. Latest is already 107.
+            // The old 100ms cancellation proved neither completed authentication
+            // nor pending status; its subsequent 1s deadline raced signed Beacon
+            // verification, paired RPCs and durable writes under suite load.
+            for (finalized, next) in [(100, 106), (106, 107)] {
+                let (observation, resume) = tokio::select! {
+                    (_, outcome) = &mut watcher => {
+                        panic!("finalized height {finalized} completed before eight confirmations: {outcome:?}");
+                    }
+                    pending = waiting.recv() => pending.expect("watcher must remain pending"),
+                };
+                assert_eq!(
+                    observation,
+                    Some((100, finalized)),
+                    "pending must follow authenticated receipt qualification, not an RPC failure"
+                );
+                assert_eq!(rpc.state.finalized_height.load(Ordering::SeqCst), finalized);
+                assert_eq!(rpc.state.head.load(Ordering::SeqCst), 107);
+                assert!(futures::poll!(&mut watcher).is_pending());
+                assert!(futures::poll!(Box::pin(rpc.api.reserve_submission())).is_pending());
+                rpc.advance_finalized_to(next);
+                resume.send(()).expect("same watcher must resume");
             }
-            if !valid {
-                receipt["logs"].as_array_mut().unwrap().pop();
-            }
-            *rpc.state.receipt.lock().unwrap() = receipt;
-            assert!(
-                tokio::time::timeout(
-                    Duration::from_millis(100),
-                    watch_tx(rpc.api.clone(), request.clone(), 8)
-                )
-                .await
-                .is_err(),
-                "latest confirmations are not finality"
-            );
-            rpc.state.finalized_height.store(107, Ordering::SeqCst);
-            let (_, outcome) = tokio::time::timeout(
-                Duration::from_secs(1),
-                watch_tx(rpc.api.clone(), request, 8),
-            )
-            .await?;
+
+            let (saved, outcome) = tokio::select! {
+                result = &mut watcher => result,
+                _ = waiting.recv() => {
+                    panic!("eight finalized confirmations must produce completion or a token-effect HOLD");
+                }
+            };
+            assert_eq!(saved.tx_uuid, request.tx_uuid);
+            assert_eq!(saved.tx_hash, request.tx_hash);
+            assert!(saved.submission == request.submission);
+            assert!(futures::poll!(Box::pin(rpc.api.reserve_submission())).is_pending());
             if valid {
-                assert!(expect_completed(outcome)?.token_delivery);
+                let completed = expect_completed(outcome)?;
+                assert!(completed.token_delivery);
+                assert_eq!(completed.receipt.transaction_hash, request.tx_hash);
+                assert_eq!(completed.finalized_block_number, 107);
+                validate_completion(
+                    &request.message,
+                    request.submission.as_ref().unwrap(),
+                    &completed,
+                )?;
             } else {
                 assert!(matches!(outcome, SubmissionOutcome::NeedsReconciliation {
                     diagnostic, nonce_disposition: None,
                 } if diagnostic.contains("lacks exactly one")));
             }
+            assert!(!rpc
+                .state
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|call| { call["method"].as_str().unwrap().starts_with("eth_send") }));
+            drop(ownership);
         }
         Ok(())
     }
@@ -2456,6 +2515,7 @@ pub(crate) mod tests {
                 block: GearBlockNumber(42),
                 block_hash: H256::repeat_byte(99),
                 authority_set_id: AuthoritySetId(5),
+                queue_id: Some(0),
             };
             let mut tx = Transaction::new(message, TxStatus::Completed);
             tx.uuid = Uuid::from_u128(index as u128 + 1);
@@ -2559,15 +2619,15 @@ pub(crate) mod tests {
             .with_lane_approvals(rpc.api.clone(), approvals);
         restarted.load_from_storage().await?;
         *rpc.state.witness_fault.lock().unwrap() = RpcFault::WrongChain;
-        assert!(restarted
-            .verify_completed(&rpc.api.reconnect().await?)
-            .await
-            .is_err());
+        // Reconnect now qualifies both identities before returning a transport.
+        assert!(rpc.api.reconnect().await.is_err());
+        assert!(restarted.verify_completed(&rpc.api).await.is_err());
         for (uuid, bytes) in &upgraded {
             assert_eq!(&std::fs::read(directory.0.join(uuid.to_string()))?, bytes);
         }
         *rpc.state.witness_fault.lock().unwrap() = RpcFault::None;
-        restarted.verify_completed(&rpc.api).await?;
+        let reconnected = rpc.api.reconnect().await?;
+        restarted.verify_completed(&reconnected).await?;
         for (uuid, bytes) in &upgraded {
             assert_eq!(&std::fs::read(directory.0.join(uuid.to_string()))?, bytes);
         }
@@ -2895,7 +2955,7 @@ pub(crate) mod tests {
             submission: Some(signed.clone()),
             lane_policy: Some(lane_policy(&message, &signed, genesis, false)),
         };
-        let ownership = api.reserve_submission().await;
+        let ownership = api.reserve_submission().await?;
         assert_forwarded_hold(
             &api,
             &request,

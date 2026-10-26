@@ -29,6 +29,7 @@ import {BaseConstants} from "test/BaseConstants.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
 import {VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {GovernanceControl, LegacyControl} from "src/interfaces/IMessageQueue.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
 import {ERC20ManagerPacker, TransferMessage} from "src/libraries/packing/ERC20ManagerPacker.sol";
 import {
@@ -179,9 +180,10 @@ abstract contract Base is
             assertFalse(messageQueue.isChallengingRoot());
             assertFalse(messageQueue.isEmergencyStopped());
 
+            _upgradeRetainedManager();
             uint256 genesis = messageQueue.genesisBlock();
             uint256 firstGovernanceBlock = messageQueue.maxBlockNumber() + 1;
-            uint256 legacyMax = firstGovernanceBlock + 1;
+            uint256 legacyMax = firstGovernanceBlock + 3;
             uint256 floor = legacyMax + 1;
             require(floor < type(uint32).max - 2, "migration height overflow");
             address newImplementation1 = address(new MessageQueue());
@@ -197,24 +199,39 @@ abstract contract Base is
             forkBeefy.rootProof(uint32(floor), keccak256("migration bootstrap"));
 
             messageNonce = 100_000_000;
-            VaraMessage[2] memory messages;
+            VaraMessage[4] memory messages;
             messages[0] = VaraMessage(
                 messageNonce++,
                 governancePauser.governance(),
                 address(governancePauser),
-                PauseProxyMessage(address(messageQueue)).pack()
+                abi.encodePacked(uint8(1), address(messageQueue)) // Exact retained pre-envelope wire body.
             );
             messages[1] = VaraMessage(
                 messageNonce++, governanceAdmin.governance(), address(governanceAdmin), retainedUpgradePayload(plan)
             );
-            // Only pause and atomic upgrade are authorized before the cutover.
+            messages[2] = VaraMessage(
+                messageNonce++, governanceAdmin.governance(), address(governanceAdmin), retainedRecoveryPayload(plan)
+            );
+            plan.migrationControl = LegacyControl(
+                messages[1], firstGovernanceBlock + 1, 1, 0, new bytes32[](0), uint64(block.timestamp + 1 days)
+            );
+            plan.recoveryControl = LegacyControl(
+                messages[2], firstGovernanceBlock + 2, 1, 0, new bytes32[](0), uint64(block.timestamp + 1 days)
+            );
+            messages[3] = VaraMessage(
+                messageNonce++, governanceAdmin.governance(), address(governanceAdmin), retainedFreezePayload(plan)
+            );
             for (uint256 i; i < messages.length; ++i) {
                 assertFalse(messageQueue.isProcessed(messages[i].nonce));
                 _registerForkGovernanceRoot(
                     plan,
                     firstGovernanceBlock + i,
                     messages[i],
-                    i == 0 ? GovernanceAction.Pause : GovernanceAction.Upgrade
+                    i == 0
+                        ? GovernanceAction.Pause
+                        : i == 1
+                            ? GovernanceAction.Upgrade
+                            : i == 2 ? GovernanceAction.Recovery : GovernanceAction.Freeze
                 );
             }
             vm.warp(block.timestamp + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
@@ -222,21 +239,20 @@ abstract contract Base is
                 plan, _forkDelivery(firstGovernanceBlock, messages[0], ""), GovernanceAction.Pause
             );
             assertTrue(messageQueue.paused());
-            vm.record();
+            executeRetainedGovernance(
+                plan, _forkDelivery(firstGovernanceBlock + 3, messages[3], ""), GovernanceAction.Freeze
+            );
+            bytes32[14] memory retainedSlots;
+            for (uint256 i; i < 14; ++i) {
+                retainedSlots[i] = vm.load(address(messageQueue), bytes32(i));
+            }
             executeRetainedGovernance(
                 plan, _forkDelivery(firstGovernanceBlock + 1, messages[1], ""), GovernanceAction.Upgrade
             );
-            (, bytes32[] memory writes) = vm.accesses(address(messageQueue));
-            bytes32 initializerSlot = vm.parseJsonBytes32(legacyArtifact, ".initializableSlot");
-            bytes32 processedSlot = keccak256(abi.encode(messages[1].nonce, uint256(13)));
-            for (uint256 i; i < writes.length; ++i) {
-                assertTrue(
-                    writes[i] == ERC1967Utils.IMPLEMENTATION_SLOT || writes[i] == initializerSlot
-                        || writes[i] == bytes32(uint256(5)) || writes[i] == bytes32(uint256(14))
-                        || writes[i] == bytes32(uint256(16)) || writes[i] == processedSlot,
-                    "migration overwrote retained queue state"
-                );
+            for (uint256 i; i < 14; ++i) {
+                if (i != 5) assertEq(vm.load(address(messageQueue), bytes32(i)), retainedSlots[i]);
             }
+            bytes32 initializerSlot = vm.parseJsonBytes32(legacyArtifact, ".initializableSlot");
             assertEq(uint64(uint256(vm.load(address(messageQueue), initializerSlot))), 8);
             assertEq(
                 address(uint160(uint256(vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT)))),
@@ -253,7 +269,7 @@ abstract contract Base is
             assertTrue(messageQueue.hasRole(messageQueue.PAUSER_ROLE(), address(governancePauser)));
             verifyRetainedPoststate(plan, true);
             for (uint256 i; i < messages.length; ++i) {
-                assertTrue(messageQueue.isProcessed(messages[i].nonce));
+                assertEq(messageQueue.isProcessed(messages[i].nonce), i != 2); // Recovery disabled, never executed.
                 assertEq(messageQueue.getMerkleRoot(firstGovernanceBlock + i), messages[i].hash());
             }
             // Test-only finality observations: model the canonical head 64 slots after each inclusion.
@@ -275,6 +291,10 @@ abstract contract Base is
                 FinalizedPin(vm.getBlockNumber(), keccak256("fixture empty publication"), vm.getBlockTimestamp());
             vm.roll(vm.getBlockNumber() + 64);
             vm.warp(vm.getBlockTimestamp() + 768);
+            vm.setBlockhash(barrier.publication.state.number, barrier.publication.state.blockHash);
+            messageQueue.captureMigrationPublicationHash(barrier.sourceBlock);
+            vm.prank(address(governanceAdmin)); // Fixture-only finalized attestation, not production approval.
+            messageQueue.recordMigrationBarrier(barrier.sourceBlock, barrier.publication.state.blockHash);
             barrier.publication.head =
                 FinalizedPin(vm.getBlockNumber(), keccak256("fixture empty observation head"), vm.getBlockTimestamp());
             barrier.publication.observedAt = vm.getBlockTimestamp();
@@ -284,16 +304,34 @@ abstract contract Base is
                 messageNonce++,
                 governancePauser.governance(),
                 address(governancePauser),
-                UnpauseProxyMessage(address(messageQueue)).pack()
+                UnpauseProxyMessage(address(messageQueue))
+                    .pack(
+                        GovernanceControl(
+                            uint64(messageNonce),
+                            uint64(block.timestamp + 1 days),
+                            messageQueue.incidentEpoch(address(messageQueue)),
+                            messageQueue.migrationAdminAction(),
+                            messageQueue.migrationBarrier()
+                        )
+                    )
             );
             GovernanceDelivery memory delivery =
                 _forkDelivery(floor + 1, unpause, forkBeefy.rootProofForEpoch(uint32(floor + 1), unpause.hash(), 2));
+            delivery.control = GovernanceControl(
+                uint64(messageNonce),
+                uint64(block.timestamp + 1 days),
+                messageQueue.incidentEpoch(address(messageQueue)),
+                messageQueue.migrationAdminAction(),
+                messageQueue.migrationBarrier()
+            );
             registerRetainedUnpauseRoot(plan, delivery, barrier);
             vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
             executeRetainedUnpause(plan, delivery, barrier);
             verifyRetainedPoststate(plan, false);
             assertTrue(messageQueue.isProcessed(unpause.nonce));
             currentBlockNumber = floor + 2;
+            vm.prank(address(governanceAdmin));
+            erc20Manager.unpause();
             messageQueueAssertions(address(messageQueue));
             erc20ManagerAssertions(address(erc20Manager));
             bridgingPaymentAssertions();
@@ -328,7 +366,55 @@ abstract contract Base is
         pure
         returns (GovernanceDelivery memory)
     {
-        return GovernanceDelivery(height, message.hash(), proof, 1, 0, message, new bytes32[](0));
+        return GovernanceDelivery(
+            height,
+            message.hash(),
+            proof,
+            1,
+            0,
+            message,
+            new bytes32[](0),
+            GovernanceControl(0, 0, 0, bytes32(0), bytes32(0))
+        );
+    }
+
+    /// Reconstructed from HTML7fe1b032 D6: actual archived proxy, no replacement retained handlers.
+    function _upgradeRetainedManager() private {
+        address[] memory tokens = erc20Manager.tokens();
+        address[] memory payments = erc20Manager.bridgingPayments();
+        bytes32[] memory managers = erc20Manager.vftManagers();
+        uint256[] memory balances = new uint256[](tokens.length);
+        uint256[] memory supplies = new uint256[](tokens.length);
+        IERC20Manager.TokenType[] memory types = new IERC20Manager.TokenType[](tokens.length);
+        bytes32 initializer = vm.load(address(erc20Manager), RETAINED_INITIALIZER_SLOT);
+        for (uint256 i; i < tokens.length; ++i) {
+            balances[i] = IERC20Metadata(tokens[i]).balanceOf(address(erc20Manager));
+            supplies[i] = IERC20Metadata(tokens[i]).totalSupply();
+            types[i] = erc20Manager.getTokenType(tokens[i]);
+        }
+        address oldImplementation =
+            address(uint160(uint256(vm.load(address(erc20Manager), ERC1967Utils.IMPLEMENTATION_SLOT))));
+        require(oldImplementation.code.length != 0, "actual retained manager implementation unavailable");
+        ERC20Manager replacement = new ERC20Manager();
+        vm.prank(address(governanceAdmin));
+        erc20Manager.upgradeToAndCall(address(replacement), "");
+        assertEq(erc20Manager.tokens(), tokens);
+        assertEq(erc20Manager.bridgingPayments(), payments);
+        assertEq(erc20Manager.vftManagers(), managers);
+        assertEq(vm.load(address(erc20Manager), RETAINED_INITIALIZER_SLOT), initializer);
+        assertEq(erc20Manager.messageQueue(), address(messageQueue));
+        assertEq(erc20Manager.governanceAdmin(), address(governanceAdmin));
+        assertEq(erc20Manager.governancePauser(), address(governancePauser));
+        assertTrue(erc20Manager.hasRole(erc20Manager.DEFAULT_ADMIN_ROLE(), address(governanceAdmin)));
+        assertTrue(erc20Manager.hasRole(erc20Manager.PAUSER_ROLE(), address(governancePauser)));
+        for (uint256 i; i < tokens.length; ++i) {
+            assertEq(IERC20Metadata(tokens[i]).balanceOf(address(erc20Manager)), balances[i]);
+            assertEq(IERC20Metadata(tokens[i]).totalSupply(), supplies[i]);
+            assertTrue(erc20Manager.tokenAdmissionEnabled(tokens[i]));
+            assertEq(uint256(erc20Manager.getTokenType(tokens[i])), uint256(types[i]));
+        }
+        vm.prank(address(governanceAdmin));
+        erc20Manager.pause();
     }
 
     function _forkMigrationPlan(
@@ -352,11 +438,10 @@ abstract contract Base is
         p.retainedState = new StatePin[](tokens.length + 2);
         for (uint256 i; i < tokens.length; ++i) {
             p.tokens[i] = Identity(tokens[i], tokens[i].codehash);
-            IERC20Metadata token = IERC20Metadata(tokens[i]);
             p.retainedState[i] = StatePin(
-                tokens[i],
-                abi.encodeCall(token.balanceOf, (address(erc20Manager))),
-                keccak256(abi.encode(token.balanceOf(address(erc20Manager))))
+                address(erc20Manager),
+                abi.encodeCall(erc20Manager.getTokenType, (tokens[i])),
+                keccak256(abi.encode(erc20Manager.getTokenType(tokens[i])))
             );
         }
         p.retainedState[tokens.length] = StatePin(
@@ -392,6 +477,8 @@ abstract contract Base is
         p.bootstrap.nextSet = BeefyClient.ValidatorSet(id, length, root);
         p.recovery = Identity(beefyRecoveryTimelock, beefyRecoveryTimelock.codehash);
         p.recoveryDelay = 1 hours;
+        p.finalityMargin = 15 minutes;
+        p.operationalMargin = 1 hours;
         p.recoveryRoles = new RolePin[](1);
         p.recoveryRoles[0] =
             RolePin(TimelockController(payable(beefyRecoveryTimelock)).PROPOSER_ROLE(), address(this), true);
@@ -413,8 +500,15 @@ abstract contract Base is
         p.retainedProxies = proxies;
     }
 
-    function _deployVerifier(uint256 chainId, address messageQueueAddress) internal override returns (IVerifier) {
-        if (deploymentArguments.privateKey != 0) return super._deployVerifier(chainId, messageQueueAddress);
+    function _deployVerifier(uint256 chainId, address messageQueueAddress)
+        internal
+        virtual
+        override
+        returns (IVerifier)
+    {
+        if (deploymentArguments.privateKey != 0) {
+            return super._deployVerifier(chainId, messageQueueAddress);
+        }
         forkBeefy = new ForkBeefyFixture(MessageQueue(messageQueueAddress), 1, true);
         beefyClient = forkBeefy.client();
         return forkBeefy.verifier();
@@ -423,6 +517,29 @@ abstract contract Base is
     function _rootProof(uint256 sourceBlock, bytes32 root) internal returns (bytes memory) {
         require(sourceBlock <= type(uint32).max, "source block exceeds uint32");
         return forkBeefy.rootProof(uint32(sourceBlock), root);
+    }
+
+    function _control() internal view returns (GovernanceControl memory) {
+        require(messageNonce < type(uint64).max);
+        return GovernanceControl(uint64(messageNonce + 1), uint64(block.timestamp + 30 days), 0, bytes32(0), bytes32(0));
+    }
+
+    /// @dev Fresh tests obtain a real completed admin capability, never a fabricated dependency hash.
+    function _unpauseControl(address target) internal returns (GovernanceControl memory control) {
+        VaraMessage memory authorization = VaraMessage(
+            messageNonce++,
+            governanceAdmin.governance(),
+            address(governanceAdmin),
+            PauseProxyMessage(target).pack(_control())
+        );
+        uint256 height = currentBlockNumber++;
+        messageQueue.submitMerkleRoot(height, authorization.hash(), _rootProof(height, authorization.hash()));
+        vm.warp(block.timestamp + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
+        messageQueue.processMessage(height, 1, 0, authorization, new bytes32[](0));
+        ++messageNonce; // Reserve a strictly newer capability than the admin authorization above.
+        control = _control();
+        control.incidentEpoch = messageQueue.incidentEpoch(target);
+        control.requiredAdminAction = authorization.hash();
     }
 
     function messageQueueAssertions(address messageQueueAddress) public view {

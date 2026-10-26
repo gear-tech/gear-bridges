@@ -75,7 +75,7 @@ impl Proofs {
             receipt_rlp,
         } = self;
 
-        let receipt = decode_and_check_receipt(&receipt_rlp)?;
+        decode_and_check_receipt(&receipt_rlp)?;
 
         let network = ServiceState::new(GStdRemoting)
             .network()
@@ -98,10 +98,9 @@ impl Proofs {
 
         let trie = TrieDB::new(&memory_db, &receipts_root).map_err(|_| Error::TrieDbFailure)?;
 
-        let (key_db, value_db) =
-            eth_utils::rlp_encode_index_and_receipt(&transaction_index, &receipt);
+        let key_db = eth_utils::rlp_encode_transaction_index(&transaction_index);
         match trie.get(&key_db) {
-            Ok(Some(found_value)) if found_value == value_db => Ok(CheckedProofs {
+            Ok(Some(found_value)) if found_value == receipt_rlp => Ok(CheckedProofs {
                 receipt_rlp,
                 transaction_index,
                 block_number,
@@ -113,14 +112,8 @@ impl Proofs {
 }
 
 fn decode_and_check_receipt(receipt_rlp: &[u8]) -> Result<ReceiptEnvelope, Error> {
-    use alloy_rlp::Decodable;
-
-    let mut input = receipt_rlp;
-    let receipt =
-        ReceiptEnvelope::decode(&mut input).map_err(|_| Error::DecodeReceiptEnvelopeFailure)?;
-    if !input.is_empty() {
-        return Err(Error::DecodeReceiptEnvelopeFailure);
-    }
+    let receipt = eth_utils::decode_canonical_receipt(receipt_rlp)
+        .map_err(|_| Error::DecodeReceiptEnvelopeFailure)?;
     if receipt
         .as_receipt()
         .and_then(|receipt| receipt.status.as_eip658())

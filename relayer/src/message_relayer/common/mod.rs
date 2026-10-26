@@ -80,11 +80,104 @@ pub struct EthereumBlockNumber(pub u64);
 pub struct EthereumSlotNumber(pub u64);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MessageInBlock {
     pub message: Message,
     pub block: GearBlockNumber,
     pub block_hash: H256,
     pub authority_set_id: AuthoritySetId,
+    /// Absent only in retained pre-QueueId journals; never eligible until requalified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_id: Option<u64>,
+}
+
+impl MessageInBlock {
+    /// Compare immutable source identity without rewriting legacy evidence.
+    pub fn same_original(&self, other: &Self) -> bool {
+        self.message == other.message
+            && self.block == other.block
+            && self.block_hash == other.block_hash
+            && self.authority_set_id == other.authority_set_id
+            && match (self.queue_id, other.queue_id) {
+                (Some(a), Some(b)) => a == b,
+                _ => true,
+            }
+    }
+
+    pub async fn qualify_queue(&mut self, api: &gear_rpc_client::GearApi) -> anyhow::Result<u64> {
+        let queue_id = gear::queue_id_at(api, self.block.0, self.block_hash).await?;
+        self.qualify_queue_observation(
+            queue_id,
+            api.signed_by_authority_set_id(self.block_hash).await?,
+            &api.message_queued_events(self.block_hash).await?,
+        )?;
+        Ok(queue_id)
+    }
+
+    fn qualify_queue_observation(
+        &mut self,
+        queue_id: u64,
+        set_id: u64,
+        events: &[Message],
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.queue_id.is_none_or(|saved| saved == queue_id)
+                && set_id == self.authority_set_id.0
+                && events.contains(&self.message),
+            "HOLD: original message/QueueId/set differs from finalized source evidence"
+        );
+        self.queue_id = Some(queue_id);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod queue_identity_tests {
+    use super::*;
+
+    /// Reconstructed from supplied HTML VB-15 / audited 7fe1b032.
+    #[test]
+    fn legacy_rehydration_preserves_original_and_missing_evidence_holds() {
+        let mut message = MessageInBlock {
+            message: Message {
+                nonce_be: [1; 32],
+                source: [2; 32],
+                destination: [3; 20],
+                payload: vec![4],
+            },
+            block: GearBlockNumber(42),
+            block_hash: H256::repeat_byte(5),
+            authority_set_id: AuthoritySetId(8),
+            queue_id: None,
+        };
+        let legacy = serde_json::to_vec(&message).unwrap();
+        let original = message.clone();
+        assert!(message.qualify_queue_observation(9, 8, &[]).is_err());
+        assert_eq!(message, original);
+        assert!(message
+            .qualify_queue_observation(9, 7, std::slice::from_ref(&original.message))
+            .is_err());
+        assert_eq!(message, original);
+        message
+            .qualify_queue_observation(9, 8, std::slice::from_ref(&original.message))
+            .unwrap();
+        assert_eq!(message.queue_id, Some(9));
+        assert!(message.same_original(&original));
+        let restored: MessageInBlock =
+            serde_json::from_slice(&serde_json::to_vec(&message).unwrap()).unwrap();
+        assert_eq!(restored, message);
+        assert_eq!(
+            serde_json::from_slice::<MessageInBlock>(&legacy).unwrap(),
+            original
+        );
+        assert!(message
+            .qualify_queue_observation(10, 8, &[original.message])
+            .is_err());
+        assert_eq!(message, restored);
+        let mut unknown: serde_json::Value = serde_json::from_slice(&legacy).unwrap();
+        unknown["future_identity"] = serde_json::json!("must not disappear");
+        assert!(serde_json::from_value::<MessageInBlock>(unknown).is_err());
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -93,12 +186,22 @@ pub struct PaidMessage {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RelayedMerkleRoot {
     pub block: GearBlockNumber,
     pub block_hash: H256,
     pub timestamp: u64,
     pub authority_set_id: AuthoritySetId,
     pub merkle_root: H256,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_id: Option<u64>,
+}
+
+impl RelayedMerkleRoot {
+    /// Coverage refers to this actual publication, never an earlier registered root.
+    pub fn covers(&self, queue_id: u64, block: GearBlockNumber) -> bool {
+        self.queue_id == Some(queue_id) && self.block >= block
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -10,8 +10,8 @@ mod cutover;
 mod error;
 mod token_mapping;
 pub use cutover::{
-    handle_upgrade_reply, CustodyTransferAttempt, CustodyTransferOutcome, CutoverPhase,
-    CutoverStatus,
+    handle_upgrade_reply, CustodyTransferAttempt, CustodyTransferOutcome, CutoverAbort,
+    CutoverPhase, CutoverStatus,
 };
 
 use error::Error;
@@ -268,6 +268,12 @@ pub struct State {
     is_paused: bool,
     native_wrapper: Option<NativeWrapperConfig>,
     cutover: CutoverStatus,
+    cutover_prior: Option<CutoverStatus>,
+    cutover_aborts: collections::BTreeMap<u64, CutoverAbort>,
+    custody_preflight: usize,
+    custody_cursor: usize,
+    custody_final_cursor: usize,
+    custody_active: u32,
     frozen_mappings: Vec<(ActorId, H160, TokenSupply)>,
     custody_transfers: Vec<CustodyTransferAttempt>,
     custody_latest: collections::BTreeMap<ActorId, usize>,
@@ -287,6 +293,9 @@ pub struct InitConfig {
     ///
     /// For more info see [State::historical_proxy_address].
     pub historical_proxy_address: ActorId,
+    /// Immutable inclusive receipt floor from the approved starting checkpoint.
+    /// A successor must be constructed with its cutover boundary plus one.
+    pub minimum_receipt_slot: u64,
     /// Config that will be used to send messages to the other programs.
     ///
     /// For more info see [Config].
@@ -398,7 +407,9 @@ impl VftManager {
         slot: u64,
         transaction_index: u64,
     ) -> Result<ReceiptStatus, Error> {
+        assert!(msg::value() == 0, "Reconciliation does not accept value");
         self.ensure_receipt_domain(slot)?;
+        self.ensure_running()?;
         submit_receipt::reconcile_receipt((slot, transaction_index), self.config()).await
     }
 
@@ -439,9 +450,9 @@ impl VftManager {
                 "Native wrapper requires zero minimum balance"
             );
             self.ensure_admin();
-            assert_eq!(
-                self.state().admin,
-                admin,
+            // Avoid Debug operands: ActorId's SS58 diagnostics retain about 9 KiB of instrumented WASM.
+            assert!(
+                self.state().admin == admin,
                 "Wrapper approval authority changed"
             );
             assert_eq!(
@@ -497,9 +508,8 @@ impl VftManager {
         self.ensure_admin();
         self.ensure_economic_mutable();
 
-        assert_ne!(
-            self.state().native_wrapper.map(|wrapper| wrapper.actor_id),
-            Some(vara_token_id),
+        assert!(
+            self.state().native_wrapper.map(|wrapper| wrapper.actor_id) != Some(vara_token_id),
             "Clear native wrapper configuration first"
         );
         let (eth_token_id, supply_type) = self.state_mut().token_map.remove(vara_token_id);
@@ -656,6 +666,10 @@ impl VftManager {
         }
 
         assert!(
+            state.cutover.minimum_receipt_slot > 0,
+            "Receipt deployment floor is not set"
+        );
+        assert!(
             matches!(
                 state.cutover.phase,
                 CutoverPhase::Active | CutoverPhase::Draining | CutoverPhase::Ready
@@ -671,14 +685,6 @@ impl VftManager {
             .expect("Failed to deposit event");
     }
 
-    fn ensure_running(&self) -> Result<(), Error> {
-        if self.state().is_paused || self.is_emergency_stopped() {
-            Err(Error::Paused)
-        } else {
-            Ok(())
-        }
-    }
-
     /// Submit rlp-encoded transaction receipt.
     ///
     /// This receipt is decoded under the hood and checked that it's a valid receipt from tx
@@ -692,6 +698,10 @@ impl VftManager {
         transaction_index: u64,
         receipt_rlp: Vec<u8>,
     ) -> Result<(), Error> {
+        assert!(
+            msg::value() == 0,
+            "Receipt submission does not accept value"
+        );
         self.ensure_receipt_domain(slot)?;
         self.ensure_running()?;
 
@@ -709,13 +719,29 @@ impl VftManager {
         amount: U256,
         receiver: H160,
     ) -> Result<(U256, H160), Error> {
-        self.ensure_source_domain()?;
-        self.ensure_running()?;
-
         let value = msg::value();
         let fee = self.config().fee_incoming;
+        let admission = self
+            .ensure_source_domain()
+            .and_then(|_| self.ensure_running());
+        if let Err(error) = admission {
+            assert!(value == 0, "Rejected request returns attached value");
+            return Err(error);
+        }
         if value != fee {
             panic!("Please attach exactly {fee} value");
+        }
+        let admission = if receiver.is_zero() {
+            Err(Error::InvalidRecipient)
+        } else {
+            self.state()
+                .token_map
+                .get_eth_token_id(&vara_token_id)
+                .map(|_| ())
+        };
+        if let Err(error) = admission {
+            assert!(value == 0, "Rejected request returns attached value");
+            return Err(error);
         }
 
         let sender = Syscall::message_source();
@@ -743,9 +769,40 @@ impl VftManager {
     }
 
     #[export]
-    pub fn begin_cutover(&mut self, destination: ActorId, last_receipt_slot: u64) {
+    pub fn begin_cutover(
+        &mut self,
+        destination: ActorId,
+        last_receipt_slot: u64,
+        expected_generation: u64,
+    ) {
         self.ensure_admin();
-        cutover::begin(self, destination, last_receipt_slot);
+        cutover::begin(self, destination, last_receipt_slot, expected_generation);
+    }
+
+    #[export]
+    pub fn abort_cutover(&mut self, expected_generation: u64) {
+        self.ensure_admin();
+        cutover::abort(self, expected_generation);
+    }
+
+    #[export]
+    pub fn cutover_abort(&self, generation: u64) -> Option<CutoverAbort> {
+        self.state().cutover_aborts.get(&generation).cloned()
+    }
+
+    #[export]
+    pub async fn restore_aborted_cutover(&mut self, expected_generation: u64) {
+        self.ensure_admin();
+        cutover::restore_aborted(self, expected_generation).await;
+    }
+
+    /// Prune only consumed terminal trackers; financial originals remain retained.
+    #[export]
+    pub fn prune_terminal_requests(&mut self, requests: Vec<MessageId>) -> u32 {
+        self.ensure_admin();
+        assert!(self.state().is_paused, "Not paused");
+        assert!(requests.len() <= 100, "At most 100 requests");
+        request_bridging::prune_terminal_requests(requests)
     }
 
     #[export]
@@ -858,7 +915,7 @@ impl VftManager {
     /// Check if an observer's bounded emergency stop is active.
     #[export]
     pub fn is_emergency_stopped(&self) -> bool {
-        exec::block_height() < self.state().emergency_stop_until
+        self.emergency_stop_active()
     }
 
     /// Get the block at which the current or latest emergency stop expires.
@@ -1003,6 +1060,17 @@ impl VftManager {
 }
 
 impl VftManager {
+    fn emergency_stop_active(&self) -> bool {
+        exec::block_height() < self.state().emergency_stop_until
+    }
+
+    fn ensure_running(&self) -> Result<(), Error> {
+        if self.state().is_paused || self.emergency_stop_active() {
+            Err(Error::Paused)
+        } else {
+            Ok(())
+        }
+    }
     fn ensure_native_wrapper_configuration(&self, wrapper: Option<NativeWrapperConfig>) {
         let state = self.state();
         assert!(state.is_paused, "Not paused");
@@ -1022,19 +1090,16 @@ impl VftManager {
                 "Invalid native Ethereum token"
             );
             assert!(!wrapper.code_id.is_zero(), "Invalid native wrapper CodeId");
-            assert_eq!(
-                state.token_map.get_eth_token_id(&wrapper.actor_id),
-                Ok(wrapper.ethereum_token),
+            assert!(
+                state.token_map.get_eth_token_id(&wrapper.actor_id) == Ok(wrapper.ethereum_token),
                 "Native wrapper Ethereum mapping differs"
             );
-            assert_eq!(
-                state.token_map.get_vara_token_id(&wrapper.ethereum_token),
-                Ok(wrapper.actor_id),
+            assert!(
+                state.token_map.get_vara_token_id(&wrapper.ethereum_token) == Ok(wrapper.actor_id),
                 "Native wrapper Gear mapping differs"
             );
-            assert_eq!(
-                state.token_map.get_supply_type(&wrapper.actor_id),
-                Ok(TokenSupply::Gear),
+            assert!(
+                state.token_map.get_supply_type(&wrapper.actor_id) == Ok(TokenSupply::Gear),
                 "Native wrapper must have Gear supply"
             );
         }
@@ -1068,7 +1133,8 @@ impl VftManager {
         if cutover.phase == CutoverPhase::Retired {
             return Err(Error::Retired);
         }
-        if slot < cutover.minimum_receipt_slot
+        if cutover.minimum_receipt_slot == 0
+            || slot < cutover.minimum_receipt_slot
             || cutover.last_receipt_slot.is_some_and(|last| slot > last)
         {
             return Err(Error::ReceiptOutsideDeployment);
@@ -1080,6 +1146,9 @@ impl VftManager {
     }
 
     fn ensure_source_domain(&self) -> Result<(), Error> {
+        if self.state().cutover.minimum_receipt_slot == 0 {
+            return Err(Error::CutoverNotReady);
+        }
         match self.state().cutover.phase {
             CutoverPhase::Active => Ok(()),
             CutoverPhase::Retired => Err(Error::Retired),
@@ -1101,6 +1170,10 @@ impl VftManager {
 
     /// Initialize VFT Manager service.
     pub fn seed(config: InitConfig) {
+        assert!(
+            config.minimum_receipt_slot > 0,
+            "Receipt deployment floor must be positive"
+        );
         unsafe {
             let source = Syscall::message_source();
             STATE = Some(State {
@@ -1114,7 +1187,16 @@ impl VftManager {
                 historical_proxy_address: config.historical_proxy_address,
                 is_paused: true,
                 native_wrapper: None,
-                cutover: CutoverStatus::default(),
+                cutover: CutoverStatus {
+                    minimum_receipt_slot: config.minimum_receipt_slot,
+                    ..CutoverStatus::default()
+                },
+                cutover_prior: None,
+                cutover_aborts: collections::BTreeMap::new(),
+                custody_preflight: 0,
+                custody_cursor: 0,
+                custody_final_cursor: 0,
+                custody_active: 0,
                 frozen_mappings: Vec::new(),
                 custody_transfers: Vec::new(),
                 custody_latest: collections::BTreeMap::new(),

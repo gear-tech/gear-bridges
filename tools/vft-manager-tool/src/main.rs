@@ -32,6 +32,8 @@ enum CliCommands {
     FinalizeCutover(cutover::FinalizeCutover),
     /// Authenticate sealed historical originals without signing or mutating any journal.
     VerifyCutover(cutover::VerifyCutover),
+    /// Abort one exact generation before any custody child; restore its prepared destination.
+    AbortCutover(cutover::AbortCutover),
     ReadTransactions(ReadTransactions),
     HexEncodedMessage(HexEncodedMessageArgs),
 }
@@ -211,6 +213,7 @@ async fn main() -> AnyResult<()> {
         return cutover::verify(&cli.gear.connection, args).await;
     }
     let endpoint = cli.gear.connection.get_endpoint().expect("Invalid URL");
+    gear_common::signer_ownership::validate_suri(&cli.gear.suri, Some(&endpoint))?;
     let gear_api = GearApi::builder()
         .suri(cli.gear.suri)
         .uri(endpoint)
@@ -225,6 +228,7 @@ async fn main() -> AnyResult<()> {
         CliCommands::FinalizeCutover(args) => {
             cutover::finalize(&cli.gear.connection, &gear_api, &args).await?
         }
+        CliCommands::AbortCutover(args) => cutover::abort(&gear_api, &args).await?,
         CliCommands::VerifyCutover(_) => unreachable!("read-only command handled before signer"),
 
         CliCommands::ReadTransactions(args) => {

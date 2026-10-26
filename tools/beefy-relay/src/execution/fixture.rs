@@ -23,6 +23,8 @@ pub(crate) struct FixtureTopology {
     pub owned_network: OwnedFixtureNetwork,
     pub beacon_approval_sha256: B256,
     pub beacon_approval_path: PathBuf,
+    pub root_signer: Address,
+    pub heartbeat_signer: Address,
 }
 
 #[derive(Deserialize)]
@@ -780,9 +782,25 @@ pub(crate) async fn generate(
         &json!({"scope":"local-only-no-production-authorization","authority":authorities["timelock"],
         "soleAdmin":topology.recovery,"proposerExecutorCanceller":topology.safe}),
     )?;
+    let signers = SigningRoles {
+        commitment: Address::from(ethereum.api.sender_address().0),
+        root: topology.root_signer,
+        heartbeat: topology.heartbeat_signer,
+    };
+    // Explicit owned-fixture approval, never a production/default signing policy.
+    let signing_policy = SigningPolicy {
+        commitment_gas_units: 30_000_000,
+        root_gas_units: 30_000_000,
+        max_fee_per_gas: 100_000_000_000,
+        max_priority_fee_per_gas: 100_000_000_000,
+        max_transaction_cost: U256::from(3_000_000_000_000_000_000u64),
+        daily_budget: U256::from(30_000_000_000_000_000_000u128),
+        wallet_warning_reserve: U256::from(1_000_000_000_000_000u64),
+    };
     let report = json!({"scope":"local-only-no-production-authorization", "nativeBootstrap":anchor,
         "beaconApprovalSha256":topology.beacon_approval_sha256,"authorities":authorities,"safeStateReport":safe_report,
-        "recoveryStateReport":recovery_report,"qualification":"owned fixture evidence; not a production safety review"});
+        "recoveryStateReport":recovery_report,"signers":signers,"signingPolicy":signing_policy,
+        "qualification":"owned fixture evidence; not a production safety review"});
     immutable_json(&directory.join("approval-source.json"), &report)?;
     let report_hash = json_sha256(&report)?;
     let manifest = Manifest {
@@ -831,6 +849,9 @@ pub(crate) async fn generate(
             custody_authority_report_sha256: report_hash,
             gear_manager_code_id: manager_code,
             deployment_plan_hash: None,
+            signers: Some(signers),
+            signing_policy: Some(signing_policy),
+            runtime_transitions: Vec::new(),
         },
     };
     let value = serde_json::to_value(manifest)?;

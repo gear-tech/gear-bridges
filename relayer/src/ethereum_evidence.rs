@@ -1255,8 +1255,13 @@ mod tests {
             "0x2"
         );
         // Separate writer stores share only explicit immutable read-only proof sources.
-        let owner_fence_path = owner.directory.join("beacon/headers/fence.json");
+        let owner_fence_path = owner.directory.join("beacon/headers/verified-head.json");
         let owner_fence = fs::read(&owner_fence_path)?;
+        let record: B256 = serde_json::from_slice(&owner_fence)?;
+        let record_path = owner
+            .directory
+            .join(format!("beacon/headers/verified/{record:#x}.json"));
+        let original_record = fs::read(&record_path)?;
         let peer_config = fixture
             .beacon
             .config
@@ -1283,6 +1288,11 @@ mod tests {
             fs::read(&owner_fence_path)?,
             owner_fence,
             "a peer must not replace another owner's header fence with its own proof identity"
+        );
+        assert_eq!(
+            fs::read(&record_path)?,
+            original_record,
+            "a peer must not rewrite another owner's immutable verified record"
         );
         let expected: B256 =
             serde_json::from_value(response["receipts"][0]["proofDigest"].clone())?;

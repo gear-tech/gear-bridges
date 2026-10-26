@@ -62,6 +62,12 @@ use vft_manager_client::{
     traits::VftManager as _, vft_manager::io, CutoverPhase, CutoverStatus, TokenSupply, VftManager,
 };
 
+use seal::preflight::{explicit_success, CoveragePolicy};
+mod preflight;
+use preflight::preflight_liabilities;
+mod abort;
+pub use abort::{abort, AbortCutover};
+
 #[derive(Args, Default)]
 pub struct NativeCapabilityArgs {
     /// Exact independently approved CodeId/ABI/native capability file.
@@ -104,6 +110,12 @@ pub struct PrepareCutover {
     pub native_capability: NativeCapabilityArgs,
     #[arg(long)]
     pub boundary_slot: u64,
+    /// Independently approved JSON coverage policy (deployment original, fee emitters, limits).
+    #[arg(long)]
+    pub coverage_policy: PathBuf,
+    /// Keccak-256 of the exact independently approved policy bytes.
+    #[arg(long)]
+    pub coverage_policy_digest: H256,
     #[arg(long)]
     pub cutover_dir: PathBuf,
     #[arg(long)]
@@ -165,8 +177,30 @@ struct Intent {
     historical_native_wrapper_approval: Option<ApprovedNativeWrapper>,
     initial_role_pins: Vec<RolePin>,
     mappings: Vec<(H256, H160, u8)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    coverage_policy: Option<CoveragePolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cutover_generation: Option<u64>,
 }
 impl Intent {
+    fn historical_receipts(&self) -> Vec<gear_common::receipt_framing::HistoricalReceiptApproval> {
+        self.coverage_policy
+            .as_ref()
+            .map_or_else(Vec::new, |policy| policy.historical_receipts.clone())
+    }
+    fn receipt_bytes_match(
+        &self,
+        proof: &eth_events_electra_client::EthToVaraEvent,
+        receipt: &TransactionReceipt,
+    ) -> bool {
+        seal::preflight::receipt_bytes_match(
+            &proof.receipt_rlp,
+            receipt,
+            self.coverage_policy.as_ref(),
+            self.old_identity.vft_manager_address,
+            proof.proof_block.block.slot,
+        )
+    }
     fn wrapper_approval(&self) -> Option<&ApprovedNativeWrapper> {
         self.native_wrapper_approval
             .as_ref()
@@ -217,6 +251,8 @@ impl Intent {
 #[serde(rename_all = "kebab-case")]
 enum CutoverStep {
     BeginCutover,
+    AbortCutover(u64),
+    RestoreAbortedCutover(u64),
     SourcePause,
     PrepareCutover,
     Upgrade(u32),
@@ -250,6 +286,8 @@ struct Admission {
     original_tx_hash: B256,
     original_block_hash: H256,
     fee_emitter: Option<H160>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fee_emitters: Option<Vec<H160>>,
     admission: String,
     fee_event_observed: bool,
     proof: Vec<u8>,
@@ -263,6 +301,11 @@ struct Admission {
     external_original: Option<seal::CanonicalExternalOriginal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     undispatched_old_admission: Option<Uuid>,
+    /// Retained liability, never a refund or an exclusion; raw receipt lives in its CoveredBlock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unprocessable: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    liability_history: Vec<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -557,8 +600,8 @@ async fn release_owned_signers(
         ApiProviderConnection::from_api(signer.api().clone()),
         &work.intent.old_identity,
         Some(work.intent.erc20_manager),
-        work.intent.wrapper_approval(),
-    );
+        &work.intent,
+    )?;
     authenticate_release_evidence(api, &scanner, &work).await?;
     qualify_work_ethereum(&mut work, &view)?;
     save(path, &work)?;
@@ -831,9 +874,34 @@ fn work_path(directory: &Path) -> PathBuf {
 }
 fn validate_work_version(work: &Work) -> Result<()> {
     ensure!(
-        matches!(work.schema_version, 1..=4),
+        matches!(work.schema_version, 1..=5),
         "HOLD: unsupported cutover work schema"
     );
+    ensure!(
+        (work.schema_version >= 5) == work.intent.coverage_policy.is_some()
+            && (work.schema_version >= 5) == work.intent.cutover_generation.is_some()
+            && work
+                .intent
+                .cutover_generation
+                .is_none_or(|generation| generation > 0)
+            && work
+                .admissions
+                .iter()
+                .all(
+                    |admission| (work.schema_version >= 5) == admission.fee_emitters.is_some()
+                        && (work.schema_version >= 5 || admission.unprocessable.is_none())
+                ),
+        "HOLD: coverage policy/admission schema mismatch"
+    );
+    if let Some(policy) = &work.intent.coverage_policy {
+        policy.validate()?;
+        ensure!(
+            policy.ethereum_chain_id == work.intent.old_identity.ethereum_chain_id
+                && policy.ethereum_genesis_hash == work.intent.old_identity.ethereum_genesis_hash
+                && policy.erc20_manager == work.intent.erc20_manager,
+            "HOLD: coverage policy differs from original lane"
+        );
+    }
     validate_ethereum_qualification(work)?;
     ensure!(
         if work.schema_version >= 3 {
@@ -1004,13 +1072,35 @@ async fn authenticate_work_ethereum(
     }
     view.verify_checkpoints_with_blocks(&**eth, work.ethereum_authentication.as_slice(), &targets)
         .await?;
-    let mut parent = H256::zero();
+    let floor = work
+        .intent
+        .coverage_policy
+        .as_ref()
+        .map_or(0, |policy| policy.deployment_block);
+    if let Some(policy) = &work.intent.coverage_policy {
+        policy.authenticate(eth, view).await?;
+    }
+    let mut parent = work
+        .blocks
+        .first()
+        .map_or(H256::zero(), |block| block.parent_hash);
     for (index, block) in work.blocks.iter().enumerate() {
         ensure!(
-            block.number == u64::try_from(index)?
+            block.number
+                == floor
+                    .checked_add(u64::try_from(index)?)
+                    .context("Coverage overflow")?
                 && block.parent_hash == parent
                 && block.number <= work.intent.boundary.execution_number
-                && (index != 0 || block.hash == work.intent.old_identity.ethereum_genesis_hash),
+                && (index != 0
+                    || block.hash
+                        == work
+                            .intent
+                            .coverage_policy
+                            .as_ref()
+                            .map_or(work.intent.old_identity.ethereum_genesis_hash, |policy| {
+                                policy.deployment_hash
+                            })),
             "HOLD: saved coverage is partial, malformed or disconnected"
         );
         validate_covered_block(block)?;
@@ -1065,12 +1155,20 @@ async fn authenticate_work_ethereum(
             .iter()
             .find(|receipt| receipt.transaction_hash == admission.original_tx_hash)
             .context("HOLD: saved admission receipt missing")?;
+        if admission.unprocessable.is_some() && admission.proof.is_empty() {
+            ensure!(
+                Some(admission.receipt_key.1) == receipt.transaction_index
+                    && is_deposit(receipt, work.intent.erc20_manager)?,
+                "HOLD: blocked liability original changed"
+            );
+            continue;
+        }
         let mut bytes = admission.proof.as_slice();
         let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
         let expected = ethereum_common::utils::map_receipt_envelope(receipt.as_ref());
         ensure!(
             bytes.is_empty()
-                && proof.receipt_rlp == alloy_rlp::encode(&expected)
+                && work.intent.receipt_bytes_match(&proof, receipt)
                 && proof.transaction_index == admission.receipt_key.1
                 && proof.proof_block.block.slot == admission.receipt_key.0
                 && proof
@@ -1103,19 +1201,24 @@ async fn authenticate_work_ethereum(
             &expected.encoded_2718(),
             &proof.proof,
         )?;
-        ensure!(
-            seal::authenticated_fee_emitter(
-                eth,
-                view,
-                work.intent.erc20_manager,
-                work.intent.old_identity.bridging_payment_address,
-                receipt
-            )
-            .await?
-                == admission.fee_emitter
-                && admission.fee_event_observed == admission.fee_emitter.is_some(),
-            "HOLD: saved admission fee policy changed"
-        );
+        let emitters = seal::authenticated_fee_emitters(
+            eth,
+            view,
+            work.intent.erc20_manager,
+            work.intent.old_identity.bridging_payment_address,
+            work.intent
+                .coverage_policy
+                .as_ref()
+                .map(|policy| policy.fee_emitters.as_slice()),
+            receipt,
+        )
+        .await?;
+        seal::validate_fee_evidence(
+            &emitters,
+            admission.fee_emitter,
+            admission.fee_emitters.as_deref(),
+            admission.fee_event_observed,
+        )?;
     }
     if let Some(registration) = &work.registration {
         validate_registration(&work.intent, registration)?;
@@ -1230,16 +1333,33 @@ async fn upgrade_work(api: &GearApi, eth: &PollingEthApi, path: &Path) -> Result
     advance_ethereum_authentication(path, &mut work, &view)?;
     work.intent.native_wrapper_approval = work.intent.wrapper_approval().cloned();
     work.intent.historical_native_wrapper_approval = None;
-    work.schema_version = 4;
+    work.schema_version = work.schema_version.max(4);
     save(path, &work)
 }
 
 fn read_versioned_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     let value: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
     ensure!(
-        matches!(value["schema_version"].as_u64(), Some(1..=4)),
+        matches!(value["schema_version"].as_u64(), Some(1..=5)),
         "HOLD: unsupported cutover evidence schema"
     );
+    if value["schema_version"]
+        .as_u64()
+        .is_some_and(|version| version < 5)
+    {
+        ensure!(
+            value["intent"].get("coverage_policy").is_none()
+                && value["intent"].get("cutover_generation").is_none()
+                && value["admissions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .all(|admission| admission.get("fee_emitters").is_none()
+                        && admission.get("unprocessable").is_none()
+                        && admission.get("liability_history").is_none()),
+            "HOLD: legacy work contains schema5 coverage authority"
+        );
+    }
     if value["schema_version"]
         .as_u64()
         .is_some_and(|version| version < 3)
@@ -1697,9 +1817,9 @@ fn sender(
     provider: ApiProviderConnection,
     identity: &InboundRuntimeIdentity,
     manager: Option<H160>,
-    approval: Option<&ApprovedNativeWrapper>,
-) -> MessageSender {
-    MessageSender::new(
+    intent: &Intent,
+) -> Result<MessageSender> {
+    let sender = MessageSender::new(
         identity.vft_manager_address,
         io::SubmitReceipt::ROUTE.to_vec(),
         identity.historical_proxy_address,
@@ -1707,7 +1827,12 @@ fn sender(
         String::new(),
         manager,
     )
-    .with_native_wrapper_approval(approval.cloned().map(Arc::new))
+    .with_native_wrapper_approval(intent.wrapper_approval().cloned().map(Arc::new))
+    .with_historical_receipt_approvals(intent.historical_receipts())?;
+    match &intent.coverage_policy {
+        Some(policy) => sender.with_approved_gear_gas_limit(policy.max_gas),
+        None => Ok(sender), // Legacy evidence remains readable, but cannot authorize new signing.
+    }
 }
 async fn status(api: &GearApi, id: H256) -> Result<(CutoverStatus, FinalizedCutoverStatus)> {
     let at = api.last_block_hash().await?;
@@ -1862,6 +1987,12 @@ fn validate_call_reply(call: &FinalizedCutoverCall) -> Result<()> {
         CutoverStep::BeginCutover => {
             exact_reply::<io::BeginCutover>(bytes)?;
         }
+        CutoverStep::AbortCutover(_) => {
+            exact_reply::<io::AbortCutover>(bytes)?;
+        }
+        CutoverStep::RestoreAbortedCutover(_) => {
+            exact_reply::<io::RestoreAbortedCutover>(bytes)?;
+        }
         CutoverStep::SourcePause => {
             exact_reply::<io::Pause>(bytes)?;
         }
@@ -1989,16 +2120,21 @@ async fn verify_activation(
             && api.get_block_hash(pin.block_number).await?.as_ref() == pin.block_hash.as_bytes(),
         "HOLD: activation pin no longer canonical finalized"
     );
-    let mut bytes = pin.status.as_slice();
-    let state = CutoverStatus::decode(&mut bytes)?;
-    let historical = VftManager::new(GClientRemoting::new(api.clone()))
-        .cutover_status()
-        .at_block(sails_rs::H256::from_slice(pin.block_hash.as_bytes()))
-        .recv(actor(intent.new_identity.vft_manager_address))
+    let state = seal::decode_status(&pin, intent.coverage_policy.is_none())?;
+    let historical = api
+        .calculate_reply_for_handle_at(
+            None,
+            actor(intent.new_identity.vft_manager_address),
+            io::CutoverStatus::encode_call(),
+            api.block_gas_limit()?,
+            0,
+            Some(pin.block_hash),
+        )
         .await?;
     ensure!(
-        bytes.is_empty()
-            && historical.encode() == pin.status
+        historical.code.is_success()
+            && historical.payload.strip_prefix(io::CutoverStatus::ROUTE)
+                == Some(pin.status.as_slice())
             && state.phase == CutoverPhase::Active
             && state.predecessor == Some(actor(intent.old_identity.vft_manager_address))
             && state.minimum_receipt_slot
@@ -2073,7 +2209,7 @@ fn validate_successor_journals(
 ) -> Result<()> {
     let journal = seal::read_original_journal(transactions)?;
     ensure!(
-        journal.schema_version == 7
+        matches!(journal.schema_version, 7 | 8)
             && journal.runtime_identity.as_ref() == Some(identity)
             && journal.predecessor_cutover.as_ref() == Some(predecessor),
         "HOLD: activated successor journal binding changed"
@@ -2206,9 +2342,26 @@ fn lifecycle_request(intent: &Intent, step: &CutoverStep) -> Result<(ActorId, Ve
             .context("HOLD: missing native policy")
     };
     Ok(match *step {
+        CutoverStep::AbortCutover(generation) => (old, io::AbortCutover::encode_call(generation)),
+        CutoverStep::RestoreAbortedCutover(generation) => {
+            (new, io::RestoreAbortedCutover::encode_call(generation))
+        }
         CutoverStep::BeginCutover => (
             old,
-            io::BeginCutover::encode_call(new, intent.boundary.slot),
+            if let Some(generation) = intent.cutover_generation {
+                io::BeginCutover::encode_call(
+                    new,
+                    intent.boundary.slot,
+                    generation
+                        .checked_sub(1)
+                        .context("HOLD: invalid BeginCutover generation")?,
+                )
+            } else {
+                // Historical schema-1..4 evidence only; never sign this obsolete call again.
+                let mut payload = io::BeginCutover::ROUTE.to_vec();
+                payload.extend((new, intent.boundary.slot).encode());
+                payload
+            },
         ),
         CutoverStep::SourcePause => (old, io::Pause::encode_call()),
         CutoverStep::PrepareCutover => (
@@ -2289,7 +2442,7 @@ async fn verify_proof_attempt(
     proof: &eth_events_electra_client::EthToVaraEvent,
     signed: &SignedSubmission,
 ) -> Result<()> {
-    if signed.message_id.is_some() {
+    if signed.retry_qualification.is_some() || signed.message_id.is_some() {
         return seal::authenticate_archived_native_retry(scanner, proof, signed).await;
     }
     let call = receipt_call(scanner, proof);
@@ -2335,6 +2488,9 @@ async fn reconcile_original(
     signed: &mut SignedSubmission,
     pin: Option<&FinalizedReceiptObservation>,
 ) -> Result<(MessageStatus, Option<std::result::Result<Vec<u8>, String>>)> {
+    scanner
+        .authenticate_retained_receipt_framing(api, proof, signed)
+        .await?;
     if signed.sender == api.account_id().to_string() || pin.is_some() {
         return scanner
             .reconcile_signed_submission(api, proof, signed, pin)
@@ -2667,8 +2823,8 @@ async fn run_cutover_request(
         ApiProviderConnection::from_api(signer.api().clone()),
         &identity,
         Some(work.intent.erc20_manager),
-        work.intent.wrapper_approval(),
-    );
+        &work.intent,
+    )?;
     // Lifecycle calls address token/wrapper services, not SubmitReceipt. The full
     // source/replacement capability was authenticated above before any signing.
     scanner.receiver_route.clear();
@@ -2678,8 +2834,8 @@ async fn run_cutover_request(
             scanner.api_provider.clone(),
             &work.intent.old_identity,
             Some(work.intent.erc20_manager),
-            work.intent.wrapper_approval(),
-        ),
+            &work.intent,
+        )?,
         &work,
     )
     .await?;
@@ -2723,6 +2879,8 @@ async fn run_cutover_request(
         );
         index
     } else {
+        ensure!(step != CutoverStep::BeginCutover || work.intent.cutover_generation.is_some(),
+            "HOLD: legacy BeginCutover original is read-only; new signing requires approved generation");
         ensure_call_authority(api, &step, target).await?;
         view.recheck(&**eth).await?;
         let original = scanner
@@ -2788,13 +2946,17 @@ async fn fee_emitter(
     eth: &PollingEthApi,
     intent: &Intent,
     receipt: &TransactionReceipt,
-) -> Result<Option<H160>> {
+) -> Result<Vec<H160>> {
     let mut view = eth.verified_finalized_view().await?;
-    seal::authenticated_fee_emitter(
+    seal::authenticated_fee_emitters(
         eth,
         &mut view,
         intent.erc20_manager,
         intent.old_identity.bridging_payment_address,
+        intent
+            .coverage_policy
+            .as_ref()
+            .map(|policy| policy.fee_emitters.as_slice()),
         receipt,
     )
     .await
@@ -3074,6 +3236,7 @@ async fn discover_external_originals(
                 finalized_reply: None,
                 native_wrapper_approval: None,
                 native_retry_qualification: None,
+                retry_qualification: None,
                 native_reconciliation: None,
                 native_reconciliation_attempts: vec![],
                 finalized_nonce_consumed: None,
@@ -3297,7 +3460,7 @@ async fn authenticate_exclusion(
         .as_ref()
         .context("HOLD: exclusion pin missing")?;
     ensure!(
-        matches!(work.schema_version, 2..=4) && admission.settlement.is_none(),
+        matches!(work.schema_version, 2..=5) && admission.settlement.is_none(),
         "HOLD: settlement/exclusion conflict"
     );
     let mut bytes = admission.proof.as_slice();
@@ -3576,6 +3739,9 @@ async fn qualify_external_original(
     identity: &InboundRuntimeIdentity,
     exclusion: Option<&FinalizedReceiptObservation>,
 ) -> Result<QualifiedExternal> {
+    scanner
+        .authenticate_retained_receipt_framing(api, proof, &external.original)
+        .await?;
     ensure!(
         external.provenance == "canonical-external",
         "HOLD: unsupported external original provenance"
@@ -3755,11 +3921,78 @@ async fn scan_coverage(
         ApiProviderConnection::from_api(signer.api().clone()),
         &work.intent.old_identity,
         Some(work.intent.erc20_manager),
-        work.intent.wrapper_approval(),
-    );
+        &work.intent,
+    )?;
+    for admission in &mut work.admissions {
+        if !admission.proof.is_empty() {
+            continue;
+        }
+        let original = originals
+            .completed
+            .values()
+            .chain(originals.transactions.values())
+            .find(|row| row.tx.tx_hash == admission.original_tx_hash);
+        let composed = if let Some(original) = original.filter(|row| row.receipt.is_some()) {
+            original.receipt_event()
+        } else if admission.external_original.is_some() {
+            continue; // Missing external proof is not authority to compose replacement bytes.
+        } else {
+            compose_admission(
+                beacon,
+                api,
+                eth,
+                admission.original_tx_hash,
+                &work.intent.old_identity,
+            )
+            .await
+        };
+        if let Ok(proof) = composed {
+            let receipt = work
+                .blocks
+                .iter()
+                .find(|block| block.hash == admission.original_block_hash)
+                .and_then(|block| {
+                    block
+                        .receipts
+                        .iter()
+                        .find(|receipt| receipt.transaction_hash == admission.original_tx_hash)
+                })
+                .context("HOLD: blocked original receipt unavailable")?;
+            ensure!(
+                work.intent.receipt_bytes_match(&proof, receipt)
+                    && (proof.proof_block.block.slot, proof.transaction_index)
+                        == admission.receipt_key,
+                "HOLD: recomposed proof changed original receipt identity"
+            );
+            if proof.receipt_rlp
+                != ethereum_common::utils::map_receipt_envelope(receipt.as_ref()).encoded_2718()
+            {
+                let signed = original
+                    .and_then(|row| row.receipt.as_ref())
+                    .and_then(|receipt| receipt.signed_submission.as_ref())
+                    .context("HOLD: historical framing requires retained original")?;
+                readonly_sender
+                    .authenticate_retained_receipt_framing(api, &proof, signed)
+                    .await?;
+            }
+            admission.proof = proof.encode();
+            if let Some(reason) = admission.unprocessable.take() {
+                admission.liability_history.push(reason);
+            }
+            admission.admission = if admission.fee_event_observed {
+                "paid"
+            } else {
+                "cutover-sponsored"
+            }
+            .into();
+        }
+    }
     let mut external_cache: Option<Vec<(Vec<u8>, seal::CanonicalExternalOriginal)>> = None;
-    // The journal floor lacks an independent constructor attestation here: scan from genesis.
-    let floor = 0;
+    let floor = work
+        .intent
+        .coverage_policy
+        .as_ref()
+        .map_or(0, |policy| policy.deployment_block);
     let mut next = work
         .blocks
         .last()
@@ -3822,7 +4055,7 @@ async fn scan_coverage(
             &mut receipts,
         )?;
         for receipt in &receipts {
-            if !receipt.status() {
+            if !explicit_success(receipt) {
                 continue;
             }
             if !belongs_to_source(&work.intent, block.header.timestamp)?
@@ -3830,15 +4063,19 @@ async fn scan_coverage(
             {
                 continue;
             }
-            let emitter = seal::authenticated_fee_emitter(
+            let emitters = seal::authenticated_fee_emitters(
                 eth,
                 &mut view,
                 work.intent.erc20_manager,
                 work.intent.old_identity.bridging_payment_address,
+                work.intent
+                    .coverage_policy
+                    .as_ref()
+                    .map(|policy| policy.fee_emitters.as_slice()),
                 receipt,
             )
             .await?;
-            let paid = emitter.is_some();
+            let paid = !emitters.is_empty();
             if let Some(existing) = work
                 .admissions
                 .iter()
@@ -3857,93 +4094,162 @@ async fn scan_coverage(
                 .chain(originals.transactions.values())
                 .find(|transaction| transaction.tx.tx_hash == receipt.transaction_hash);
             let mut external_original = None;
-            let proof = if original.is_none_or(never_dispatched) {
-                if external_cache.is_none() {
-                    external_cache = Some(
-                        discover_external_originals(
-                            &readonly_sender,
-                            work.intent.old_identity.gear_genesis_hash,
-                            None,
+            let composed = async {
+                let proof = if original.is_none_or(never_dispatched) {
+                    if external_cache.is_none() {
+                        external_cache = Some(
+                            discover_external_originals(
+                                &readonly_sender,
+                                work.intent.old_identity.gear_genesis_hash,
+                                None,
+                            )
+                            .await?,
+                        );
+                    }
+                    let mapped = ethereum_common::utils::map_receipt_envelope(receipt.as_ref());
+                    let expected = mapped.encoded_2718();
+                    // Discover retained historical originals too, without admitting or
+                    // rewriting them. The canonical admission check below HOLDs until
+                    // exact old-code/framing authority is independently qualified.
+                    let historical_envelope = alloy_rlp::encode(&mapped);
+                    let candidate = external_cache
+                        .as_ref()
+                        .context("External discovery cache missing")?
+                        .iter()
+                        .find(|(proof, _)| {
+                            let Ok(event) = eth_events_electra_client::EthToVaraEvent::decode(
+                                &mut proof.as_slice(),
+                            ) else {
+                                return false;
+                            };
+                            (event.receipt_rlp == expected
+                                || event.receipt_rlp == historical_envelope)
+                                && Some(event.transaction_index) == receipt.transaction_index
+                                && event
+                                    .proof_block
+                                    .block
+                                    .body
+                                    .execution_payload
+                                    .block_hash
+                                    .0
+                                     .0
+                                    == block.header.hash.0
+                        });
+                    if let Some((proof, external)) = candidate {
+                        external_original = Some(external.clone());
+                        eth_events_electra_client::EthToVaraEvent::decode(&mut proof.as_slice())?
+                    } else if let Some(transaction) =
+                        original.filter(|transaction| transaction.receipt.is_some())
+                    {
+                        transaction.receipt_event()?
+                    } else {
+                        compose_admission(
+                            beacon,
+                            api,
+                            eth,
+                            receipt.transaction_hash,
+                            &work.intent.old_identity,
                         )
-                        .await?,
-                    );
-                }
-                let expected = alloy_rlp::encode(ethereum_common::utils::map_receipt_envelope(
-                    receipt.as_ref(),
-                ));
-                let candidate = external_cache
-                    .as_ref()
-                    .context("External discovery cache missing")?
-                    .iter()
-                    .find(|(proof, _)| {
-                        let Ok(event) = eth_events_electra_client::EthToVaraEvent::decode(
-                            &mut proof.as_slice(),
-                        ) else {
-                            return false;
-                        };
-                        event.receipt_rlp == expected
-                            && Some(event.transaction_index) == receipt.transaction_index
-                            && event
-                                .proof_block
-                                .block
-                                .body
-                                .execution_payload
-                                .block_hash
-                                .0
-                                 .0
-                                == block.header.hash.0
-                    });
-                if let Some((proof, external)) = candidate {
-                    external_original = Some(external.clone());
-                    eth_events_electra_client::EthToVaraEvent::decode(&mut proof.as_slice())?
-                } else if let Some(transaction) =
-                    original.filter(|transaction| transaction.receipt.is_some())
-                {
-                    transaction.receipt_event()?
+                        .await?
+                    }
                 } else {
-                    compose_admission(
-                        beacon,
-                        api,
-                        eth,
-                        receipt.transaction_hash,
-                        &work.intent.old_identity,
-                    )
-                    .await?
+                    original
+                        .context("Original receipt identity missing")?
+                        .receipt_event()?
+                };
+                if proof.receipt_rlp
+                    != ethereum_common::utils::map_receipt_envelope(receipt.as_ref()).encoded_2718()
+                {
+                    let retained = external_original
+                        .as_ref()
+                        .map(|external| &external.original)
+                        .or_else(|| {
+                            original
+                                .and_then(|row| row.receipt.as_ref())
+                                .and_then(|receipt| receipt.signed_submission.as_ref())
+                        })
+                        .context(
+                            "HOLD: historical framing requires an exact retained signed original",
+                        )?;
+                    readonly_sender
+                        .authenticate_retained_receipt_framing(api, &proof, retained)
+                        .await?;
                 }
-            } else {
-                original
-                    .context("Original receipt identity missing")?
-                    .receipt_event()?
+                ensure!(
+                    proof.transaction_index
+                        == receipt
+                            .transaction_index
+                            .context("HOLD: receipt index missing")?
+                        && work.intent.receipt_bytes_match(&proof, receipt)
+                        && proof
+                            .proof_block
+                            .block
+                            .body
+                            .execution_payload
+                            .block_hash
+                            .0
+                             .0
+                            == block.header.hash.0
+                        && proof
+                            .proof_block
+                            .block
+                            .body
+                            .execution_payload
+                            .receipts_root
+                            .0
+                             .0
+                            == block.header.receipts_root.0,
+                    "HOLD: original proof does not bind canonical receipt/header"
+                );
+                Ok::<_, anyhow::Error>(proof)
+            }
+            .await;
+            let proof = match composed {
+                Ok(proof) => proof,
+                Err(error) => {
+                    let slot = work
+                        .intent
+                        .boundary
+                        .slot
+                        .checked_sub(
+                            work.intent
+                                .boundary_execution_timestamp
+                                .checked_sub(block.header.timestamp)
+                                .context("HOLD: deposit timestamp exceeds boundary")?
+                                / ethereum_common::SECONDS_PER_SLOT,
+                        )
+                        .context("HOLD: deposit predates Beacon domain")?;
+                    work.admissions.push(Admission {
+                        receipt_key: (
+                            slot,
+                            receipt.transaction_index.context("Receipt index missing")?,
+                        ),
+                        original_tx_hash: receipt.transaction_hash,
+                        original_block_hash: H256(block.header.hash.0),
+                        fee_emitter: if work.schema_version < 5 {
+                            emitters.first().copied()
+                        } else {
+                            None
+                        },
+                        fee_emitters: (work.schema_version >= 5).then_some(emitters),
+                        admission: "needs-reconciliation".into(),
+                        fee_event_observed: paid,
+                        proof: vec![],
+                        signed: None,
+                        attempts: vec![],
+                        settlement: None,
+                        exclusion: None,
+                        original_lane_uuid: original.map(|row| row.uuid),
+                        external_original,
+                        undispatched_old_admission: None,
+                        unprocessable: Some(format!(
+                            "proof unavailable; retained liability: {error:#}"
+                        )),
+                        liability_history: vec![],
+                    });
+                    continue;
+                }
             };
-            ensure!(
-                proof.transaction_index
-                    == receipt
-                        .transaction_index
-                        .context("HOLD: receipt index missing")?
-                    && proof.receipt_rlp
-                        == alloy_rlp::encode(ethereum_common::utils::map_receipt_envelope(
-                            receipt.as_ref()
-                        ))
-                    && proof
-                        .proof_block
-                        .block
-                        .body
-                        .execution_payload
-                        .block_hash
-                        .0
-                         .0
-                        == block.header.hash.0
-                    && proof
-                        .proof_block
-                        .block
-                        .body
-                        .execution_payload
-                        .receipts_root
-                        .0
-                         .0
-                        == block.header.receipts_root.0,
-                "HOLD: original proof does not bind canonical receipt/header"
-            );
             let key = (proof.proof_block.block.slot, proof.transaction_index);
             if key.0 < work.intent.source_receipt_floor {
                 continue;
@@ -3969,6 +4275,7 @@ async fn scan_coverage(
                 receipt_key: key,
                 original_tx_hash: receipt.transaction_hash,
                 original_block_hash: H256(block.header.hash.0),
+                liability_history: vec![],
                 admission: if external_original.is_some() {
                     "external-original-pending"
                 } else if paid {
@@ -3978,7 +4285,13 @@ async fn scan_coverage(
                 }
                 .into(),
                 fee_event_observed: paid,
-                fee_emitter: emitter,
+                fee_emitter: if work.schema_version < 5 {
+                    emitters.first().copied()
+                } else {
+                    None
+                },
+                fee_emitters: (work.schema_version >= 5).then_some(emitters),
+                unprocessable: None,
                 proof: proof.encode(),
                 signed: None,
                 attempts: vec![],
@@ -4022,6 +4335,9 @@ async fn scan_coverage(
     // Also run when the boundary block was committed before a crash: there may
     // be no new blocks, but every saved original still needs reconciliation.
     for index in 0..work.admissions.len() {
+        if work.admissions[index].unprocessable.is_some() {
+            continue;
+        }
         record_resolution(api, &readonly_sender, path, &mut work, index).await?;
     }
     let unpaid = work
@@ -4054,8 +4370,8 @@ async fn drain(
         provider.clone(),
         &work.intent.old_identity,
         Some(work.intent.erc20_manager),
-        work.intent.wrapper_approval(),
-    );
+        &work.intent,
+    )?;
     let mut excluded_owned = BTreeSet::new();
     for index in 0..work.admissions.len() {
         if record_resolution(api, &sender, path, &mut work, index).await? {
@@ -4319,6 +4635,29 @@ async fn drain(
             save(path, &work)?;
             continue;
         }
+        if admission.signed.is_none() {
+            if let Some(previous) = admission.attempts.last_mut() {
+                match reconcile_original(api, &sender, &proof, previous, None)
+                    .await?
+                    .0
+                {
+                    MessageStatus::RetryableNoop { qualification, .. } => {
+                        previous.retry_qualification = Some(qualification);
+                    }
+                    MessageStatus::Success {
+                        receipt_observation: Some(pin),
+                    } => {
+                        admission.settlement = Some(pin);
+                        save(path, &work)?;
+                        continue;
+                    }
+                    _ => bail!("HOLD: retry no longer has exact finalized no-effect authority"),
+                }
+            }
+        }
+        // Persist the newly requalified old attempt before allocating/signing another nonce.
+        save(path, &work)?;
+        let admission = &mut work.admissions[index];
         view.recheck(&**eth).await?;
         let signed = match admission.signed.take() {
             Some(signed) => signed,
@@ -4349,11 +4688,12 @@ async fn drain(
         {
             admission.settlement = receipt_observation.clone();
         }
-        if matches!(&status, Ok(MessageStatus::RetryableNoop { .. })) {
+        if let Ok(MessageStatus::RetryableNoop { qualification, .. }) = &status {
             let mut archived = admission
                 .signed
                 .take()
                 .context("Missing original no-effect proof")?;
+            archived.retry_qualification = Some(qualification.clone());
             if archived.inclusion_block_number.is_none() {
                 let hash = H256::from_str(&archived.scanned_finalized_hash)?;
                 archived.finalized_nonce_consumed = Some(u64::from(
@@ -4446,6 +4786,13 @@ pub async fn prepare(
     args: &PrepareCutover,
 ) -> Result<()> {
     let approved = args.native_capability.load()?;
+    let policy_bytes = fs::read(&args.coverage_policy)?;
+    ensure!(
+        seal::digest(&policy_bytes) == args.coverage_policy_digest,
+        "HOLD: coverage policy differs from independently approved digest"
+    );
+    let coverage_policy: CoveragePolicy = serde_json::from_slice(&policy_bytes)?;
+    coverage_policy.validate()?;
     let _work_owner = lock_work(&args.cutover_dir)?;
     let path = work_path(&args.cutover_dir);
     if path.exists() {
@@ -4539,6 +4886,19 @@ pub async fn prepare(
         .at_block(pin)
         .recv(args.old_vft_manager)
         .await?;
+    let successor_floor = args
+        .boundary_slot
+        .checked_add(1)
+        .context("HOLD: successor receipt floor overflow")?;
+    let replacement_status = manager
+        .cutover_status()
+        .at_block(pin)
+        .recv(args.new_vft_manager)
+        .await?;
+    ensure!(
+        replacement_status.minimum_receipt_slot == successor_floor,
+        "HOLD: replacement constructor floor differs from approved boundary plus one"
+    );
     ensure!(
         manager
             .is_paused()
@@ -4570,6 +4930,12 @@ pub async fn prepare(
         .await?
         .context("HOLD: source ERC20 manager missing")?;
     authenticate_source_emitter(&eth, &old_identity, H160(erc20_manager.0)).await?;
+    ensure!(
+        coverage_policy.erc20_manager == H160(erc20_manager.0)
+            && coverage_policy.deployment_block <= block.body.execution_payload.block_number,
+        "HOLD: approved deployment differs from source manager/boundary"
+    );
+    coverage_policy.authenticate(&eth, &mut view).await?;
     let native_approval = args.native_capability.load()?;
     let binding = native_wrapper_at(
         api,
@@ -4722,6 +5088,15 @@ pub async fn prepare(
         native_wrapper: native_wrapper.map(hash_actor),
         native_wrapper_approval: native_approval,
         historical_native_wrapper_approval: None,
+        coverage_policy: Some(coverage_policy),
+        cutover_generation: Some(if source_status.phase == CutoverPhase::Active {
+            source_status
+                .generation
+                .checked_add(1)
+                .context("HOLD: cutover generation exhausted")?
+        } else {
+            source_status.generation
+        }),
         mappings: mappings
             .iter()
             .map(|(token, eth, supply)| {
@@ -4747,7 +5122,7 @@ pub async fn prepare(
         save(
             &path,
             &Work {
-                schema_version: 4,
+                schema_version: 5,
                 ethereum_authentication: Some(view.checkpoint().clone()),
                 ethereum_qualification: None,
                 legacy_ethereum_work_digest: None,
@@ -4766,14 +5141,41 @@ pub async fn prepare(
         )?;
     }
     let resumed = read_work(&path)?;
+    ensure!(
+        !resumed
+            .calls
+            .iter()
+            .any(|call| matches!(call.step, CutoverStep::AbortCutover(_)))
+            && !args
+                .cutover_dir
+                .join(format!(
+                    "cutover-abort-{}.json",
+                    source_status.generation.saturating_sub(1)
+                ))
+                .exists(),
+        "HOLD: aborted generation is terminal; independently prepare a new cutover directory"
+    );
     let _signer_owner = lock_signer(&path, api, intent.old_identity.gear_genesis_hash)?;
     let _other_signers = lock_other_signers(api, &resumed.intent, &resumed, &path)?;
     let result: Result<()> = async {
         authenticate_environment(api, &eth, &intent).await?;
+        scan_coverage(api, &eth, &beacon, &path, args.sponsor_unpaid).await?;
+        preflight_liabilities(api, &eth, &path).await?;
+        let (before, _) = status(api, intent.old_identity.vft_manager_address).await?;
+        ensure!(
+            intent.cutover_generation
+                == if before.phase == CutoverPhase::Active {
+                    before.generation.checked_add(1)
+                } else {
+                    Some(before.generation)
+                },
+            "HOLD: source generation changed during preflight"
+        );
         run_cutover_call(api, &eth, &path, CutoverStep::BeginCutover, &intent).await?;
         let (source, _) = status(api, intent.old_identity.vft_manager_address).await?;
         ensure!(
             source.phase == CutoverPhase::Draining
+                && Some(source.generation) == intent.cutover_generation
                 && source.successor == Some(args.new_vft_manager)
                 && source.last_receipt_slot == Some(args.boundary_slot)
                 && source.config_fingerprint == Some(fingerprint.0.into()),
@@ -4938,7 +5340,7 @@ fn validate_registration(intent: &Intent, registration: &Registration) -> Result
     let transaction = &transactions[index];
     let receipt = &receipts[index];
     ensure!(
-        receipt.status()
+        explicit_success(receipt)
             && transaction.chain_id() == Some(intent.old_identity.ethereum_chain_id)
             && transaction.recover_signer()? == receipt.from
             && transaction.to() == receipt.to,
@@ -5179,8 +5581,8 @@ async fn reconcile_retained_role_calls(api: &GearApi, path: &Path) -> Result<()>
         ApiProviderConnection::from_api(signer.api().clone()),
         &work.intent.old_identity,
         Some(work.intent.erc20_manager),
-        work.intent.wrapper_approval(),
-    );
+        &work.intent,
+    )?;
     for index in 0..work.calls.len() {
         if !matches!(
             work.calls[index].step,
@@ -5426,7 +5828,12 @@ fn validate_admission_uniqueness(admissions: &[Admission]) -> Result<()> {
 fn completed_coverage(work: &Work) -> Result<()> {
     validate_work_version(work)?;
     validate_admission_uniqueness(&work.admissions)?;
-    let mut expected = 0;
+    preflight::ensure_processable(&work.admissions)?;
+    let mut expected = work
+        .intent
+        .coverage_policy
+        .as_ref()
+        .map_or(0, |policy| policy.deployment_block);
     let mut previous = None;
     let mut accounted = BTreeSet::new();
     for block in &work.blocks {
@@ -5437,7 +5844,7 @@ fn completed_coverage(work: &Work) -> Result<()> {
         validate_covered_block(block)?;
         if belongs_to_source(&work.intent, block.header.timestamp)? {
             for receipt in &block.receipts {
-                if receipt.status() && is_deposit(receipt, work.intent.erc20_manager)? {
+                if explicit_success(receipt) && is_deposit(receipt, work.intent.erc20_manager)? {
                     let admission = work
                         .admissions
                         .iter()
@@ -5453,10 +5860,7 @@ fn completed_coverage(work: &Work) -> Result<()> {
                     let proof = eth_events_electra_client::EthToVaraEvent::decode(&mut bytes)?;
                     ensure!(
                         bytes.is_empty()
-                            && proof.receipt_rlp
-                                == alloy_rlp::encode(ethereum_common::utils::map_receipt_envelope(
-                                    receipt.as_ref()
-                                ))
+                            && work.intent.receipt_bytes_match(&proof, receipt)
                             && proof.transaction_index == admission.receipt_key.1
                             && proof.proof_block.block.slot == admission.receipt_key.0
                             && proof
@@ -5529,7 +5933,7 @@ fn completed_coverage(work: &Work) -> Result<()> {
         );
         if admission.exclusion.is_some() {
             ensure!(
-                matches!(work.schema_version, 2..=4)
+                matches!(work.schema_version, 2..=5)
                     && admission.settlement.is_none()
                     && ((admission.external_original.is_some()
                         && admission.admission == "externally-resolved"
@@ -5561,6 +5965,20 @@ pub async fn finalize(
     let path = work_path(&args.cutover_dir);
     bind_invocation_approval(api, &path, approved.as_ref()).await?;
     let mut work = read_work(&path)?;
+    ensure!(
+        !work
+            .calls
+            .iter()
+            .any(|call| matches!(call.step, CutoverStep::AbortCutover(_))),
+        "HOLD: aborted work cannot be finalized"
+    );
+    if let Some(generation) = work.intent.cutover_generation {
+        let (source, _) = status(api, work.intent.old_identity.vft_manager_address).await?;
+        ensure!(
+            source.generation == generation && source.phase != CutoverPhase::Active,
+            "HOLD: source cutover generation was aborted or replaced"
+        );
+    }
     let _journals =
         seal::lock_original_journals(&work.intent.old_transactions, &work.intent.old_discovery)?;
     let _signer = lock_signer(&path, api, work.intent.old_identity.gear_genesis_hash)?;
@@ -5737,8 +6155,8 @@ pub async fn finalize(
         ApiProviderConnection::from_api(signer.api().clone()),
         &work.intent.old_identity,
         Some(work.intent.erc20_manager),
-        work.intent.wrapper_approval(),
-    );
+        &work.intent,
+    )?;
     if verify_activation(api, &activation_scanner, &work.intent, &seal_path).await? {
         let (sealed, _) = seal::verify_markers(&seal_path)?;
         seal::verify_originals_read_only(
@@ -5781,6 +6199,7 @@ pub async fn finalize(
         &work.intent.new_identity,
         Some(&seal_path),
         Some(work.intent.new_manager_code_id),
+        None,
         api,
         &eth,
         work.intent.wrapper_approval(),
@@ -5908,8 +6327,8 @@ pub async fn verify(connection: &GearConnectionArgs, args: &VerifyCutover) -> Re
         provider,
         &work.intent.old_identity,
         Some(work.intent.erc20_manager),
-        work.intent.wrapper_approval(),
-    );
+        &work.intent,
+    )?;
     verify_activation(&api, &scanner, &work.intent, &args.seal).await?;
     seal::verify_markers(&args.seal)?;
     println!("Verified original sealed journals, canonical coverage, lifecycle originals and historical economic settlement; exact authenticated activation publication recovered if interrupted.");
@@ -5949,18 +6368,21 @@ async fn authenticate_completed_work(
         let observed = read_role_pin(api, pin.token, mode, Some(pin.block_hash)).await?;
         authenticate_role_evidence(pin, &observed, work.schema_version, mode)?;
     }
-    for block in &work.blocks {
-        ensure!(
-            eth.is_finalized_block(block.number, block.hash).await?,
-            "HOLD: sealed canonical coverage changed"
-        );
-    }
+    view.verify_blocks(
+        &**eth,
+        &work
+            .blocks
+            .iter()
+            .map(|block| (block.number, B256::from(block.hash.0)))
+            .collect(),
+    )
+    .await?;
     let scanner = sender(
         provider,
         &work.intent.old_identity,
         Some(work.intent.erc20_manager),
-        work.intent.wrapper_approval(),
-    );
+        &work.intent,
+    )?;
     for original in &work.calls {
         verify_lifecycle_original(api, &scanner, &work.intent, original).await?;
     }
@@ -5975,11 +6397,12 @@ async fn authenticate_completed_work(
             .iter()
             .find(|receipt| receipt.transaction_hash == admission.original_tx_hash)
             .context("HOLD: original admitted receipt missing")?;
-        ensure!(
-            fee_emitter(eth, &work.intent, receipt).await? == admission.fee_emitter
-                && admission.fee_event_observed == admission.fee_emitter.is_some(),
-            "HOLD: transaction-local fee evidence changed"
-        );
+        seal::validate_fee_evidence(
+            &fee_emitter(eth, &work.intent, receipt).await?,
+            admission.fee_emitter,
+            admission.fee_emitters.as_deref(),
+            admission.fee_event_observed,
+        )?;
         if admission.exclusion.is_some() {
             authenticate_exclusion(api, &scanner, &work, admission).await?;
             continue;
@@ -5992,9 +6415,8 @@ async fn authenticate_completed_work(
             ensure!(
                 original.tx.tx_hash == admission.original_tx_hash
                     && original.receipt_event()?.receipt_rlp
-                        == alloy_rlp::encode(ethereum_common::utils::map_receipt_envelope(
-                            receipt.as_ref()
-                        )),
+                        == ethereum_common::utils::map_receipt_envelope(receipt.as_ref())
+                            .encoded_2718(),
                 "HOLD: original paid receipt association changed"
             );
             continue;
@@ -6603,6 +7025,7 @@ mod tests {
             }),
             native_wrapper_approval: None,
             native_retry_qualification: None,
+            retry_qualification: None,
             native_reconciliation: None,
             native_reconciliation_attempts: vec![],
             finalized_nonce_consumed: None,
@@ -7033,9 +7456,8 @@ mod tests {
         // a coordinate fixture, never passed off as authenticated checkpoint evidence.
         let mut proof = receipt_frame();
         proof.transaction_index = 0;
-        proof.receipt_rlp = alloy_rlp::encode(ethereum_common::utils::map_receipt_envelope(
-            receipt.as_ref(),
-        ));
+        proof.receipt_rlp =
+            ethereum_common::utils::map_receipt_envelope(receipt.as_ref()).encoded_2718();
         proof
             .proof_block
             .block
@@ -7061,6 +7483,8 @@ mod tests {
             original_tx_hash: tx_hash,
             original_block_hash: covered.hash,
             fee_emitter: None,
+            fee_emitters: None,
+            unprocessable: None,
             admission: "cutover-sponsored".into(),
             fee_event_observed: false,
             proof: proof.encode(),
@@ -7071,6 +7495,7 @@ mod tests {
             original_lane_uuid: None,
             external_original: None,
             undispatched_old_admission: None,
+            liability_history: vec![],
         };
         Work {
             schema_version: 2,
@@ -7097,6 +7522,8 @@ mod tests {
                 native_wrapper: None,
                 native_wrapper_approval: None,
                 historical_native_wrapper_approval: None,
+                coverage_policy: None,
+                cutover_generation: None,
                 initial_role_pins: vec![],
                 mappings: vec![],
             },
@@ -7110,6 +7537,76 @@ mod tests {
             new_transactions: None,
             new_discovery: None,
         }
+    }
+
+    // Reconstructed from HTML7fe1b032 VB-19/25, not the unavailable original PoC bundle.
+    #[tokio::test]
+    async fn reconstructed_html7fe1b032_blocked_liability_preserves_later_candidate() {
+        let mut work = terminal_coverage_fixture().await;
+        let later = work.admissions[0].clone();
+        let later_bytes = serde_json::to_vec(&later).unwrap();
+        work.admissions[0].unprocessable = Some("unmapped token remains a liability".into());
+        work.admissions.push(later);
+        assert!(preflight::ensure_processable(&work.admissions).is_err());
+        assert_eq!(
+            serde_json::to_vec(&work.admissions[1]).unwrap(),
+            later_bytes
+        );
+        work.admissions[0].unprocessable = None;
+        let original_proof = std::mem::take(&mut work.admissions[0].proof);
+        assert!(preflight::ensure_processable(&work.admissions).is_err());
+        work.admissions[0].proof = original_proof;
+        assert!(preflight::ensure_processable(&work.admissions).is_ok());
+    }
+
+    // Reconstructed from HTML7fe1b032 VB-21/24: no numeric floor or generation alias.
+    #[tokio::test]
+    async fn reconstructed_html7fe1b032_provenance_and_abort_generation_are_bound() {
+        let work = terminal_coverage_fixture().await;
+        let block = &work.blocks[0];
+        let policy = CoveragePolicy {
+            ethereum_chain_id: work.intent.old_identity.ethereum_chain_id,
+            ethereum_genesis_hash: work.intent.old_identity.ethereum_genesis_hash,
+            erc20_manager: work.intent.erc20_manager,
+            deployment_block: block.number,
+            deployment_hash: block.hash,
+            deployment_transaction: H256(block.transactions[0].0),
+            deployment_transaction_index: 0,
+            historical_receipts: vec![],
+            fee_emitters: vec![],
+            max_redirect_bytes: 1024,
+            max_gas: 100,
+        };
+        // A real trie-bound call to the manager is not its deployment transaction.
+        assert!(policy
+            .validate_deployment(block)
+            .unwrap_err()
+            .to_string()
+            .contains("CREATE provenance"));
+        let abort = lifecycle_request(&work.intent, &CutoverStep::AbortCutover(7)).unwrap();
+        assert_eq!(abort.1, io::AbortCutover::encode_call(7));
+        assert_ne!(
+            abort.1,
+            lifecycle_request(&work.intent, &CutoverStep::AbortCutover(8))
+                .unwrap()
+                .1
+        );
+        let restore =
+            lifecycle_request(&work.intent, &CutoverStep::RestoreAbortedCutover(9)).unwrap();
+        assert_eq!(restore.1, io::RestoreAbortedCutover::encode_call(9));
+        assert_ne!(abort.1, restore.1);
+        let mut intent = work.intent;
+        intent.cutover_generation = Some(8);
+        assert_eq!(
+            lifecycle_request(&intent, &CutoverStep::BeginCutover)
+                .unwrap()
+                .1,
+            io::BeginCutover::encode_call(
+                actor(intent.new_identity.vft_manager_address),
+                intent.boundary.slot,
+                7
+            )
+        );
     }
 
     // Reproduce a committed admission whose block was not yet appended by scan_coverage.
@@ -7647,7 +8144,7 @@ mod tests {
             eth_events_electra_client::EthToVaraEvent::decode(&mut second.proof.as_slice())
                 .unwrap();
         proof.transaction_index = 1;
-        proof.receipt_rlp = alloy_rlp::encode(&envelopes[1].1);
+        proof.receipt_rlp = envelopes[1].1.encoded_2718();
         proof.proof = ethereum_common::utils::generate_merkle_proof(1, &envelopes)
             .unwrap()
             .proof;
@@ -7781,8 +8278,8 @@ mod tests {
             connection,
             &work.intent.old_identity,
             Some(work.intent.erc20_manager),
-            work.intent.wrapper_approval(),
-        );
+            &work.intent,
+        )?;
         let journal = seal::OriginalJournal {
             schema_version: 7,
             runtime_identity: Some(work.intent.old_identity.clone()),

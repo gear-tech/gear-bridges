@@ -16,7 +16,7 @@ use std::{
 };
 use tokio::{
     io::AsyncWriteExt,
-    sync::{mpsc::UnboundedSender, RwLock},
+    sync::{mpsc::Sender, RwLock},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -297,18 +297,23 @@ pub(super) async fn replay_pending_handoffs(
     api: &PollingEthApi,
     storage: &dyn Storage,
     genesis_time: u64,
-    sender: &UnboundedSender<TxHashWithSlot>,
+    sender: &Sender<TxHashWithSlot>,
 ) -> anyhow::Result<()> {
-    let pending = storage
-        .block_storage()
-        .blocks_raw()
-        .read()
-        .await
-        .iter()
-        .filter(|(_, block)| !block.is_processed())
-        .map(|(&slot, block)| (slot, block.number, block.hash, block.transactions.clone()))
-        .collect::<Vec<_>>();
-    for (slot, number, hash, transactions) in pending {
+    let mut after = std::ops::Bound::Unbounded;
+    loop {
+        // Clone one block, not the entire durable backlog, before awaiting capacity.
+        let pending = storage
+            .block_storage()
+            .blocks_raw()
+            .read()
+            .await
+            .range((after, std::ops::Bound::Unbounded))
+            .find(|(_, block)| !block.is_processed())
+            .map(|(&slot, block)| (slot, block.number, block.hash, block.transactions.clone()));
+        let Some((slot, number, hash, transactions)) = pending else {
+            break;
+        };
+        after = std::ops::Bound::Excluded(slot);
         let hash =
             hash.context("HOLD: pending inbound handoff lacks its immutable EL block hash")?;
         let block = finalized_block(api, number.0).await?;
@@ -323,11 +328,14 @@ pub(super) async fn replay_pending_handoffs(
             "HOLD: pending inbound handoff historical block/slot changed"
         );
         for tx_hash in transactions {
-            sender.send(TxHashWithSlot {
-                slot_number: slot,
-                tx_hash,
-            })?;
+            sender
+                .send(TxHashWithSlot {
+                    slot_number: slot,
+                    tx_hash,
+                })
+                .await?;
         }
+        tokio::task::yield_now().await;
     }
     Ok(())
 }
@@ -532,6 +540,68 @@ pub(crate) mod tests {
             std::collections::HashSet::from([transaction])
         );
         drop(blocks);
+        tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+
+    // Reconstructed from supplied PR860 HTML, C4; not the unavailable original PoC.
+    #[tokio::test]
+    async fn reconstructed_empty_block_progress_survives_later_handoff_failure() {
+        use crate::message_relayer::eth_to_gear::{
+            storage::JSONStorage, tx_manager::TransactionManager,
+        };
+        use std::sync::Arc;
+        let root = std::env::temp_dir().join(format!("empty-progress-{}", uuid::Uuid::now_v7()));
+        let transactions = root.join("transactions");
+        let path = root.join("discovery.json");
+        let queue = Arc::new(JSONStorage::new(&transactions));
+        queue.bind_runtime_identity(identity()).await.unwrap();
+        queue
+            .save(&TransactionManager::new(queue.clone()))
+            .await
+            .unwrap();
+        let discovery = JSONBlockStorage::new(path.clone(), identity())
+            .await
+            .unwrap();
+        let first = BlockCursor {
+            number: 70,
+            hash: H256::repeat_byte(7),
+        };
+        discovery
+            .add_block(first, H256::repeat_byte(6))
+            .await
+            .unwrap();
+        store_extracted_transactions(
+            queue.as_ref(),
+            &discovery,
+            EthereumSlotNumber(70),
+            first,
+            std::iter::empty(),
+        )
+        .await
+        .unwrap();
+        let second = BlockCursor {
+            number: 71,
+            hash: H256::repeat_byte(8),
+        };
+        discovery.add_block(second, first.hash).await.unwrap();
+        let interrupted = transactions.join("blocks.json.new");
+        tokio::fs::create_dir(&interrupted).await.unwrap();
+        assert!(store_extracted_transactions(
+            queue.as_ref(),
+            &discovery,
+            EthereumSlotNumber(71),
+            second,
+            [ethereum_client::TxHash::from([9; 32])].into_iter()
+        )
+        .await
+        .is_err());
+        let restored = JSONBlockStorage::new(path, identity()).await.unwrap();
+        assert_eq!(restored.snapshot().await.extracted, Some(first));
+        assert_eq!(
+            restored.snapshot().await.pending,
+            BTreeMap::from([(71, second.hash)])
+        );
+        assert!(!restored.is_pending(first).await.unwrap());
         tokio::fs::remove_dir_all(root).await.unwrap();
     }
 }

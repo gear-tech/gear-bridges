@@ -22,6 +22,28 @@ fn main() {
         optimizer.flush_to_file(&optimized);
         // Gear's default -O4 exceeds the runtime's instrumented-code limit for this program.
         gear_wasm_builder::optimize::optimize_wasm(&optimized, &optimized, "z", true).unwrap();
+        // Gas instrumentation expands control-flow blocks; raw byte size is not the limit.
+        let status = std::process::Command::new("wasm-opt")
+            .arg(&optimized)
+            .args([
+                "--flatten",
+                "--rereloop",
+                "-Oz",
+                "--converge",
+                "-mvp",
+                "--enable-sign-ext",
+                "--enable-mutable-globals",
+                "--limit-segments",
+                "--pass-arg=limit-segments@1024",
+                "--zero-filled-memory",
+                "--dae",
+                "--vacuum",
+            ])
+            .arg("-o")
+            .arg(&optimized)
+            .status()
+            .expect("failed to run manager control-flow optimization");
+        assert!(status.success(), "manager control-flow optimization failed");
     }
 
     if env::var("__GEAR_WASM_BUILDER_NO_BUILD").is_ok() {

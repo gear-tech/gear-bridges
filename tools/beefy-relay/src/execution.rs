@@ -124,6 +124,53 @@ struct Approval {
     custody_authority_report_sha256: B256,
     gear_manager_code_id: B256,
     deployment_plan_hash: Option<B256>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signers: Option<SigningRoles>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signing_policy: Option<SigningPolicy>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    runtime_transitions: Vec<crate::source::RuntimeTransitionApproval>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SigningRoles {
+    commitment: Address,
+    root: Address,
+    heartbeat: Address,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SigningPolicy {
+    pub commitment_gas_units: u64,
+    pub root_gas_units: u64,
+    pub max_fee_per_gas: u128,
+    pub max_priority_fee_per_gas: u128,
+    pub max_transaction_cost: U256,
+    pub daily_budget: U256,
+    pub wallet_warning_reserve: U256,
+}
+
+impl SigningPolicy {
+    pub(crate) fn gas_limit(&self, role: &str) -> Result<u64> {
+        ensure!(
+            self.commitment_gas_units > 0
+                && self.root_gas_units > 0
+                && self.max_fee_per_gas > 0
+                && self.max_priority_fee_per_gas > 0
+                && self.max_priority_fee_per_gas <= self.max_fee_per_gas
+                && self.max_transaction_cost > U256::ZERO
+                && self.daily_budget >= self.max_transaction_cost
+                && self.wallet_warning_reserve > U256::ZERO,
+            "HOLD: missing or inconsistent explicit signing budget"
+        );
+        match role {
+            "commitment" | "heartbeat" => Ok(self.commitment_gas_units),
+            "root" => Ok(self.root_gas_units),
+            _ => anyhow::bail!("HOLD: unknown signing role"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -250,6 +297,43 @@ fn hash(value: &Value, name: &str) -> Result<B256> {
 }
 
 impl ExecutionAuthority {
+    pub(crate) fn signer_role(&self, sender: Address) -> Result<&'static str> {
+        let roles =
+            self.manifest.execution.signers.context(
+                "HOLD: fresh signing requires independently approved distinct signer roles",
+            )?;
+        ensure!(
+            [roles.commitment, roles.root, roles.heartbeat]
+                .iter()
+                .all(|address| *address != Address::ZERO)
+                && roles.commitment != roles.root
+                && roles.commitment != roles.heartbeat
+                && roles.root != roles.heartbeat,
+            "HOLD: commitment, root and heartbeat signers must be distinct"
+        );
+        if sender == roles.commitment {
+            Ok("commitment")
+        } else if sender == roles.root {
+            Ok("root")
+        } else if sender == roles.heartbeat {
+            Ok("heartbeat")
+        } else {
+            anyhow::bail!("HOLD: account is not an approved execution signer")
+        }
+    }
+
+    pub(crate) fn signing_policy(&self, role: &str, sender: Address) -> Result<SigningPolicy> {
+        ensure!(
+            self.signer_role(sender)? == role,
+            "HOLD: configured account belongs to another signing role"
+        );
+        let policy = self.manifest.execution.signing_policy.context(
+            "HOLD: fresh signing requires explicit independently approved spending limits",
+        )?;
+        policy.gas_limit(role)?;
+        Ok(policy)
+    }
+
     pub(crate) fn load(
         path: &Path,
         finality: &cli_utils::EthereumFinalityArgs,
@@ -736,7 +820,12 @@ impl ExecutionAuthority {
         Ok(())
     }
     pub(crate) async fn verify_source(&self, source: &crate::source::Source) -> Result<()> {
-        source.validate_attachment(&self.manifest.anchor).await?;
+        source
+            .validate_approved_attachment(
+                &self.manifest.anchor,
+                &self.manifest.execution.runtime_transitions,
+            )
+            .await?;
         ensure!(
             source.source_genesis == hash(&self.manifest.anchor, "sourceGenesis")?.0
                 && source.bridge_domain == hash(&self.manifest.anchor, "bridgeDomain")?.0

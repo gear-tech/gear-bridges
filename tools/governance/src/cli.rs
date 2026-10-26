@@ -1,4 +1,4 @@
-use alloy::primitives::Address;
+use alloy::primitives::{Address, B256};
 use clap::{Parser, Subcommand, ValueEnum};
 use gprimitives::ActorId;
 use std::{ops::Deref, str::FromStr};
@@ -11,6 +11,18 @@ use cli_utils::EthereumConnectionArgs;
 pub struct Cli {
     #[clap(flatten)]
     pub eth_connection: EthereumConnectionArgs,
+    /// Explicit source/destination stream sequence (never inferred from an RPC).
+    #[arg(long)]
+    pub sequence: Option<u64>,
+    /// Inclusive Unix expiry for this independently approved capability.
+    #[arg(long)]
+    pub valid_until: Option<u64>,
+    #[arg(long, default_value_t = 0)]
+    pub incident_epoch: u64,
+    #[arg(long, default_value_t = B256::ZERO)]
+    pub required_admin_action: B256,
+    #[arg(long, default_value_t = B256::ZERO)]
+    pub required_barrier: B256,
 
     /// Destination
     #[command(subcommand)]
@@ -40,6 +52,12 @@ pub enum DestinationCommand {
 #[derive(Debug, Subcommand)]
 #[command(rename_all = "verbatim")]
 pub enum GovernanceAdminCommand {
+    /// Cancel capabilities through a sequence on one exact configured stream.
+    Cancel {
+        source: B256,
+        destination: Address,
+        through: u64,
+    },
     /// Change governance address to `new_governance`
     ChangeGovernance {
         /// New governance address in 0x-prefixed hex or SS58 format (Vara Network)

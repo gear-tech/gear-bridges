@@ -611,7 +611,9 @@ contract BeefyInteropTest is BeefyFixtureTest {
                     client.lastAuthenticatedSourceTimestampMs(), fixtureUint(i, "freshnessProof.sourceTimestampMs")
                 );
                 (BeefyClient.MMRLeaf memory fresh,, bytes32[] memory items, uint256 order) = freshnessWitness(i);
-                assertTrue(client.verifyMMRLeafProof(keccak256(leafBytes(fresh)), items, order));
+                assertTrue(
+                    client.verifyMMRLeafProof(p.anchorBlock, p.anchorRoot, keccak256(leafBytes(fresh)), items, order)
+                );
             }
         }
         vm.resumeGasMetering();
@@ -695,10 +697,18 @@ contract BeefyInteropTest is BeefyFixtureTest {
             items,
             order
         );
-        assertTrue(client.verifyMMRLeafProof(keccak256(leafBytes(leaf)), items, order));
+        assertTrue(
+            client.verifyMMRLeafProof(102, fixtureHash(index, "mmrRoot"), keccak256(leafBytes(leaf)), items, order)
+        );
         if (items.length < 256) {
             assertFalse(
-                client.verifyMMRLeafProof(keccak256(leafBytes(leaf)), items, order | (uint256(1) << items.length))
+                client.verifyMMRLeafProof(
+                    102,
+                    fixtureHash(index, "mmrRoot"),
+                    keccak256(leafBytes(leaf)),
+                    items,
+                    order | (uint256(1) << items.length)
+                )
             );
         }
     }

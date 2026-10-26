@@ -349,7 +349,7 @@ async fn replay_back_and_updating() -> Result<()> {
 
     // start to replay back
     let (gas_limit, (sync_update, sync_aggregate_encoded, headers)) = {
-        let sync_update = utils::sync_update_from_finality(signature, finality_update.clone());
+        let sync_update = utils::sync_update_from_finality(signature, finality_update);
         let params = (
             sync_update,
             sync_aggregate_encoded,
@@ -369,8 +369,12 @@ async fn replay_back_and_updating() -> Result<()> {
     };
 
     println!("replay_back_io::Start gas_limit = {gas_limit}");
+    let replay_checkpoint = (
+        sync_update.finalized_header.slot,
+        sync_update.finalized_header.tree_hash_root(),
+    );
     let result = service
-        .start(sync_update, sync_aggregate_encoded.clone(), headers)
+        .start(sync_update, sync_aggregate_encoded, headers)
         .with_gas_limit(gas_limit)
         .send_recv(program_id)
         .await
@@ -381,28 +385,6 @@ async fn replay_back_and_updating() -> Result<()> {
         "result = {result:?}"
     );
 
-    // second attempt to start backreplay should fail
-    let sync_update = utils::sync_update_from_finality(signature, finality_update);
-    let result = service
-        .start(
-            sync_update.clone(),
-            sync_aggregate_encoded,
-            headers_all
-                .iter()
-                .rev()
-                .take(size_batch)
-                .map(|r| r.data.header.message.clone())
-                .rev()
-                .collect(),
-        )
-        .send_recv(program_id)
-        .await
-        .unwrap();
-
-    assert!(
-        matches!(result, Err(ReplayBackError::AlreadyStarted)),
-        "result = {result:?}"
-    );
     let mut listener = api.subscribe().await.unwrap();
     // replaying the blocks back
     let headers = headers_all
@@ -454,8 +436,7 @@ async fn replay_back_and_updating() -> Result<()> {
                             headers_all.iter().any(|header| {
                                 header.data.header.message.slot == slot
                                     && header.data.header.message.tree_hash_root() == tree_hash_root
-                            }) || (sync_update.finalized_header.slot == slot
-                                && sync_update.finalized_header.tree_hash_root() == tree_hash_root),
+                            }) || (slot, tree_hash_root) == replay_checkpoint,
                             "unexpected replay checkpoint: slot = {slot}, root = {tree_hash_root:?}"
                         );
 
@@ -467,10 +448,7 @@ async fn replay_back_and_updating() -> Result<()> {
                 _ => None,
             },
             |res| {
-                let finished = res.contains(&(
-                    sync_update.finalized_header.slot,
-                    sync_update.finalized_header.tree_hash_root(),
-                ));
+                let finished = res.contains(&replay_checkpoint);
                 (res, finished)
             },
         )

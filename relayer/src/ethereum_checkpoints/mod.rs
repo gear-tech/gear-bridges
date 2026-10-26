@@ -137,7 +137,7 @@ impl Relayer {
                     replay_back,
                     checkpoint,
                 }) => {
-                    replay_back::execute(replay_back::Args {
+                    match replay_back::execute(replay_back::Args {
                         beacon_client: &self.beacon_client,
                         gear_api: &self.gear_api,
                         program_id: self.program_id.0,
@@ -148,8 +148,14 @@ impl Relayer {
                         size_batch: self.size_batch,
                         sync_aggregate_encoded,
                     })
-                    .await?;
-                    Ok(())
+                    .await
+                    {
+                        Ok(()) => Ok(()),
+                        Err(error) if error.is::<replay_back::ReplayStateChanged>() => {
+                            Err(Error::StateChanged)
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
                 result => result,
             };

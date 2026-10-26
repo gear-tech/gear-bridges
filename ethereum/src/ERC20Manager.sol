@@ -188,6 +188,10 @@ contract ERC20Manager is
     CustomEnumerableMap.AddressToTokenTypeMap private _tokens;
     EnumerableSet.AddressSet private _bridgingPayments;
 
+    // Append-only: retained token registrations remain enabled without initialization.
+    mapping(address => bool) private _admissionDisabled;
+    bytes32 private constant GEAR_SYSTEM = hex"6765617267656172676561726765617267656172676561726765617267656172";
+
     /**
      * @custom:oz-upgrades-unsafe-allow constructor
      */
@@ -350,6 +354,18 @@ contract ERC20Manager is
         return tokenType;
     }
 
+    function tokenAdmissionEnabled(address token) external view returns (bool) {
+        (, TokenType tokenType) = _tokens.tryGet(token);
+        return tokenType != TokenType.Unknown && !_admissionDisabled[token];
+    }
+
+    function _setTokenAdmission(address token, bool enabled) private {
+        (, TokenType tokenType) = _tokens.tryGet(token);
+        if (tokenType == TokenType.Unknown) revert InvalidTokenType();
+        _admissionDisabled[token] = !enabled;
+        emit TokenAdmissionChanged(token, enabled);
+    }
+
     /**
      * @dev Returns total number of bridging payments.
      * @return totalBridgingPayments Total number of bridging payments.
@@ -470,15 +486,13 @@ contract ERC20Manager is
         if (to == bytes32(0)) {
             revert InvalidRecipient();
         }
-        if (amount > type(uint80).max) {
-            address wrappedVara = address(_governanceAdmin.wrappedVara());
-            if (wrappedVara == address(0)) {
-                revert InvalidWrappedVara();
-            }
-            if (token == wrappedVara) {
-                revert InvalidAmount();
-            }
+        address wrappedVara = address(_governanceAdmin.wrappedVara());
+        if (wrappedVara == address(0)) revert InvalidWrappedVara();
+        if (token == wrappedVara) {
+            if (to == GEAR_SYSTEM) revert InvalidRecipient();
+            if (amount > type(uint80).max) revert InvalidAmount();
         }
+        if (_admissionDisabled[token]) revert TokenAdmissionDisabled(token);
 
         (, TokenType tokenType) = _tokens.tryGet(token);
 
@@ -705,6 +719,13 @@ contract ERC20Manager is
             /* reviewed: ... */
             // `DISCRIMINANT_BIT_SHIFT` right bit shift is required to remove extra bits since `calldataload` returns `uint256`
             discriminant := shr(DISCRIMINANT_BIT_SHIFT, calldataload(payload.offset))
+        }
+
+        // 0x03 || token(20) || enabled(1), exact canonical boolean.
+        if (discriminant == 3) {
+            if (payload.length != 22 || uint8(payload[21]) > 1) return false;
+            _setTokenAdmission(address(bytes20(payload[1:21])), payload[21] == bytes1(uint8(1)));
+            return true;
         }
 
         if (!(discriminant >= ADD_VFT_MANAGER && discriminant <= uint256(TokenType.Gear))) {

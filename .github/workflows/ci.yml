@@ -145,6 +145,26 @@ jobs:
           EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD" && git rev-parse HEAD
 
+      - name: Verify reviewed Sails revision in active locks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          reviewed = "3cd30d98a22ad92f0c3ac3a1bf0c2fb360fb75c9"
+          # Historical immutable-token fixture locks are deliberately excluded.
+          locks = [Path("Cargo.lock"), *sorted(Path("gear-programs").glob("*/Cargo.lock"))]
+          for path in locks:
+              packages = tomllib.loads(path.read_text())["package"]
+              sails = [p for p in packages if p["name"].startswith("sails-")]
+              assert sails, f"{path}: missing Sails packages"
+              for package in sails:
+                  source = package.get("source", "")
+                  assert source.startswith("git+https://github.com/gear-tech/sails.git?"), (path, package)
+                  assert source.rsplit("#", 1)[-1] == reviewed, (path, package)
+          print(f"Reviewed Sails revision verified in {len(locks)} active lockfiles")
+          PY
+
       - name: "Install: Linux packages"
         run: |
           sudo apt update
@@ -245,6 +265,12 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Install frontend client generation dependencies
+        run: yarn install --immutable
+
+      - name: Compare frontend clients with canonical Cargo IDLs
+        run: yarn workspace frontend check:sails
 
   lints:
     needs: check-frontend-changes

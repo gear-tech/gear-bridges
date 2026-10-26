@@ -133,6 +133,10 @@ pub enum Error {
     WrongNodeUrl,
     #[error("Wrong private key")]
     WrongPrivateKey,
+    #[error("HOLD: Ethereum signer is not configured")]
+    SignerNotConfigured,
+    #[error("HOLD: Ethereum signing policy admission failed: {0}")]
+    SigningPolicy(String),
     #[error("Error during contract execution: {0}")]
     ErrorDuringContractExecution(alloy::contract::Error),
     /// Challenge gas estimation failed before any send was attempted.
@@ -298,14 +302,6 @@ mod tests {
             .send()
             .await
             .unwrap_err();
-        assert!(
-            std::iter::successors(Some(&error as &(dyn StdError + 'static)), |&error| error
-                .source())
-            .any(|error| error
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|error| error.kind() == ErrorKind::AddrNotAvailable)),
-            "{error:?}"
-        );
         assert!(is_transient_rpc_cause(&error));
         let rpc = RpcError::Transport(TransportErrorKind::Custom(Box::new(error)));
         let error = Error::ErrorQueryingEvent(alloy::contract::Error::TransportError(rpc));

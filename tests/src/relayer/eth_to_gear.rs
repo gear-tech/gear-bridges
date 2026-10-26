@@ -1,15 +1,12 @@
 use alloy::{
+    eips::eip2718::Encodable2718,
     primitives::{fixed_bytes, FixedBytes},
     rpc::types::TransactionReceipt,
 };
-use alloy_rlp::Encodable;
 use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof, EthToVaraEvent};
 use ethereum_common::{
     beacon::electra::Block,
-    utils::{
-        self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof,
-        ReceiptEnvelope,
-    },
+    utils::{self as eth_utils, BeaconBlockHeaderResponse, BeaconBlockResponse, MerkleProof},
 };
 use gear_common::api_provider::ApiProvider;
 use relayer::message_relayer::{
@@ -33,7 +30,7 @@ use std::{
     io::Read,
     sync::{Arc, LazyLock},
 };
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use vft_manager_client::traits::VftManager;
 
 #[derive(Deserialize, Debug)]
@@ -61,12 +58,11 @@ use primitive_types::H160;
 
 impl TestTx {
     pub fn eth_token_id(&self) -> H160 {
-        use alloy_rlp::Decodable;
         use alloy_sol_types::SolEvent;
         let event = self.event();
 
-        let receipt =
-            ReceiptEnvelope::decode(&mut &event.receipt_rlp[..]).expect("Failed to decode receipt");
+        let receipt = eth_utils::decode_canonical_receipt(&event.receipt_rlp)
+            .expect("Failed to decode canonical receipt");
 
         if !receipt.is_success() {
             panic!("Receipt is not successful");
@@ -107,8 +103,7 @@ impl TestTx {
         let MerkleProof { proof, receipt } =
             eth_utils::generate_merkle_proof(self.tx_index, &receipts).unwrap();
 
-        let mut receipt_rlp = Vec::with_capacity(Encodable::length(&receipt));
-        Encodable::encode(&receipt, &mut receipt_rlp);
+        let receipt_rlp = receipt.encoded_2718();
 
         let block = BlockGenericForBlockBody {
             slot: self.block.data.message.slot,
@@ -157,27 +152,25 @@ struct MockProofComposer;
 
 impl MockProofComposer {
     async fn run(
-        mut requests: UnboundedReceiver<proof_composer::Request>,
-        response: UnboundedSender<proof_composer::Response>,
+        mut requests: Receiver<proof_composer::Request>,
+        response: Sender<proof_composer::Response>,
     ) {
         tokio::task::spawn(async move {
-            loop {
-                if requests.is_closed() || response.is_closed() {
-                    return;
-                }
-
-                let req = requests.recv().await.unwrap();
-
+            while let Some(req) = requests.recv().await {
                 let tx = TRANSACTIONS.get(&req.tx.tx_hash).unwrap();
 
                 let event = tx.event();
                 println!("compose proof #{}: {:?}", req.tx_uuid, tx.tx_hash);
-                response
+                if response
                     .send(proof_composer::Response {
                         payload: event,
                         tx_uuid: req.tx_uuid,
                     })
-                    .unwrap();
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
             }
         });
     }
@@ -281,7 +274,9 @@ async fn custom_consumer_preserves_authenticated_original_result() {
         provider.connection(),
         conn.accounts[0].2.clone(),
         None,
-    );
+    )
+    .with_approved_gear_gas_limit(conn.gas_limit)
+    .unwrap();
     // This account has no VFT-manager query interface. Only the manager route
     // may require its domain/economic queries; generic preparation must work.
     let manager_sender = MessageSender::new(
@@ -291,7 +286,9 @@ async fn custom_consumer_preserves_authenticated_original_result() {
         provider.connection(),
         conn.accounts[0].2.clone(),
         None,
-    );
+    )
+    .with_approved_gear_gas_limit(conn.gas_limit)
+    .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(120), async {
         assert!(manager_sender
             .prepare_submission(&api, &proof)
@@ -378,7 +375,9 @@ async fn custom_consumer_preserves_authenticated_original_result() {
                 provider.connection(),
                 conn.accounts[0].2.clone(),
                 None,
-            );
+            )
+            .with_approved_gear_gas_limit(conn.gas_limit)
+            .unwrap();
             assert!(changed_route
                 .reconcile_signed_submission(&api, &proof, &mut signed.clone(), None)
                 .await
@@ -413,8 +412,8 @@ async fn test_tx_manager() {
         .gclient_client(&contracts.suri)
         .expect("Failed to create GClient client");
 
-    let (proof_req_tx, proof_req_rx) = unbounded_channel();
-    let (proof_res_tx, proof_res_rx) = unbounded_channel();
+    let (proof_req_tx, proof_req_rx) = channel(128);
+    let (proof_res_tx, proof_res_rx) = channel(128);
 
     let mut proof_composer_io = ProofComposerIo::new(proof_req_tx, proof_res_rx);
 
@@ -427,41 +426,47 @@ async fn test_tx_manager() {
         conn.clone(),
         contracts.suri2.clone(),
         None,
-    );
+    )
+    .with_approved_gear_gas_limit(contracts.gas_limit)
+    .unwrap();
 
     let mut message_sender_io = message_sender.run();
 
     let tx_manager = TransactionManager::new(Arc::new(TestStorage(BlockStorage::new())));
 
-    let (events_tx, mut events_rx) = unbounded_channel();
+    let (events_tx, mut events_rx) = channel(128);
 
     // Bound the delivery batch independently of deployment and the paused-receipt scenario.
     tokio::time::timeout(std::time::Duration::from_secs(120), async {
-        for (_, tx_data) in TRANSACTIONS.iter().filter(|(hash, _)| **hash != TX_TO_FAIL) {
-            let tx_event = TxHashWithSlot {
-                tx_hash: tx_data.tx_hash,
-                slot_number: EthereumSlotNumber(tx_data.slot_number),
-            };
+        let produce = async {
+            for (_, tx_data) in TRANSACTIONS.iter().filter(|(hash, _)| **hash != TX_TO_FAIL) {
+                let tx_event = TxHashWithSlot {
+                    tx_hash: tx_data.tx_hash,
+                    slot_number: EthereumSlotNumber(tx_data.slot_number),
+                };
 
-            events_tx.send(tx_event).unwrap();
-        }
-
-        loop {
-            assert!(
-                tx_manager
-                    .process(
-                        &mut events_rx,
-                        &mut proof_composer_io,
-                        &mut message_sender_io,
-                    )
-                    .await
-                    .expect("transaction manager failed while delivering receipts"),
-                "transaction manager channel closed before delivery completed"
-            );
-            if tx_manager.completed.read().await.len() == TRANSACTIONS.len() - 1 {
-                break;
+                events_tx.send(tx_event).await.unwrap();
             }
-        }
+        };
+        let consume = async {
+            loop {
+                assert!(
+                    tx_manager
+                        .process(
+                            &mut events_rx,
+                            &mut proof_composer_io,
+                            &mut message_sender_io,
+                        )
+                        .await
+                        .expect("transaction manager failed while delivering receipts"),
+                    "transaction manager channel closed before delivery completed"
+                );
+                if tx_manager.completed.read().await.len() == TRANSACTIONS.len() - 1 {
+                    break;
+                }
+            }
+        };
+        tokio::join!(produce, consume);
     })
     .await
     .expect("native receipt delivery batch exceeded 120 seconds after deployment");
@@ -484,13 +489,17 @@ async fn test_tx_manager() {
             .unwrap()
             .clone();
         signed.chain_genesis_hash = format!("{:#x}", primitive_types::H256::zero());
-        assert!(message_sender_io.submit_prepared(
-            delivered.uuid,
-            delivered.tx.tx_hash,
-            TRANSACTIONS.get(&delivered.tx.tx_hash).unwrap().event(),
-            signed,
-            None,
-        ));
+        assert!(
+            message_sender_io
+                .submit_prepared(
+                    delivered.uuid,
+                    delivered.tx.tx_hash,
+                    TRANSACTIONS.get(&delivered.tx.tx_hash).unwrap().event(),
+                    signed,
+                    None,
+                )
+                .await
+        );
         let rejected = message_sender_io
             .recv()
             .await
@@ -514,6 +523,7 @@ async fn test_tx_manager() {
                 tx_hash: TX_TO_FAIL,
                 slot_number: EthereumSlotNumber(TRANSACTIONS.get(&TX_TO_FAIL).unwrap().slot_number),
             })
+            .await
             .unwrap();
 
         loop {

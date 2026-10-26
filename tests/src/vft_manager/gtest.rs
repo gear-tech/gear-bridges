@@ -171,7 +171,7 @@ async fn mint_eth_supply_tokens(
 ) {
     let receipt_rlp = deposit_receipt(account_id, ERC20_TOKEN_ETH_SUPPLY, amount);
     VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
-        .submit_receipt(0, transaction_index, receipt_rlp)
+        .submit_receipt(1, transaction_index, receipt_rlp)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap()
@@ -248,9 +248,9 @@ async fn benchmark_reply(
         );
         assert!(deposit.child.is_some());
         assert_eq!(deposit.receiver, caller);
-        assert_eq!(deposit.token_id, caller);
+        assert_eq!(deposit.token_id, Some(caller));
         assert_eq!(deposit.amount, U256::from(100_u32));
-        assert_eq!(deposit.supply, supply);
+        assert_eq!(deposit.supply.as_ref(), Some(&supply));
         assert!(!deposit.native);
         assert_ne!(deposit.operation_id, H256::zero());
         assert_eq!(
@@ -300,6 +300,15 @@ async fn setup_with_wrapper(
     reply_timeout: u32,
     escrow_v1: bool,
 ) -> Fixture {
+    setup_with_wrapper_and_floor(builtin_behavior, reply_timeout, escrow_v1, 1).await
+}
+
+async fn setup_with_wrapper_and_floor(
+    builtin_behavior: Option<ReplyBehavior>,
+    reply_timeout: u32,
+    escrow_v1: bool,
+    minimum_receipt_slot: u64,
+) -> Fixture {
     let system = System::new();
     system.init_logger();
     system.mint_to(REMOTING_ACTOR_ID, 100_000_000_000_000_000);
@@ -323,6 +332,7 @@ async fn setup_with_wrapper(
     let init_config = InitConfig {
         gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
         historical_proxy_address: HISTORICAL_PROXY_ID.into(),
+        minimum_receipt_slot,
         config: Config {
             gas_for_token_ops: 15_000_000_000,
             gas_for_reply_deposit: 15_000_000_000,
@@ -419,6 +429,909 @@ async fn setup_with_wrapper(
     }
 }
 
+/// Reconstructed from supplied HTML VB-22, audited 7fe1b032; actual candidate manager Wasm.
+#[tokio::test]
+async fn reconstructed_html_unmapped_sibling_is_retained_without_blocking_mint() {
+    use vft_manager_client::{ReceiptDepositOutcome, ReceiptRejectionEvidence};
+    let Fixture {
+        remoting,
+        vft_manager_program_id: manager,
+        eth_supply_vft: token,
+        ..
+    } = setup_for_test().await;
+    let recipient: ActorId = 120_001.into();
+    let unmapped = H160([92; 20]);
+    let amount = U256::from(17u64);
+    let receipt = crate::create_receipt_rlp_with_logs(
+        ERC20_MANAGER_ADDRESS,
+        vec![
+            (H160([3; 20]), recipient, unmapped, amount),
+            (H160([4; 20]), recipient, ERC20_TOKEN_ETH_SUPPLY, amount),
+        ],
+    );
+    let mut admin = VftManagerC::new(remoting.clone());
+    assert_eq!(
+        submit_receipt_events(&remoting, manager, 82, 0, receipt.clone()).0,
+        Err(Error::ReceiptResolved)
+    );
+    let rows = receipt_deposits(&admin, manager, 82, 0).await;
+    assert_eq!(
+        (rows[0].token_id, rows[0].supply.as_ref(), rows[0].child),
+        (None, None, None)
+    );
+    assert_eq!(rows[0].eth_token_id, unmapped);
+    assert_eq!(rows[0].receiver, recipient);
+    assert_eq!(rows[0].outcome, ReceiptDepositOutcome::Rejected);
+    assert_eq!(
+        admin
+            .receipt_rejection(82, 0, 0)
+            .recv(manager)
+            .await
+            .unwrap(),
+        Some(ReceiptRejectionEvidence::UnmappedToken)
+    );
+    assert_eq!(rows[1].outcome, ReceiptDepositOutcome::Settled);
+    assert_eq!(balance_of(&remoting, token, recipient).await, amount);
+    admin.pause().send_recv(manager).await.unwrap();
+    let added = deploy_vft(&remoting, "Later", "LATE", 6, b"late-mapping").await;
+    admin
+        .map_vara_to_eth_address(added, unmapped, TokenSupply::Ethereum)
+        .send_recv(manager)
+        .await
+        .unwrap();
+    admin.unpause().send_recv(manager).await.unwrap();
+    assert_eq!(
+        submit_receipt_events(&remoting, manager, 82, 0, receipt).0,
+        Err(Error::AlreadyProcessed)
+    );
+    assert_eq!(receipt_deposits(&admin, manager, 82, 0).await, rows);
+    assert_eq!(balance_of(&remoting, added, recipient).await, U256::zero());
+    admin.pause().send_recv(manager).await.unwrap();
+    let destination = upgrade_destination(&remoting, manager, 90).await;
+    configure_cutover_destination(&remoting, manager, destination).await;
+    let begin_generation = admin
+        .cutover_status()
+        .recv(manager)
+        .await
+        .unwrap()
+        .generation;
+    admin
+        .begin_cutover(destination, 90, begin_generation)
+        .send_recv(manager)
+        .await
+        .unwrap();
+    admin
+        .prepare_cutover(manager, 90)
+        .send_recv(destination)
+        .await
+        .unwrap();
+    assert!(
+        admin.upgrade(destination).send_recv(manager).await.is_err(),
+        "unmapped liability is not excluded"
+    );
+}
+
+/// Reconstructed from supplied HTML G3-02, audited 7fe1b032; runtime refund, not a typed-error mock.
+#[tokio::test]
+async fn reconstructed_html_paused_value_is_returned_before_typed_rejection() {
+    use vft_manager_client::vft_manager::io::RequestBridging;
+    let Fixture {
+        remoting,
+        vft_manager_program_id: manager,
+        eth_supply_vft: token,
+        ..
+    } = setup_for_test().await;
+    let mut admin = VftManagerC::new(remoting.clone());
+    admin.pause().send_recv(manager).await.unwrap();
+    let before = remoting.system().balance_of(manager);
+    let caller_before = remoting.system().balance_of(REMOTING_ACTOR_ID);
+    let value = 1_000_000_000_000u128;
+    let request = remoting
+        .system()
+        .get_program(manager)
+        .unwrap()
+        .send_bytes_with_gas(
+            REMOTING_ACTOR_ID,
+            RequestBridging::encode_call(token, U256::one(), ETH_TOKEN_RECEIVER),
+            gtest::constants::MAX_USER_GAS_LIMIT,
+            value,
+        );
+    let mut failed = false;
+    let mut spent = 0;
+    for _ in 0..10 {
+        let block = remoting.system().run_next_block();
+        failed |= block.failed.contains(&request);
+        spent += block.spent_value();
+    }
+    assert!(
+        failed,
+        "nonzero attached value must trap for runtime refund"
+    );
+    assert_eq!(remoting.system().balance_of(manager), before);
+    assert_eq!(
+        remoting.system().balance_of(REMOTING_ACTOR_ID),
+        caller_before - spent,
+        "all attached value must return; only execution gas is spent"
+    );
+    assert_eq!(
+        admin
+            .request_bridging(token, U256::one(), ETH_TOKEN_RECEIVER)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Err(Error::Paused)
+    );
+    assert!(admin
+        .request_briding_msg_tracker_state(0, 100)
+        .recv(manager)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+/// Reconstructed from supplied HTML G3-03/G3-05, audited 7fe1b032.
+#[tokio::test]
+async fn reconstructed_html_pause_between_logs_preserves_original_and_releases_lease() {
+    use vft_client::vft::io::TransferFrom;
+    use vft_manager_client::ReceiptDepositOutcome;
+    for emergency in [false, true] {
+        let Fixture {
+            remoting,
+            vft_manager_program_id: manager,
+            eth_supply_vft: token,
+            ..
+        } = setup_for_test().await;
+        let delayed: ActorId = 120_002.into();
+        let recipient: ActorId = 120_003.into();
+        remoting.system().mint_to(delayed, 100_000_000_000_000);
+        let mut admin = VftManagerC::new(remoting.clone());
+        admin.pause().send_recv(manager).await.unwrap();
+        admin
+            .map_vara_to_eth_address(delayed, H160([93; 20]), TokenSupply::Gear)
+            .send_recv(manager)
+            .await
+            .unwrap();
+        admin
+            .add_emergency_stop_observer(REMOTING_ACTOR_ID.into())
+            .send_recv(manager)
+            .await
+            .unwrap();
+        admin.unpause().send_recv(manager).await.unwrap();
+        let amount = U256::from(17u64);
+        let receipt = crate::create_receipt_rlp_with_logs(
+            ERC20_MANAGER_ADDRESS,
+            vec![
+                (H160([3; 20]), recipient, H160([93; 20]), amount),
+                (H160([4; 20]), recipient, ERC20_TOKEN_ETH_SUPPLY, amount),
+            ],
+        );
+        let manual = remoting
+            .clone()
+            .with_actor_id(HISTORICAL_PROXY_ID.into())
+            .with_block_run_mode(BlockRunMode::Manual);
+        let mut proxy = VftManagerC::new(manual.clone());
+        let pending = proxy
+            .submit_receipt(83, 0, receipt.clone())
+            .send(manager)
+            .await
+            .unwrap();
+        for _ in 0..3 {
+            manual.run_next_block();
+        }
+        if emergency {
+            admin.emergency_stop().send_recv(manager).await.unwrap();
+        } else {
+            admin.pause().send_recv(manager).await.unwrap();
+        }
+        let call = Log::builder()
+            .source(manager)
+            .dest(delayed)
+            .payload_bytes(TransferFrom::encode_call(manager, recipient, amount));
+        let mut reply = TransferFrom::ROUTE.to_vec();
+        true.encode_to(&mut reply);
+        remoting
+            .system()
+            .get_mailbox(delayed)
+            .reply_bytes(call, reply, 0)
+            .unwrap();
+        for _ in 0..3 {
+            manual.run_next_block();
+        }
+        assert_eq!(
+            pending.recv().now_or_never().unwrap().unwrap(),
+            Err(Error::Paused)
+        );
+        let rows = receipt_deposits(&admin, manager, 83, 0).await;
+        assert_eq!(
+            rows[0].outcome,
+            ReceiptDepositOutcome::Settled,
+            "late original hook still records"
+        );
+        assert_eq!(rows[1].outcome, ReceiptDepositOutcome::Pending);
+        assert_eq!(rows[1].child, None);
+        assert_eq!(balance_of(&remoting, token, recipient).await, U256::zero());
+        assert_eq!(
+            admin
+                .reconcile_receipt(83, 0)
+                .send_recv(manager)
+                .await
+                .unwrap(),
+            Err(Error::Paused)
+        );
+        if emergency {
+            admin
+                .disable_emergency_stop()
+                .send_recv(manager)
+                .await
+                .unwrap();
+        } else {
+            admin.unpause().send_recv(manager).await.unwrap();
+        }
+        assert_eq!(
+            submit_receipt_events(&remoting, manager, 83, 0, receipt).0,
+            Ok(())
+        );
+        let settled = receipt_deposits(&admin, manager, 83, 0).await;
+        assert_eq!(settled[0], rows[0]);
+        assert_eq!(settled[1].outcome, ReceiptDepositOutcome::Settled);
+        assert_eq!(balance_of(&remoting, token, recipient).await, amount);
+    }
+}
+
+/// Reconstructed from supplied HTML VB-21, audited 7fe1b032.
+#[tokio::test]
+async fn reconstructed_html_frozen_preflight_abort_restores_exact_generation() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id: manager,
+        eth_supply_vft: token,
+        ..
+    } = setup_for_test().await;
+    let mut admin = VftManagerC::new(remoting.clone());
+    admin.pause().send_recv(manager).await.unwrap();
+    let destination = upgrade_destination(&remoting, manager, 90).await;
+    configure_cutover_destination(&remoting, manager, destination).await;
+    let before = admin.cutover_status().recv(manager).await.unwrap();
+    let destination_before = admin.cutover_status().recv(destination).await.unwrap();
+    VftAdminC::new(remoting.clone())
+        .pause()
+        .send_recv(token)
+        .await
+        .unwrap();
+    admin
+        .begin_cutover(destination, 90, before.generation)
+        .send_recv(manager)
+        .await
+        .unwrap();
+    admin
+        .prepare_cutover(manager, 90)
+        .send_recv(destination)
+        .await
+        .unwrap();
+    let prepared_generation = admin
+        .cutover_status()
+        .recv(destination)
+        .await
+        .unwrap()
+        .generation;
+    admin.upgrade(destination).send_recv(manager).await.unwrap();
+    let intent = admin.cutover_status().recv(manager).await.unwrap();
+    assert_eq!(intent.phase, vft_manager_client::CutoverPhase::Draining);
+    assert!(!intent.custody_started);
+    assert!(admin
+        .cutover_transfers(0, 100)
+        .recv(manager)
+        .await
+        .unwrap()
+        .is_empty());
+    admin
+        .abort_cutover(intent.generation)
+        .send_recv(manager)
+        .await
+        .unwrap();
+    let abort = admin
+        .cutover_abort(intent.generation)
+        .recv(manager)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(abort.successor, destination);
+    // A new identical intent cannot substitute for this generation's terminal abort.
+    let after_abort = admin.cutover_status().recv(manager).await.unwrap();
+    assert!(admin
+        .begin_cutover(destination, 90, before.generation)
+        .send_recv(manager)
+        .await
+        .is_err());
+    assert_eq!(
+        admin.cutover_status().recv(manager).await.unwrap(),
+        after_abort
+    );
+    admin
+        .begin_cutover(destination, 90, after_abort.generation)
+        .send_recv(manager)
+        .await
+        .unwrap();
+    let restarted = admin.cutover_status().recv(manager).await.unwrap();
+    assert!(admin
+        .abort_cutover(intent.generation)
+        .send_recv(manager)
+        .await
+        .is_err());
+    assert_eq!(
+        admin.cutover_status().recv(manager).await.unwrap(),
+        restarted
+    );
+    assert!(admin.upgrade(destination).send_recv(manager).await.is_err());
+    admin
+        .restore_aborted_cutover(prepared_generation)
+        .send_recv(destination)
+        .await
+        .unwrap();
+    let restored = admin.cutover_status().recv(destination).await.unwrap();
+    assert!(restored.generation > destination_before.generation);
+    assert_eq!(restored.phase, destination_before.phase);
+    assert_eq!(restored.predecessor, destination_before.predecessor);
+    assert_eq!(
+        restored.minimum_receipt_slot,
+        destination_before.minimum_receipt_slot
+    );
+    admin
+        .abort_cutover(restarted.generation)
+        .send_recv(manager)
+        .await
+        .unwrap();
+    let restored = admin.cutover_status().recv(manager).await.unwrap();
+    assert!(restored.generation > intent.generation);
+    assert_eq!(restored.phase, before.phase);
+    assert_eq!(restored.predecessor, before.predecessor);
+    assert_eq!(restored.minimum_receipt_slot, before.minimum_receipt_slot);
+    assert_eq!(
+        admin
+            .cutover_abort(intent.generation)
+            .recv(manager)
+            .await
+            .unwrap(),
+        Some(abort)
+    );
+}
+
+/// Reconstructed from supplied HTML VB-21, audited 7fe1b032.
+/// Manager is real Wasm; mailbox controls adversarial response timing, not token economics.
+#[tokio::test]
+async fn reconstructed_html_aborted_generation_cannot_resume_after_identical_begin() {
+    let (remoting, source, destination, token) = custody_mailbox_fixture().await;
+    let mut admin = VftManagerC::new(remoting.clone());
+    let generation = admin
+        .cutover_status()
+        .recv(source)
+        .await
+        .unwrap()
+        .generation;
+    start_custody_upgrade(&remoting, source, destination);
+    for _ in 0..3 {
+        remoting.run_next_block();
+    }
+    admin
+        .abort_cutover(generation)
+        .send_recv(source)
+        .await
+        .unwrap();
+    let begin_generation = admin
+        .cutover_status()
+        .recv(source)
+        .await
+        .unwrap()
+        .generation;
+    admin
+        .begin_cutover(destination, 32, begin_generation)
+        .send_recv(source)
+        .await
+        .unwrap();
+    reply_custody_balance(&remoting, source, token, U256::from(17u32));
+    let current = admin.cutover_status().recv(source).await.unwrap();
+    assert!(current.generation > generation);
+    assert_eq!(current.phase, vft_manager_client::CutoverPhase::Draining);
+    assert!(!current.custody_started);
+    assert!(admin
+        .cutover_transfers(0, 100)
+        .recv(source)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(admin
+        .cutover_abort(generation)
+        .recv(source)
+        .await
+        .unwrap()
+        .is_some());
+    let prepared_generation = admin
+        .cutover_status()
+        .recv(destination)
+        .await
+        .unwrap()
+        .generation;
+    admin
+        .restore_aborted_cutover(prepared_generation)
+        .send_recv(destination)
+        .await
+        .unwrap();
+    admin
+        .prepare_cutover(source, 32)
+        .send_recv(destination)
+        .await
+        .unwrap();
+    let new_preparation = admin.cutover_status().recv(destination).await.unwrap();
+    assert!(admin
+        .restore_aborted_cutover(prepared_generation)
+        .send_recv(destination)
+        .await
+        .is_err());
+    assert_eq!(
+        admin.cutover_status().recv(destination).await.unwrap(),
+        new_preparation
+    );
+    assert_eq!(
+        admin
+            .cutover_status()
+            .recv(destination)
+            .await
+            .unwrap()
+            .predecessor_generation,
+        Some(current.generation)
+    );
+}
+
+/// Reconstructed from supplied HTML VB-21, audited 7fe1b032; timeout is not no-effect proof.
+#[tokio::test]
+async fn reconstructed_html_custody_dispatch_permanently_disables_abort() {
+    let (remoting, source, destination, token) = custody_mailbox_fixture().await;
+    let mut admin = VftManagerC::new(remoting.clone());
+    start_custody_upgrade(&remoting, source, destination);
+    reply_custody_balance(&remoting, source, token, U256::from(17u32));
+    let original = admin.cutover_transfers(0, 100).recv(source).await.unwrap();
+    assert_eq!(original.len(), 1);
+    assert!(
+        admin
+            .cutover_status()
+            .recv(source)
+            .await
+            .unwrap()
+            .custody_started
+    );
+    let generation = admin
+        .cutover_status()
+        .recv(source)
+        .await
+        .unwrap()
+        .generation;
+    assert!(admin
+        .abort_cutover(generation)
+        .send_recv(source)
+        .await
+        .is_err());
+    for _ in 0..12 {
+        remoting.run_next_block();
+    }
+    assert!(admin
+        .abort_cutover(generation)
+        .send_recv(source)
+        .await
+        .is_err());
+    let retained = admin.cutover_transfers(0, 100).recv(source).await.unwrap();
+    assert_eq!(retained[0].child, original[0].child);
+    assert_eq!(retained[0].amount, original[0].amount);
+    assert_eq!(
+        retained[0].outcome,
+        vft_manager_client::CustodyTransferOutcome::Ambiguous
+    );
+    assert_eq!(
+        admin.cutover_status().recv(source).await.unwrap().phase,
+        vft_manager_client::CutoverPhase::Transferring
+    );
+}
+
+/// Reconstructed from supplied HTML state-bounds finding, audited 7fe1b032.
+#[tokio::test]
+async fn reconstructed_html_definite_failed_trackers_do_not_grow_quiescence_work() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id: manager,
+        eth_supply_vft: token,
+        ..
+    } = setup_for_test().await;
+    let mut admin = VftManagerC::new(remoting.clone());
+    for _ in 0..128 {
+        assert!(admin
+            .request_bridging(token, U256::one(), ETH_TOKEN_RECEIVER)
+            .send_recv(manager)
+            .await
+            .unwrap()
+            .is_err());
+    }
+    assert!(admin
+        .request_briding_msg_tracker_state(0, 100)
+        .recv(manager)
+        .await
+        .unwrap()
+        .is_empty());
+    admin.pause().send_recv(manager).await.unwrap();
+    assert!(admin
+        .prune_terminal_requests(vec![MessageId::zero(); 101])
+        .send_recv(manager)
+        .await
+        .is_err());
+    assert_eq!(
+        admin
+            .prune_terminal_requests(vec![MessageId::zero(); 100])
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        0
+    );
+    let destination = upgrade_destination(&remoting, manager, 90).await;
+    configure_cutover_destination(&remoting, manager, destination).await;
+    let begin_generation = admin
+        .cutover_status()
+        .recv(manager)
+        .await
+        .unwrap()
+        .generation;
+    admin
+        .begin_cutover(destination, 90, begin_generation)
+        .send_recv(manager)
+        .await
+        .unwrap();
+    admin
+        .prepare_cutover(manager, 90)
+        .send_recv(destination)
+        .await
+        .unwrap();
+    admin.upgrade(destination).send_recv(manager).await.unwrap();
+    assert_eq!(
+        admin.cutover_status().recv(manager).await.unwrap().phase,
+        vft_manager_client::CutoverPhase::Retired
+    );
+}
+
+/// Reconstructed from supplied HTML VB-21, audited 7fe1b032; malformed balance is pending, not zero.
+#[tokio::test]
+async fn reconstructed_html_malformed_custody_balance_remains_abortable() {
+    use vft_client::vft::io::BalanceOf;
+    use vft_manager_client::vft_manager::io::Upgrade;
+    let (remoting, source, destination, token) = custody_mailbox_fixture().await;
+    let request = start_custody_upgrade(&remoting, source, destination);
+    for _ in 0..3 {
+        remoting.run_next_block();
+    }
+    let query = Log::builder()
+        .source(source)
+        .dest(token)
+        .payload_bytes(BalanceOf::encode_call(source));
+    let mut bytes = BalanceOf::ROUTE.to_vec();
+    U256::zero().encode_to(&mut bytes);
+    bytes.push(0xff);
+    remoting
+        .system()
+        .get_mailbox(token)
+        .reply_bytes(query, bytes, 0)
+        .unwrap();
+    let mut replied = false;
+    for _ in 0..8 {
+        let block = remoting.system().run_next_block();
+        assert!(!block.failed.contains(&request));
+        for log in block.log() {
+            if log.reply_to() == Some(request) {
+                Upgrade::decode_reply(log.payload()).unwrap();
+                replied = true;
+            }
+        }
+    }
+    assert!(replied);
+    let mut admin = VftManagerC::new(remoting.clone());
+    assert_eq!(
+        admin.cutover_status().recv(source).await.unwrap().phase,
+        vft_manager_client::CutoverPhase::Draining
+    );
+    assert!(admin
+        .cutover_transfers(0, 100)
+        .recv(source)
+        .await
+        .unwrap()
+        .is_empty());
+    let generation = admin
+        .cutover_status()
+        .recv(source)
+        .await
+        .unwrap()
+        .generation;
+    admin
+        .abort_cutover(generation)
+        .send_recv(source)
+        .await
+        .unwrap();
+}
+
+// VB-12 regressions reconstructed from HTML (audited 7fe1b032; candidate baseline 3ccf409).
+// These exercise the candidate Wasm; the original PoC bundle was not available.
+#[tokio::test]
+async fn test_constructor_rejects_zero_receipt_floor() {
+    let system = System::new();
+    system.mint_to(REMOTING_ACTOR_ID, 100_000_000_000_000_000);
+    let remoting = GTestRemoting::new(system, REMOTING_ACTOR_ID.into());
+    let code = remoting.system().submit_code(vft_manager::WASM_BINARY);
+    let config = InitConfig {
+        minimum_receipt_slot: 0,
+        ..super::manager_init_config()
+    };
+    assert!(VftManagerFactoryC::new(remoting.clone())
+        .new(config.clone())
+        .send_recv(code, b"zero-floor")
+        .await
+        .is_err());
+    assert!(
+        VftManagerFactoryC::new(remoting)
+            .gas_calculation(config, 10, None)
+            .send_recv(code, b"zero-floor-benchmark")
+            .await
+            .is_err(),
+        "benchmark constructor must not bypass the floor"
+    );
+}
+
+#[tokio::test]
+async fn test_fresh_root_receipt_floor_rejects_history_without_child() {
+    use gear_core::ids::prelude::MessageIdExt;
+    use vft_manager_client::vft_manager::io::SubmitReceipt;
+    let Fixture {
+        remoting,
+        vft_manager_program_id: manager,
+        eth_supply_vft: token,
+        ..
+    } = setup_with_wrapper_and_floor(None, 100, false, 10).await;
+    let recipient: ActorId = 100_120.into();
+    let amount = U256::from(17u32);
+    let receipt = deposit_receipt(recipient, ERC20_TOKEN_ETH_SUPPLY, amount);
+    let admin = VftManagerC::new(remoting.clone());
+    let before = admin.cutover_status().recv(manager).await.unwrap();
+    assert_eq!(before.minimum_receipt_slot, 10);
+    assert!(before.predecessor.is_none());
+    let token_client = VftC::new(remoting.clone());
+    let supply = token_client.total_supply().recv(token).await.unwrap();
+    for slot in [0, 9] {
+        let request = remoting
+            .system()
+            .get_program(manager)
+            .unwrap()
+            .send_bytes_with_gas(
+                HISTORICAL_PROXY_ID,
+                SubmitReceipt::encode_call(slot, 0, receipt.clone()),
+                gtest::constants::MAX_USER_GAS_LIMIT,
+                0,
+            );
+        let first_child = MessageId::generate_outgoing(request, 0);
+        let mut reply = None;
+        for _ in 0..20 {
+            let block = remoting.system().run_next_block();
+            assert!(
+                !block.succeed.contains(&first_child)
+                    && !block.failed.contains(&first_child)
+                    && !block.not_executed.contains(&first_child)
+                    && !block.gas_burned.contains_key(&first_child)
+                    && !block
+                        .log()
+                        .iter()
+                        .any(|log| log.id() == first_child || log.reply_to() == Some(first_child)),
+                "pre-floor receipt dispatched a child"
+            );
+            for log in block.log() {
+                if log.reply_to() == Some(request) {
+                    assert!(reply.is_none());
+                    reply = Some(SubmitReceipt::decode_reply(log.payload()).unwrap());
+                }
+            }
+        }
+        assert_eq!(reply, Some(Err(Error::ReceiptOutsideDeployment)));
+        assert_eq!(
+            receipt_status(&admin, manager, slot, 0).await,
+            vft_manager_client::ReceiptStatus::Unknown
+        );
+        assert!(receipt_deposits(&admin, manager, slot, 0).await.is_empty());
+        assert_eq!(balance_of(&remoting, token, recipient).await, U256::zero());
+        assert_eq!(
+            token_client.total_supply().recv(token).await.unwrap(),
+            supply
+        );
+        assert_eq!(admin.cutover_status().recv(manager).await.unwrap(), before);
+    }
+    let mut proxy = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()));
+    proxy
+        .submit_receipt(10, 0, receipt.clone())
+        .send_recv(manager)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(balance_of(&remoting, token, recipient).await, amount);
+    assert_eq!(
+        token_client.total_supply().recv(token).await.unwrap(),
+        supply + amount
+    );
+    assert_eq!(
+        proxy
+            .submit_receipt(10, 0, receipt)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Err(Error::AlreadyProcessed)
+    );
+}
+
+// VB-20 reconstructed from HTML at 7fe1b032; executes fresh manager Wasm.
+#[tokio::test]
+async fn test_fresh_manager_requires_canonical_success_receipt_before_child() {
+    use alloy::eips::eip2718::{Decodable2718, Encodable2718};
+    use alloy_consensus::{Eip658Value, ReceiptEnvelope};
+    use alloy_rlp::Encodable;
+    use gear_core::ids::prelude::MessageIdExt;
+    use vft_manager_client::vft_manager::io::SubmitReceipt;
+
+    let Fixture {
+        remoting,
+        vft_manager_program_id: manager,
+        eth_supply_vft: token,
+        ..
+    } = setup_with_wrapper_and_floor(None, 100, false, 10).await;
+    let recipient: ActorId = 100_121.into();
+    let amount = U256::from(17u32);
+    let raw = deposit_receipt(recipient, ERC20_TOKEN_ETH_SUPPLY, amount);
+    let receipt =
+        ReceiptEnvelope::<alloy_primitives::Log>::decode_2718(&mut raw.as_slice()).unwrap();
+    let mut wrapped = Vec::new();
+    receipt.encode(&mut wrapped);
+    let mut trailing = raw.clone();
+    trailing.push(0);
+    let ReceiptEnvelope::Eip2930(mut post_state) = receipt else {
+        unreachable!()
+    };
+    post_state.receipt.status = Eip658Value::PostState(alloy_primitives::B256::repeat_byte(0x42));
+    let post_state = ReceiptEnvelope::Eip2930(post_state).encoded_2718();
+    let admin = VftManagerC::new(remoting.clone());
+    let token_client = VftC::new(remoting.clone());
+    let supply = token_client.total_supply().recv(token).await.unwrap();
+    for invalid in [wrapped, trailing, post_state] {
+        let request = remoting
+            .system()
+            .get_program(manager)
+            .unwrap()
+            .send_bytes_with_gas(
+                HISTORICAL_PROXY_ID,
+                SubmitReceipt::encode_call(10, 0, invalid),
+                gtest::constants::MAX_USER_GAS_LIMIT,
+                0,
+            );
+        let first_child = MessageId::generate_outgoing(request, 0);
+        let mut reply = None;
+        for _ in 0..20 {
+            let block = remoting.system().run_next_block();
+            assert!(
+                !block.succeed.contains(&first_child)
+                    && !block.failed.contains(&first_child)
+                    && !block.not_executed.contains(&first_child)
+                    && !block.gas_burned.contains_key(&first_child)
+                    && !block
+                        .log()
+                        .iter()
+                        .any(|log| log.id() == first_child || log.reply_to() == Some(first_child)),
+                "invalid framing/status dispatched an economic child"
+            );
+            for log in block.log() {
+                if log.reply_to() == Some(request) {
+                    assert!(reply.is_none());
+                    reply = Some(SubmitReceipt::decode_reply(log.payload()).unwrap());
+                }
+            }
+        }
+        assert_eq!(reply, Some(Err(Error::UnsupportedEthEvent)));
+        assert_eq!(
+            receipt_status(&admin, manager, 10, 0).await,
+            vft_manager_client::ReceiptStatus::Unknown
+        );
+        assert!(receipt_deposits(&admin, manager, 10, 0).await.is_empty());
+        assert_eq!(balance_of(&remoting, token, recipient).await, U256::zero());
+        assert_eq!(
+            token_client.total_supply().recv(token).await.unwrap(),
+            supply
+        );
+    }
+    VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
+        .submit_receipt(10, 0, raw)
+        .send_recv(manager)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(balance_of(&remoting, token, recipient).await, amount);
+    assert_eq!(
+        token_client.total_supply().recv(token).await.unwrap(),
+        supply + amount
+    );
+}
+
+#[tokio::test]
+async fn test_prepare_cutover_floor_mismatch_rejects_before_child_or_mutation() {
+    use gear_core::ids::prelude::MessageIdExt;
+    use vft_manager_client::vft_manager::io::PrepareCutover;
+    let Fixture {
+        remoting,
+        vft_manager_program_id: source,
+        ..
+    } = setup_for_test().await;
+    // Deliberately approve a different successor domain from source's boundary 32.
+    let destination = upgrade_destination(&remoting, source, 33).await;
+    configure_cutover_destination(&remoting, source, destination).await;
+    let mut admin = VftManagerC::new(remoting.clone());
+    let begin_generation = admin
+        .cutover_status()
+        .recv(source)
+        .await
+        .unwrap()
+        .generation;
+    admin
+        .begin_cutover(destination, 32, begin_generation)
+        .send_recv(source)
+        .await
+        .unwrap();
+    let source_before = admin.cutover_status().recv(source).await.unwrap();
+    let before = admin.cutover_status().recv(destination).await.unwrap();
+    assert_eq!(before.minimum_receipt_slot, 34);
+    let request = remoting
+        .system()
+        .get_program(destination)
+        .unwrap()
+        .send_bytes_with_gas(
+            REMOTING_ACTOR_ID,
+            PrepareCutover::encode_call(source, 32),
+            gtest::constants::MAX_USER_GAS_LIMIT,
+            0,
+        );
+    let first_child = MessageId::generate_outgoing(request, 0);
+    let mut rejected = false;
+    for _ in 0..20 {
+        let block = remoting.system().run_next_block();
+        assert!(
+            !block.succeed.contains(&first_child)
+                && !block.failed.contains(&first_child)
+                && !block.not_executed.contains(&first_child)
+                && !block.gas_burned.contains_key(&first_child)
+                && !block
+                    .log()
+                    .iter()
+                    .any(|log| log.id() == first_child || log.reply_to() == Some(first_child)),
+            "mismatched floor must reject before querying the predecessor"
+        );
+        for log in block.log() {
+            if log.reply_to() == Some(request) {
+                assert!(log.reply_code().is_some_and(|code| !code.is_success()));
+                rejected = true;
+            }
+        }
+    }
+    assert!(rejected);
+    assert_eq!(
+        admin.cutover_status().recv(destination).await.unwrap(),
+        before
+    );
+    assert_eq!(
+        admin.cutover_status().recv(source).await.unwrap(),
+        source_before
+    );
+    assert!(admin
+        .cutover_transfers(0, 10)
+        .recv(source)
+        .await
+        .unwrap()
+        .is_empty());
+}
+
 #[tokio::test]
 async fn test_benchmark_mutations_require_admin_on_deployable_wasm() {
     let Fixture {
@@ -486,7 +1399,7 @@ async fn test_benchmark_mutations_require_admin_on_deployable_wasm() {
             .recv(manager)
             .await
             .unwrap(),
-        vec![(0, 0)],
+        vec![(1, 0)],
     );
     assert_eq!(
         balance_of(&remoting, eth_supply_vft, caller).await,
@@ -742,7 +1655,10 @@ async fn test_zero_receiver_rejected_without_economic_effects() {
                     allowance_before
                 );
             } else {
-                assert!(child_observed, "valid request must dispatch its token child");
+                assert!(
+                    child_observed,
+                    "valid request must dispatch its token child"
+                );
                 assert_eq!(reply, Ok((U256::one(), eth_token)));
                 assert_eq!(
                     balance_of(&remoting, token, sender).await,
@@ -888,7 +1804,7 @@ async fn test_eth_supply_token() {
 
     let manager = VftManagerC::new(remoting.clone());
     assert_eq!(
-        receipt_status(&manager, vft_manager_program_id, 0, 0).await,
+        receipt_status(&manager, vft_manager_program_id, 1, 0).await,
         vft_manager_client::ReceiptStatus::Processed,
     );
     assert_eq!(
@@ -897,12 +1813,12 @@ async fn test_eth_supply_token() {
             .recv(vft_manager_program_id)
             .await
             .unwrap(),
-        vec![(0, 0)],
+        vec![(1, 0)],
     );
     let receipt = deposit_receipt(account_id, ERC20_TOKEN_ETH_SUPPLY, amount);
     assert_eq!(
         VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
-            .submit_receipt(0, 0, receipt)
+            .submit_receipt(1, 0, receipt)
             .send_recv(vft_manager_program_id)
             .await
             .unwrap(),
@@ -1042,12 +1958,12 @@ async fn test_submit_receipt_concurrent_replay_prevents_double_mint() {
     let mut client_2 = VftManagerC::new(manual.clone());
 
     let ticket_1 = client_1
-        .submit_receipt(0, 0, receipt_rlp.clone())
+        .submit_receipt(1, 0, receipt_rlp.clone())
         .send(vft_manager_program_id)
         .await
         .unwrap();
     let ticket_2 = client_2
-        .submit_receipt(0, 0, receipt_rlp)
+        .submit_receipt(1, 0, receipt_rlp)
         .send(vft_manager_program_id)
         .await
         .unwrap();
@@ -1090,7 +2006,7 @@ async fn test_failed_mint_releases_receipt_for_retry() {
         .unwrap();
 
     let failed = VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
-        .submit_receipt(0, 0, receipt_rlp.clone())
+        .submit_receipt(1, 0, receipt_rlp.clone())
         .send_recv(vft_manager_program_id)
         .await;
     assert!(matches!(failed, Err(_) | Ok(Err(_))));
@@ -1103,7 +2019,7 @@ async fn test_failed_mint_releases_receipt_for_retry() {
         .await
         .unwrap();
     VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
-        .submit_receipt(0, 0, receipt_rlp.clone())
+        .submit_receipt(1, 0, receipt_rlp.clone())
         .send_recv(vft_manager_program_id)
         .await
         .unwrap()
@@ -1114,7 +2030,7 @@ async fn test_failed_mint_releases_receipt_for_retry() {
     );
 
     let replay = VftManagerC::new(remoting.with_actor_id(HISTORICAL_PROXY_ID.into()))
-        .submit_receipt(0, 0, receipt_rlp)
+        .submit_receipt(1, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
@@ -1637,24 +2553,19 @@ async fn test_failed_burn_is_not_recoverable() {
         .request_bridging(eth_supply_vft, amount, ETH_TOKEN_RECEIVER)
         .send_recv(vft_manager_program_id)
         .await;
-    assert!(result.is_err());
+    assert!(result.unwrap().is_err());
 
     let entries = VftManagerC::new(remoting.clone())
         .request_briding_msg_tracker_state(0, 100)
         .recv(vft_manager_program_id)
         .await
         .unwrap();
-    let (msg_id, info) = entries
-        .into_iter()
-        .find(|(_, info)| info.details.sender == account_id && info.details.amount == amount)
-        .expect("failed burn must remain visible for forensic inspection");
-    assert_eq!(info.status, MessageStatus::TokenDepositCompleted(false));
-
-    let recovery = VftManagerC::new(remoting.clone().with_actor_id(account_id))
-        .handle_request_bridging_interrupted_transfer(msg_id)
-        .send_recv(vft_manager_program_id)
-        .await;
-    assert!(recovery.is_err());
+    assert!(
+        entries
+            .iter()
+            .all(|(_, info)| info.details.sender != account_id),
+        "consumed definite failed deposit is removed without a subsequent trap"
+    );
     assert!(balance_of(&remoting, eth_supply_vft, account_id)
         .await
         .is_zero());
@@ -1694,7 +2605,7 @@ async fn test_withdraw_fails_with_bad_origin() {
     let account_id: ActorId = 42.into();
     let receipt_rlp = deposit_receipt(account_id, ERC20_TOKEN_GEAR_SUPPLY, U256::zero());
     let result = vft_manager
-        .submit_receipt(0, 0, receipt_rlp)
+        .submit_receipt(1, 0, receipt_rlp)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
@@ -1726,7 +2637,7 @@ async fn test_requests_fail_on_pause() {
     assert_eq!(result, Err(Error::Paused));
 
     let result = vft_manager
-        .submit_receipt(0, 0, vec![])
+        .submit_receipt(1, 0, vec![])
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
@@ -1814,6 +2725,7 @@ async fn test_upgrade_rejects_unpaused_destination_without_moving_balances() {
         .new(InitConfig {
             gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
             historical_proxy_address: HISTORICAL_PROXY_ID.into(),
+            minimum_receipt_slot: 32u64.checked_add(1).unwrap(),
             config: Config {
                 gas_for_token_ops: 15_000_000_000,
                 gas_for_reply_deposit: 15_000_000_000,
@@ -1837,8 +2749,14 @@ async fn test_upgrade_rejects_unpaused_destination_without_moving_balances() {
 
     let mut manager = VftManagerC::new(remoting.clone());
     manager.unpause().send_recv(destination).await.unwrap();
+    let begin_generation = manager
+        .cutover_status()
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .generation;
     manager
-        .begin_cutover(destination, 32)
+        .begin_cutover(destination, 32, begin_generation)
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
@@ -1948,6 +2866,14 @@ async fn test_bridge_timeout_is_quarantined_and_late_reply_does_not_refund() {
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
+    assert_eq!(
+        admin
+            .prune_terminal_requests(vec![msg_id])
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        0
+    );
     for actor in [account_id, remoting.actor_id()] {
         assert!(VftManagerC::new(remoting.clone().with_actor_id(actor))
             .handle_request_bridging_interrupted_transfer(msg_id)
@@ -1993,7 +2919,7 @@ async fn test_bridge_timeout_is_quarantined_and_late_reply_does_not_refund() {
             .unwrap(),
         Err(Error::InvalidReconciliation)
     );
-    let destination = upgrade_destination(&remoting, vft_manager_program_id).await;
+    let destination = upgrade_destination(&remoting, vft_manager_program_id, 1000).await;
     assert_cutover_rejected(
         &remoting,
         vft_manager_program_id,
@@ -2065,6 +2991,11 @@ async fn test_bridge_timeout_is_quarantined_and_late_reply_does_not_refund() {
         .send_recv(vft_manager_program_id)
         .await
         .is_err());
+    assert!(admin
+        .prune_terminal_requests(vec![msg_id])
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
     assert!(mailbox
         .reply_bytes(request, queued_bridge_reply(), 0)
         .is_err());
@@ -2073,6 +3004,41 @@ async fn test_bridge_timeout_is_quarantined_and_late_reply_does_not_refund() {
         .send_recv(vft_manager_program_id)
         .await
         .unwrap();
+    assert!(VftManagerC::new(remoting.clone().with_actor_id(account_id))
+        .prune_terminal_requests(vec![msg_id])
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+    assert!(admin
+        .prune_terminal_requests(vec![msg_id; 101])
+        .send_recv(vft_manager_program_id)
+        .await
+        .is_err());
+    assert_eq!(
+        admin
+            .prune_terminal_requests(vec![msg_id; 100])
+            .send_recv(vft_manager_program_id)
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(!admin
+        .request_briding_msg_tracker_state(0, 100)
+        .recv(vft_manager_program_id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|(id, _)| id == &msg_id));
+    assert_eq!(
+        admin
+            .source_request_evidence(msg_id)
+            .recv(vft_manager_program_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .encode(),
+        queued.encode()
+    );
     admin
         .upgrade(destination)
         .send_recv(vft_manager_program_id)
@@ -2150,7 +3116,7 @@ async fn test_malformed_bridge_success_reply_is_quarantined() {
     assert!(balance_of(&remoting, eth_supply_vft, account_id)
         .await
         .is_zero());
-    let destination = upgrade_destination(&remoting, vft_manager_program_id).await;
+    let destination = upgrade_destination(&remoting, vft_manager_program_id, 1000).await;
     let mut admin = VftManagerC::new(remoting.clone());
     admin
         .pause()
@@ -2214,26 +3180,38 @@ async fn test_definite_bridge_rejection_refunds_once() {
     )
     .await;
 
-    let result = VftManagerC::new(remoting.clone().with_actor_id(account_id))
-        .request_bridging(eth_supply_vft, amount, ETH_TOKEN_RECEIVER)
-        .send_recv(vft_manager_program_id)
-        .await
-        .unwrap();
-    assert_eq!(result, Err(Error::MessageFailed));
+    use vft_manager_client::vft_manager::io::RequestBridging;
+    let msg_id = remoting
+        .system()
+        .get_program(vft_manager_program_id)
+        .unwrap()
+        .send_bytes_with_gas(
+            account_id,
+            RequestBridging::encode_call(eth_supply_vft, amount, ETH_TOKEN_RECEIVER),
+            gtest::constants::MAX_USER_GAS_LIMIT,
+            0,
+        );
+    let mut result = None;
+    for _ in 0..20 {
+        let block = remoting.system().run_next_block();
+        for log in block.log() {
+            if log.reply_to() == Some(msg_id) {
+                result = Some(RequestBridging::decode_reply(log.payload()).unwrap());
+            }
+        }
+    }
+    assert_eq!(result, Some(Err(Error::MessageFailed)));
     assert_eq!(
         balance_of(&remoting, eth_supply_vft, account_id).await,
         amount
     );
 
-    let (msg_id, info) = VftManagerC::new(remoting.clone())
+    assert!(VftManagerC::new(remoting.clone())
         .request_briding_msg_tracker_state(0, 100)
         .recv(vft_manager_program_id)
         .await
         .unwrap()
-        .into_iter()
-        .find(|(_, info)| info.details.sender == account_id && info.details.amount == amount)
-        .unwrap();
-    assert_eq!(info.status, MessageStatus::TokensReturnComplete(true));
+        .is_empty());
     let mut admin = VftManagerC::new(remoting.clone());
     let evidence = admin
         .source_request_evidence(msg_id)
@@ -2304,6 +3282,7 @@ async fn test_definite_17_unit_refund_remains_available_under_pause_and_emergenc
             .request_bridging(token, amount, ETH_TOKEN_RECEIVER)
             .send_recv(manager)
             .await
+            .unwrap()
             .is_err());
         let mut admin = VftManagerC::new(remoting.clone());
         let (request, info) = admin
@@ -2401,15 +3380,13 @@ async fn test_definite_17_unit_refund_remains_available_under_pause_and_emergenc
                 .encode(),
             evidence.encode()
         );
-        let (_, info) = admin
+        assert!(admin
             .request_briding_msg_tracker_state(0, 100)
             .recv(manager)
             .await
             .unwrap()
-            .into_iter()
-            .find(|(id, _)| *id == request)
-            .unwrap();
-        assert_eq!(info.status, MessageStatus::TokensReturnComplete(true));
+            .iter()
+            .all(|(id, _)| *id != request));
     }
 }
 
@@ -2492,7 +3469,7 @@ async fn test_emergency_stop_observers_and_expiry() {
     );
     assert_eq!(
         admin
-            .submit_receipt(0, 0, vec![])
+            .submit_receipt(1, 0, vec![])
             .send_recv(vft_manager_program_id)
             .await
             .unwrap(),
@@ -2830,10 +3807,16 @@ async fn test_receipt_resolution_exact_unlock_false_is_terminal_without_transfer
         );
         assert!(events.is_empty());
     }
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 40).await;
     configure_cutover_destination(&remoting, manager, destination).await;
+    let begin_generation = admin
+        .cutover_status()
+        .recv(manager)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 40)
+        .begin_cutover(destination, 40, begin_generation)
         .send_recv(manager)
         .await
         .unwrap();
@@ -3011,6 +3994,15 @@ async fn test_native_wrapper_error_retries_after_resume() {
         receipt_deposits(&admin, manager, 37, 0).await,
         vec![retried]
     );
+    assert_eq!(
+        admin
+            .reconcile_receipt(37, 0)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Err(Error::Paused)
+    );
+    admin.unpause().send_recv(manager).await.unwrap();
     for _ in 0..2 {
         assert_eq!(
             admin
@@ -3044,7 +4036,6 @@ async fn test_native_wrapper_error_retries_after_resume() {
             .unwrap(),
         Some(queued)
     );
-    admin.unpause().send_recv(manager).await.unwrap();
     assert_eq!(
         submit_receipt_events(&remoting, manager, 37, 0, receipt).0,
         Err(Error::AlreadyProcessed)
@@ -3266,8 +4257,9 @@ async fn test_receipt_resolution_live_lease_and_malformed_unlock_fail_closed() {
         .with_actor_id(HISTORICAL_PROXY_ID.into())
         .with_block_run_mode(BlockRunMode::Manual);
     let mut proxy = VftManagerC::new(manual.clone());
+    let receipt = deposit_receipt(recipient, erc20, U256::from(17u64));
     let pending = proxy
-        .submit_receipt(38, 0, deposit_receipt(recipient, erc20, U256::from(17u64)))
+        .submit_receipt(38, 0, receipt.clone())
         .send(manager)
         .await
         .unwrap();
@@ -3309,7 +4301,7 @@ async fn test_receipt_resolution_live_lease_and_malformed_unlock_fail_closed() {
     }
     assert_eq!(
         pending.recv().now_or_never().unwrap().unwrap(),
-        Err(Error::InvalidReply)
+        Err(Error::Paused)
     );
     let ambiguous = receipt_deposits(&admin, manager, 38, 0).await.remove(0);
     assert_eq!(ambiguous.child, row.child);
@@ -3317,6 +4309,23 @@ async fn test_receipt_resolution_live_lease_and_malformed_unlock_fail_closed() {
         ambiguous.outcome,
         vft_manager_client::ReceiptDepositOutcome::Unknown
     );
+    // Pause stops the continuation, not the authenticated malformed-reply evidence.
+    // Once resumed, the same receipt must expose that evidence without a new child.
+    admin.unpause().send_recv(manager).await.unwrap();
+    assert_eq!(
+        VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
+            .submit_receipt(38, 0, receipt)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Err(Error::InvalidReply)
+    );
+    assert_eq!(
+        receipt_deposits(&admin, manager, 38, 0).await,
+        vec![ambiguous.clone()]
+    );
+    assert!(!mailbox.contains(&request));
+    admin.pause().send_recv(manager).await.unwrap();
     assert_eq!(
         admin
             .resolve_receipt_deposit(38, 0, 0, row.operation_id, row.child)
@@ -3341,10 +4350,16 @@ async fn test_receipt_resolution_live_lease_and_malformed_unlock_fail_closed() {
         !mailbox.contains(&request),
         "resolution must not retry an ambiguous economic child"
     );
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 40).await;
     configure_cutover_destination(&remoting, manager, destination).await;
+    let begin_generation = admin
+        .cutover_status()
+        .recv(manager)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 40)
+        .begin_cutover(destination, 40, begin_generation)
         .send_recv(manager)
         .await
         .unwrap();
@@ -3681,18 +4696,30 @@ async fn test_invalid_receipt_inputs_are_terminal_without_economic_children() {
         .await
         .unwrap()
         .is_empty());
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 40).await;
     configure_cutover_destination(&remoting, manager, destination).await;
+    let begin_generation = admin
+        .cutover_status()
+        .recv(manager)
+        .await
+        .unwrap()
+        .generation;
     assert!(
         admin
-            .begin_cutover(destination, 33)
+            .begin_cutover(destination, 33, begin_generation)
             .send_recv(manager)
             .await
             .is_err(),
         "terminal evidence must still contribute to admission high-water"
     );
+    let begin_generation = admin
+        .cutover_status()
+        .recv(manager)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 40)
+        .begin_cutover(destination, 40, begin_generation)
         .send_recv(manager)
         .await
         .unwrap();
@@ -4735,7 +5762,7 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
         payout.child
     );
     assert_eq!(balance_of(&remoting, native, recipient).await, U256::zero());
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 1000).await;
     admin.pause().send_recv(manager).await.unwrap();
     assert_cutover_rejected(&remoting, manager, destination, native).await;
     admin.unpause().send_recv(manager).await.unwrap();
@@ -4751,6 +5778,15 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
             .send_recv(manager)
             .await
             .unwrap(),
+        Err(Error::Paused)
+    );
+    admin.unpause().send_recv(manager).await.unwrap();
+    assert_eq!(
+        reconciler
+            .reconcile_receipt(31, 1)
+            .send_recv(manager)
+            .await
+            .unwrap(),
         Ok(vft_manager_client::ReceiptStatus::Processed)
     );
     assert_eq!(
@@ -4761,7 +5797,6 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
             .unwrap(),
         Ok(vft_manager_client::ReceiptStatus::Processed)
     );
-    admin.unpause().send_recv(manager).await.unwrap();
     assert_eq!(
         receipt_deposits(&admin, manager, 31, 1).await[0].outcome,
         vft_manager_client::ReceiptDepositOutcome::Settled
@@ -4980,13 +6015,14 @@ async fn test_native_receipt_dead_continuation_keeps_original_payout() {
     );
 }
 
-async fn upgrade_destination(remoting: &GTestRemoting, manager: ActorId) -> ActorId {
-    upgrade_destination_with_salt(remoting, manager, b"quiescent-upgrade").await
+async fn upgrade_destination(remoting: &GTestRemoting, manager: ActorId, boundary: u64) -> ActorId {
+    upgrade_destination_with_salt(remoting, manager, boundary, b"quiescent-upgrade").await
 }
 
 async fn upgrade_destination_with_salt(
     remoting: &GTestRemoting,
     manager: ActorId,
+    boundary: u64,
     salt: &[u8],
 ) -> ActorId {
     let config = VftManagerC::new(remoting.clone())
@@ -4998,6 +6034,7 @@ async fn upgrade_destination_with_salt(
         .new(InitConfig {
             gear_bridge_builtin: BRIDGE_BUILTIN_ID.into(),
             historical_proxy_address: HISTORICAL_PROXY_ID.into(),
+            minimum_receipt_slot: boundary.checked_add(1).unwrap(),
             config,
         })
         .send_recv(
@@ -5048,8 +6085,14 @@ async fn assert_cutover_rejected(
         == vft_manager_client::CutoverPhase::Active
     {
         configure_cutover_destination(remoting, manager, destination).await;
+        let begin_generation = admin
+            .cutover_status()
+            .recv(manager)
+            .await
+            .unwrap()
+            .generation;
         admin
-            .begin_cutover(destination, 1000)
+            .begin_cutover(destination, 1000, begin_generation)
             .send_recv(manager)
             .await
             .unwrap();
@@ -5092,18 +6135,18 @@ async fn test_upgrade_rejects_pending_receipt_and_retains_original_evidence() {
     let receipt = deposit_receipt(recipient, ERC20_TOKEN_ETH_SUPPLY, U256::from(11u32));
     assert!(
         VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
-            .submit_receipt(1, 0, receipt)
+            .submit_receipt(2, 0, receipt)
             .send_recv(manager)
             .await
             .unwrap()
             .is_err()
     );
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 1000).await;
     let mut admin = VftManagerC::new(remoting.clone());
     admin.pause().send_recv(manager).await.unwrap();
     assert_cutover_rejected(&remoting, manager, destination, token).await;
     assert_eq!(
-        receipt_status(&admin, manager, 1, 0).await,
+        receipt_status(&admin, manager, 2, 0).await,
         vft_manager_client::ReceiptStatus::Reserved
     );
     for order in [Order::Direct, Order::Reverse] {
@@ -5113,7 +6156,7 @@ async fn test_upgrade_rejects_pending_receipt_and_retains_original_evidence() {
                 .recv(manager)
                 .await
                 .unwrap(),
-            vec![(0, 0)]
+            vec![(1, 0)]
         );
     }
     // Rejected cutovers do not fence recovery on the original manager.
@@ -5144,7 +6187,7 @@ async fn test_non_native_unrepresentable_mint_remains_a_cutover_blocker() {
     let mut admin = VftManagerC::new(remoting.clone());
     let row = receipt_deposits(&admin, manager, 41, 0).await.remove(0);
     assert!(!row.native);
-    assert_eq!(row.supply, TokenSupply::Ethereum);
+    assert_eq!(row.supply, Some(TokenSupply::Ethereum));
     assert_eq!(row.amount, amount);
     assert!(row.child.is_some());
     assert_eq!(row.outcome, ReceiptDepositOutcome::Retryable);
@@ -5174,7 +6217,7 @@ async fn test_non_native_unrepresentable_mint_remains_a_cutover_blocker() {
     assert_eq!(resolved, Err(Error::InvalidReconciliation));
     assert!(events.is_empty());
     assert_eq!(receipt_deposits(&admin, manager, 41, 0).await, vec![row]);
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 1000).await;
     assert_cutover_rejected(&remoting, manager, destination, token).await;
     assert_eq!(
         receipt_status(&admin, manager, 41, 0).await,
@@ -5182,6 +6225,8 @@ async fn test_non_native_unrepresentable_mint_remains_a_cutover_blocker() {
     );
 }
 
+// VB-12 regression reconstructed from HTML (audited 7fe1b032; candidate baseline 3ccf409).
+// This exercises the candidate Wasm, not the unavailable original PoC bundle.
 #[tokio::test]
 async fn test_cutover_retains_custody_domains_and_retired_program_queries() {
     use vft_manager_client::CutoverPhase;
@@ -5208,11 +6253,17 @@ async fn test_cutover_retains_custody_domains_and_retired_program_queries() {
         .send_recv(token)
         .await
         .unwrap();
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 32).await;
     configure_cutover_destination(&remoting, manager, destination).await;
     let mut admin = VftManagerC::new(remoting.clone());
+    let begin_generation = admin
+        .cutover_status()
+        .recv(manager)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 32)
+        .begin_cutover(destination, 32, begin_generation)
         .send_recv(manager)
         .await
         .unwrap();
@@ -5241,9 +6292,9 @@ async fn test_cutover_retains_custody_domains_and_retired_program_queries() {
             .recv(manager)
             .await
             .unwrap(),
-        vec![(0, 10)]
+        vec![(1, 10)]
     );
-    assert_eq!(receipt_deposits(&admin, manager, 0, 10).await.len(), 1);
+    assert_eq!(receipt_deposits(&admin, manager, 1, 10).await.len(), 1);
     assert!(admin
         .transactions(Order::Direct, 0, 10)
         .recv(destination)
@@ -5312,7 +6363,7 @@ async fn test_cutover_retains_custody_domains_and_retired_program_queries() {
     );
     assert_eq!(
         proxy
-            .reconcile_receipt(0, 10)
+            .reconcile_receipt(1, 10)
             .send_recv(manager)
             .await
             .unwrap(),
@@ -5333,9 +6384,15 @@ async fn test_cutover_retains_custody_domains_and_retired_program_queries() {
         balance_of(&remoting, eth_supply_vft, sender).await,
         U256::from(18u32)
     );
-    let later = upgrade_destination_with_salt(&remoting, destination, b"later-cutover").await;
+    let later = upgrade_destination_with_salt(&remoting, destination, 64, b"later-cutover").await;
+    let begin_generation = admin
+        .cutover_status()
+        .recv(destination)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(later, 64)
+        .begin_cutover(later, 64, begin_generation)
         .send_recv(destination)
         .await
         .unwrap();
@@ -5367,6 +6424,7 @@ async fn test_upgrade_rejects_failed_refund_until_original_request_is_drained() 
         .request_bridging(token, amount, ETH_TOKEN_RECEIVER)
         .send_recv(manager)
         .await
+        .unwrap()
         .is_err());
     let mut admin = VftManagerC::new(remoting.clone());
     let (request, info) = admin
@@ -5378,7 +6436,7 @@ async fn test_upgrade_rejects_failed_refund_until_original_request_is_drained() 
         .find(|(_, info)| info.details.sender == sender)
         .unwrap();
     assert_eq!(info.status, MessageStatus::TokensReturnComplete(false));
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 1000).await;
     admin.pause().send_recv(manager).await.unwrap();
     assert_cutover_rejected(&remoting, manager, destination, token).await;
     token_admin
@@ -5413,14 +6471,20 @@ async fn test_cutover_draining_slot_boundary_and_economic_freeze() {
         eth_supply_vft: token,
         gear_supply_vft,
     } = setup_for_test().await;
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 32).await;
     configure_cutover_destination(&remoting, manager, destination).await;
     let mut admin = VftManagerC::new(remoting.clone());
     let config = admin.get_config().recv(manager).await.unwrap();
     admin.pause().send_recv(manager).await.unwrap();
     assert!(admin.pause().send_recv(manager).await.is_err());
+    let begin_generation = admin
+        .cutover_status()
+        .recv(manager)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 32)
+        .begin_cutover(destination, 32, begin_generation)
         .send_recv(manager)
         .await
         .unwrap();
@@ -5436,12 +6500,12 @@ async fn test_cutover_draining_slot_boundary_and_economic_freeze() {
     assert_eq!(admin.cutover_status().recv(manager).await.unwrap(), intent);
     admin.unpause().send_recv(manager).await.unwrap();
     admin
-        .begin_cutover(destination, 32)
+        .begin_cutover(destination, 32, intent.generation)
         .send_recv(manager)
         .await
         .unwrap();
     assert!(admin
-        .begin_cutover(destination, 33)
+        .begin_cutover(destination, 33, intent.generation)
         .send_recv(manager)
         .await
         .is_err());
@@ -5609,7 +6673,7 @@ async fn test_begin_cutover_rejects_boundary_below_processed_or_reserved_high_wa
             ..
         } = setup_for_test().await;
         let mut admin = VftManagerC::new(remoting.clone());
-        let destination = upgrade_destination(&remoting, manager).await;
+        let destination = upgrade_destination(&remoting, manager, 101).await;
         if !settled {
             VftAdminC::new(remoting.clone())
                 .set_minter(ActorId::zero())
@@ -5626,19 +6690,25 @@ async fn test_begin_cutover_rejects_boundary_below_processed_or_reserved_high_wa
         assert_eq!(result.is_ok(), settled);
         let before = admin.cutover_status().recv(manager).await.unwrap();
         assert!(admin
-            .begin_cutover(destination, 100)
+            .begin_cutover(destination, 100, before.generation)
             .send_recv(manager)
             .await
             .is_err());
         assert_eq!(admin.cutover_status().recv(manager).await.unwrap(), before);
         assert_eq!(before.phase, vft_manager_client::CutoverPhase::Active);
         assert!(admin
-            .begin_cutover(destination, u64::MAX)
+            .begin_cutover(destination, u64::MAX, before.generation)
             .send_recv(manager)
             .await
             .is_err());
+        let begin_generation = admin
+            .cutover_status()
+            .recv(manager)
+            .await
+            .unwrap()
+            .generation;
         admin
-            .begin_cutover(destination, 101)
+            .begin_cutover(destination, 101, begin_generation)
             .send_recv(manager)
             .await
             .unwrap();
@@ -5655,7 +6725,7 @@ async fn test_prepare_cutover_rejects_mismatched_fingerprint_and_used_destinatio
             gear_supply_vft,
             ..
         } = setup_for_test().await;
-        let destination = upgrade_destination(&remoting, manager).await;
+        let destination = upgrade_destination(&remoting, manager, 32).await;
         configure_cutover_destination(&remoting, manager, destination).await;
         let mut admin = VftManagerC::new(remoting.clone());
         match mismatch {
@@ -5701,8 +6771,14 @@ async fn test_prepare_cutover_rejects_mismatched_fingerprint_and_used_destinatio
                     .unwrap();
             }
         }
+        let begin_generation = admin
+            .cutover_status()
+            .recv(manager)
+            .await
+            .unwrap()
+            .generation;
         admin
-            .begin_cutover(destination, 32)
+            .begin_cutover(destination, 32, begin_generation)
             .send_recv(manager)
             .await
             .unwrap();
@@ -5735,7 +6811,7 @@ async fn test_prepare_cutover_rejects_mismatched_fingerprint_and_used_destinatio
         eth_supply_vft: token,
         ..
     } = setup_for_test().await;
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 32).await;
     configure_cutover_destination(&remoting, manager, destination).await;
     let mut admin = VftManagerC::new(remoting.clone());
     admin.unpause().send_recv(destination).await.unwrap();
@@ -5746,14 +6822,20 @@ async fn test_prepare_cutover_rejects_mismatched_fingerprint_and_used_destinatio
         .unwrap();
     let receipt = deposit_receipt(100_102.into(), ERC20_TOKEN_ETH_SUPPLY, U256::one());
     VftManagerC::new(remoting.clone().with_actor_id(HISTORICAL_PROXY_ID.into()))
-        .submit_receipt(0, 0, receipt)
+        .submit_receipt(33, 0, receipt)
         .send_recv(destination)
         .await
         .unwrap()
         .unwrap();
     admin.pause().send_recv(destination).await.unwrap();
+    let begin_generation = admin
+        .cutover_status()
+        .recv(manager)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 32)
+        .begin_cutover(destination, 32, begin_generation)
         .send_recv(manager)
         .await
         .unwrap();
@@ -5772,11 +6854,17 @@ async fn test_prepare_and_upgrade_recheck_concurrent_pause_and_revision() {
             vft_manager_program_id: manager,
             ..
         } = setup_for_test().await;
-        let destination = upgrade_destination(&remoting, manager).await;
+        let destination = upgrade_destination(&remoting, manager, 32).await;
         configure_cutover_destination(&remoting, manager, destination).await;
         let mut admin = VftManagerC::new(remoting.clone());
+        let begin_generation = admin
+            .cutover_status()
+            .recv(manager)
+            .await
+            .unwrap()
+            .generation;
         admin
-            .begin_cutover(destination, 32)
+            .begin_cutover(destination, 32, begin_generation)
             .send_recv(manager)
             .await
             .unwrap();
@@ -5826,11 +6914,17 @@ async fn test_prepare_and_upgrade_recheck_concurrent_pause_and_revision() {
         vft_manager_program_id: manager,
         ..
     } = setup_for_test().await;
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 32).await;
     configure_cutover_destination(&remoting, manager, destination).await;
     let mut admin = VftManagerC::new(remoting.clone());
+    let begin_generation = admin
+        .cutover_status()
+        .recv(manager)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 32)
+        .begin_cutover(destination, 32, begin_generation)
         .send_recv(manager)
         .await
         .unwrap();
@@ -5896,10 +6990,16 @@ async fn custody_mailbox_fixture() -> (GTestRemoting, ActorId, ActorId, ActorId)
     let mut config = admin.get_config().recv(source).await.unwrap();
     config.reply_timeout = 10;
     admin.update_config(config).send_recv(source).await.unwrap();
-    let destination = upgrade_destination(&remoting, source).await;
+    let destination = upgrade_destination(&remoting, source, 32).await;
     configure_cutover_destination(&remoting, source, destination).await;
+    let begin_generation = admin
+        .cutover_status()
+        .recv(source)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 32)
+        .begin_cutover(destination, 32, begin_generation)
         .send_recv(source)
         .await
         .unwrap();
@@ -5909,6 +7009,37 @@ async fn custody_mailbox_fixture() -> (GTestRemoting, ActorId, ActorId, ActorId)
         .send_recv(destination)
         .await
         .unwrap();
+    // Qualify the new bounded preflight, then let the first non-economic balance
+    // observation time out. Tests below start with no custody child dispatched.
+    start_custody_upgrade(&remoting, source, destination);
+    reply_custody_balance(&remoting, source, token, U256::zero());
+    let paused = Log::builder()
+        .source(source)
+        .dest(token)
+        .payload_bytes(vft_client::vft_admin::io::IsPaused::encode_call());
+    let mut reply = vft_client::vft_admin::io::IsPaused::ROUTE.to_vec();
+    false.encode_to(&mut reply);
+    remoting
+        .system()
+        .get_mailbox(token)
+        .reply_bytes(paused, reply, 0)
+        .unwrap();
+    for _ in 0..14 {
+        remoting.run_next_block();
+    }
+    // Remove the expired observation from the mailbox without granting any effect.
+    let expired = Log::builder()
+        .source(source)
+        .dest(token)
+        .payload_bytes(vft_client::vft::io::BalanceOf::encode_call(source));
+    let mut reply = vft_client::vft::io::BalanceOf::ROUTE.to_vec();
+    U256::zero().encode_to(&mut reply);
+    remoting
+        .system()
+        .get_mailbox(token)
+        .reply_bytes(expired, reply, 0)
+        .unwrap();
+    remoting.run_next_block();
     (remoting, source, destination, token)
 }
 
@@ -5965,40 +7096,82 @@ async fn test_custody_timeout_late_reply_and_concurrent_upgrade_keep_one_origina
     use vft_manager_client::{CustodyTransferOutcome, CutoverPhase};
     let (remoting, source, destination, token) = custody_mailbox_fixture().await;
     let amount = U256::from(17u32);
-    let first = start_custody_upgrade(&remoting, source, destination);
-    let _concurrent = start_custody_upgrade(&remoting, source, destination);
-    reply_custody_balance(&remoting, source, token, amount);
-    reply_custody_balance(&remoting, source, token, amount);
     let admin = VftManagerC::new(remoting.clone());
-    let before = admin.cutover_transfers(0, 10).recv(source).await.unwrap();
-    assert_eq!(before.len(), 1);
-    assert_eq!(before[0].outcome, CustodyTransferOutcome::InFlight);
-    assert_eq!(before[0].token, token);
-    assert_eq!(before[0].amount, amount);
-    assert_eq!(
-        admin
-            .cutover_status()
-            .recv(source)
-            .await
-            .unwrap()
-            .in_flight_transfer_count,
-        1
-    );
-    let mut original_parent_finished = false;
-    for _ in 0..14 {
-        let result = remoting.system().run_next_block();
-        if let Some(reply) = result
-            .log()
-            .iter()
-            .find(|entry| entry.reply_to() == Some(first))
-        {
-            vft_manager_client::vft_manager::io::Upgrade::decode_reply(reply.payload()).unwrap();
-            original_parent_finished = true;
+    let timeout = admin.get_config().recv(source).await.unwrap().reply_timeout;
+    let first = start_custody_upgrade(&remoting, source, destination);
+    let concurrent = start_custody_upgrade(&remoting, source, destination);
+    let mailbox = remoting.system().get_mailbox(token);
+    let balance_query = Log::builder()
+        .source(source)
+        .dest(token)
+        .payload_bytes(vft_client::vft::io::BalanceOf::encode_call(source));
+    let transfer_payload = vft_client::vft::io::Transfer::encode_call(destination, amount);
+    let mut before = None;
+    let mut deadline = None;
+    let mut finished = [false; 2];
+    // Observe both parents from dispatch onward: either concurrent request may
+    // win the balance-query race and own the sole transfer child.
+    for _ in 0..timeout * 3 {
+        let block = remoting.system().run_next_block();
+        let height = remoting.system().block_height();
+        for entry in block.log() {
+            for (index, parent) in [first, concurrent].into_iter().enumerate() {
+                if entry.reply_to() == Some(parent) {
+                    assert!(!finished[index], "one reply per original upgrade");
+                    assert!(entry.reply_code().unwrap().is_success());
+                    vft_manager_client::vft_manager::io::Upgrade::decode_reply(entry.payload())
+                        .unwrap();
+                    finished[index] = true;
+                }
+            }
+            if entry.source() == source
+                && entry.destination() == token
+                && entry.payload() == transfer_payload
+            {
+                assert!(
+                    deadline.is_none(),
+                    "only one custody child may be dispatched"
+                );
+                deadline = Some(height + timeout);
+                let records = admin
+                    .cutover_transfers(0, 10)
+                    .query_with_message(false)
+                    .recv(source)
+                    .await
+                    .unwrap();
+                assert_eq!(records.len(), 1);
+                assert_eq!(records[0].child, entry.id());
+                assert_eq!(records[0].outcome, CustodyTransferOutcome::InFlight);
+                assert_eq!(records[0].token, token);
+                assert_eq!(records[0].amount, amount);
+                assert_eq!(
+                    admin
+                        .cutover_status()
+                        .query_with_message(false)
+                        .recv(source)
+                        .await
+                        .unwrap()
+                        .in_flight_transfer_count,
+                    1
+                );
+                before = Some(records);
+            }
+        }
+        while mailbox.contains(&balance_query) {
+            let mut reply = vft_client::vft::io::BalanceOf::ROUTE.to_vec();
+            amount.encode_to(&mut reply);
+            mailbox
+                .reply_bytes(balance_query.clone(), reply, 0)
+                .unwrap();
+        }
+        if deadline.is_some_and(|deadline| height > deadline) {
+            break;
         }
     }
+    let before = before.expect("original custody child must reach the mailbox");
     assert!(
-        original_parent_finished,
-        "original Upgrade must finish at its configured reply deadline"
+        finished.into_iter().all(|finished| finished),
+        "both original Upgrades must finish by the custody child's configured reply deadline"
     );
     let ambiguous = admin.cutover_transfers(0, 10).recv(source).await.unwrap();
     assert_eq!(ambiguous.len(), 1);
@@ -6051,20 +7224,23 @@ async fn test_custody_timeout_late_reply_and_concurrent_upgrade_keep_one_origina
         CutoverPhase::Retired
     );
     assert!(remoting.system().is_active_program(source));
-    // The saved child belongs to the original parent, not any continuation.
-    assert_ne!(completed[0].child, first);
+    // Late completion remains bound to the child observed in the original dispatch.
+    assert_eq!(completed[0].child, before[0].child);
 }
 
+// VB-08 reconstructed from HTML (audited 7fe1b032; candidate baseline 3ccf409).
+// Synthetic mailbox timing exercises the candidate manager, not real-token deployment qualification.
 #[tokio::test]
 async fn test_custody_donation_appends_residual_attempt_and_preserves_original() {
-    use vft_manager_client::{CustodyTransferOutcome, CutoverPhase};
+    use vft_client::vft::io::BalanceOf;
+    use vft_manager_client::{vft_manager::io::Upgrade, CustodyTransferOutcome, CutoverPhase};
     let (remoting, source, destination, token) = custody_mailbox_fixture().await;
     let amount = U256::from(17u32);
     let donation = U256::from(3u32);
     let mailbox = remoting.system().get_mailbox(token);
     let mut success = vft_client::vft::io::Transfer::ROUTE.to_vec();
     true.encode_to(&mut success);
-    start_custody_upgrade(&remoting, source, destination);
+    let original_request = start_custody_upgrade(&remoting, source, destination);
     reply_custody_balance(&remoting, source, token, amount);
     mailbox
         .reply_bytes(
@@ -6075,14 +7251,51 @@ async fn test_custody_donation_appends_residual_attempt_and_preserves_original()
         .unwrap();
     // The completed original has moved its custody, but an unsolicited balance
     // arrives before the final zero check. Retirement must remain blocked.
-    reply_custody_balance(&remoting, source, token, donation);
+    let final_query = Log::builder()
+        .source(source)
+        .dest(token)
+        .payload_bytes(BalanceOf::encode_call(source));
+    for _ in 0..12 {
+        if mailbox.contains(&final_query) {
+            break;
+        }
+        remoting.system().run_next_block();
+    }
+    assert!(
+        mailbox.contains(&final_query),
+        "final custody query must arrive"
+    );
+    let mut balance_reply = BalanceOf::ROUTE.to_vec();
+    donation.encode_to(&mut balance_reply);
+    mailbox.reply_bytes(final_query, balance_reply, 0).unwrap();
+    let mut original_finished = false;
+    for _ in 0..20 {
+        let block = remoting.system().run_next_block();
+        for reply in block.log() {
+            if reply.reply_to() == Some(original_request) {
+                assert!(!original_finished, "one reply per original upgrade");
+                assert!(
+                    reply.reply_code().unwrap().is_success(),
+                    "donation must not trap the original upgrade"
+                );
+                Upgrade::decode_reply(reply.payload()).unwrap();
+                original_finished = true;
+            }
+        }
+    }
+    assert!(
+        original_finished,
+        "original upgrade must return after the bounded final check"
+    );
     let admin = VftManagerC::new(remoting.clone());
     let original = admin.cutover_transfers(0, 10).recv(source).await.unwrap();
     assert_eq!(original.len(), 1);
     assert_eq!(original[0].outcome, CustodyTransferOutcome::Completed);
+    let status = admin.cutover_status().recv(source).await.unwrap();
+    assert_eq!(status.phase, CutoverPhase::Transferring);
     assert_eq!(
-        admin.cutover_status().recv(source).await.unwrap().phase,
-        CutoverPhase::Transferring
+        status.completed_transfer_count, 0,
+        "donation clears the completion mark before retry"
     );
 
     start_custody_upgrade(&remoting, source, destination);
@@ -6209,11 +7422,26 @@ async fn test_custody_explicit_token_error_retries_without_exit_or_losing_attemp
         .send_recv(token)
         .await
         .unwrap();
-    let destination = upgrade_destination(&remoting, source).await;
+    // A final mailbox token holds the preflight open after the real token has
+    // proved cooperation, so its subsequent pause exercises an actual child error.
+    let barrier = ActorId::from([0xff; 32]);
+    remoting.system().mint_to(barrier, 100_000_000_000_000);
+    VftManagerC::new(remoting.clone())
+        .map_vara_to_eth_address(barrier, H160([25; 20]), TokenSupply::Gear)
+        .send_recv(source)
+        .await
+        .unwrap();
+    let destination = upgrade_destination(&remoting, source, 32).await;
     configure_cutover_destination(&remoting, source, destination).await;
     let mut admin = VftManagerC::new(remoting.clone());
+    let begin_generation = admin
+        .cutover_status()
+        .recv(source)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 32)
+        .begin_cutover(destination, 32, begin_generation)
         .send_recv(source)
         .await
         .unwrap();
@@ -6223,18 +7451,72 @@ async fn test_custody_explicit_token_error_retries_without_exit_or_losing_attemp
         .send_recv(destination)
         .await
         .unwrap();
+    let first = start_custody_upgrade(&remoting, source, destination);
+    reply_custody_balance(&remoting, source, barrier, U256::zero());
+    let mailbox = remoting.system().get_mailbox(barrier);
+    let paused_query = Log::builder()
+        .source(source)
+        .dest(barrier)
+        .payload_bytes(vft_client::vft_admin::io::IsPaused::encode_call());
+    assert!(mailbox.contains(&paused_query));
     let mut token_admin = vft_vara_client::VftAdmin::new(remoting.clone());
     token_admin.pause().send_recv(token).await.unwrap();
-    admin.upgrade(destination).send_recv(source).await.unwrap();
+    let mut reply = vft_client::vft_admin::io::IsPaused::ROUTE.to_vec();
+    false.encode_to(&mut reply);
+    mailbox.reply_bytes(paused_query, reply, 0).unwrap();
+    let timeout = admin
+        .get_config()
+        .query_with_message(false)
+        .recv(source)
+        .await
+        .unwrap()
+        .reply_timeout;
+    let finish_upgrade = |request| {
+        let balance_query = Log::builder()
+            .source(source)
+            .dest(barrier)
+            .payload_bytes(vft_client::vft::io::BalanceOf::encode_call(source));
+        for _ in 0..timeout {
+            let block = remoting.system().run_next_block();
+            for entry in block.log() {
+                if entry.reply_to() == Some(request) {
+                    assert!(entry.reply_code().unwrap().is_success());
+                    vft_manager_client::vft_manager::io::Upgrade::decode_reply(entry.payload())
+                        .unwrap();
+                    return;
+                }
+            }
+            if mailbox.contains(&balance_query) {
+                let mut reply = vft_client::vft::io::BalanceOf::ROUTE.to_vec();
+                U256::zero().encode_to(&mut reply);
+                mailbox
+                    .reply_bytes(balance_query.clone(), reply, 0)
+                    .unwrap();
+            }
+        }
+        std::panic!("original Upgrade did not finish after cooperating balance replies");
+    };
+    finish_upgrade(first);
     let rejected = admin.cutover_transfers(0, 10).recv(source).await.unwrap();
     assert_eq!(rejected.len(), 1);
     assert_eq!(
         rejected[0].outcome,
         vft_manager_client::CustodyTransferOutcome::Rejected
     );
+    let blocked = admin.cutover_status().recv(source).await.unwrap();
+    assert!(blocked.custody_started);
+    assert_eq!(
+        blocked.phase,
+        vft_manager_client::CutoverPhase::Transferring
+    );
+    assert!(admin
+        .abort_cutover(blocked.generation)
+        .send_recv(source)
+        .await
+        .is_err());
     assert_eq!(balance_of(&remoting, token, source).await, amount);
     token_admin.resume().send_recv(token).await.unwrap();
-    admin.upgrade(destination).send_recv(source).await.unwrap();
+    finish_upgrade(start_custody_upgrade(&remoting, source, destination));
     let records = admin.cutover_transfers(0, 10).recv(source).await.unwrap();
     assert_eq!(records.len(), 2);
     assert_eq!(records[0], rejected[0]);
@@ -6260,7 +7542,7 @@ async fn test_cutover_fingerprint_uses_sorted_mapping_and_fixed_config_encoding(
         vft_manager_program_id: manager,
         ..
     } = setup_for_test().await;
-    let destination = upgrade_destination(&remoting, manager).await;
+    let destination = upgrade_destination(&remoting, manager, 32).await;
     let mut admin = VftManagerC::new(remoting.clone());
     let mut mappings = admin.vara_to_eth_addresses().recv(manager).await.unwrap();
     mappings.sort_unstable_by(|a, b| a.0.as_ref().cmp(b.0.as_ref()));
@@ -6276,8 +7558,14 @@ async fn test_cutover_fingerprint_uses_sorted_mapping_and_fixed_config_encoding(
         )
             .encode(),
     );
+    let begin_generation = admin
+        .cutover_status()
+        .recv(manager)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 32)
+        .begin_cutover(destination, 32, begin_generation)
         .send_recv(manager)
         .await
         .unwrap();
@@ -6625,8 +7913,18 @@ async fn test_native_held_and_delivered_first_observed_in_same_block() {
                 .send_recv(manager)
                 .await
                 .unwrap(),
+            Err(Error::Paused)
+        );
+        admin.unpause().send_recv(manager).await.unwrap();
+        assert_eq!(
+            admin
+                .reconcile_receipt(42, 0)
+                .send_recv(manager)
+                .await
+                .unwrap(),
             Ok(ReceiptStatus::Resolved)
         );
+        admin.pause().send_recv(manager).await.unwrap();
     }
     assert_eq!(
         receipt_deposits(&admin, manager, 42, 0).await,
@@ -6762,10 +8060,16 @@ async fn test_native_cutover_requires_same_wrapper_handoff_before_ready() {
                 "unpaused resolution must fail"
             );
         }
-        let destination = upgrade_destination(&remoting, source).await;
+        let destination = upgrade_destination(&remoting, source, 32).await;
         configure_cutover_destination(&remoting, source, destination).await;
+        let begin_generation = admin
+            .cutover_status()
+            .recv(source)
+            .await
+            .unwrap()
+            .generation;
         admin
-            .begin_cutover(destination, 32)
+            .begin_cutover(destination, 32, begin_generation)
             .send_recv(source)
             .await
             .unwrap();
@@ -7084,9 +8388,15 @@ async fn test_awaiting_vft_map_update_cannot_commit_after_begin_cutover() {
         gear_supply_vft,
         ..
     } = setup_for_test().await;
-    let destination = upgrade_destination(&remoting, source).await;
+    let destination = upgrade_destination(&remoting, source, 32).await;
     let admin = VftManagerC::new(remoting.clone());
     let before = admin.vara_to_eth_addresses().recv(source).await.unwrap();
+    let begin_generation = admin
+        .cutover_status()
+        .recv(source)
+        .await
+        .unwrap()
+        .generation;
     let manual = remoting.clone().with_block_run_mode(BlockRunMode::Manual);
     let mut updating_client = VftManagerC::new(manual.clone());
     let mut beginning_client = VftManagerC::new(manual);
@@ -7097,7 +8407,7 @@ async fn test_awaiting_vft_map_update_cannot_commit_after_begin_cutover() {
         .await
         .unwrap();
     let beginning = beginning_client
-        .begin_cutover(destination, 32)
+        .begin_cutover(destination, 32, begin_generation)
         .send(source)
         .await
         .unwrap();
@@ -7130,11 +8440,17 @@ async fn test_mock_receipt_admission_preserves_typed_cutover_domain_errors() {
         vft_manager_program_id: source,
         ..
     } = setup_for_test().await;
-    let destination = upgrade_destination(&remoting, source).await;
+    let destination = upgrade_destination(&remoting, source, 32).await;
     configure_cutover_destination(&remoting, source, destination).await;
     let mut admin = VftManagerC::new(remoting.clone());
+    let begin_generation = admin
+        .cutover_status()
+        .recv(source)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 32)
+        .begin_cutover(destination, 32, begin_generation)
         .send_recv(source)
         .await
         .unwrap();

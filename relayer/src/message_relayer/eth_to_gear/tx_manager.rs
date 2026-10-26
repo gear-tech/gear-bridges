@@ -14,13 +14,14 @@ use std::{
     time::Instant,
 };
 use tokio::{
-    sync::{mpsc::UnboundedReceiver, RwLock},
+    sync::{mpsc::Receiver, RwLock},
     time::{self, Duration},
 };
 use utils_prometheus::{impl_metered_service, MeteredService};
 use uuid::Uuid;
 
 const CAPACITY: usize = 1_000;
+const PASS_LIMIT: usize = 128;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Transaction {
@@ -100,6 +101,13 @@ pub enum TxStatus {
     Failed {
         diagnostic: String,
     },
+    /// Authenticated liability retained cold; not a refund, settlement, or retry authorization.
+    Unprocessable {
+        encoded_envelope_bytes: u64,
+        required_gas: Option<u64>,
+        approved_gas: Option<u64>,
+        diagnostic: String,
+    },
     Completed,
 }
 impl_metered_service!(
@@ -177,7 +185,7 @@ impl TransactionManager {
 
     pub async fn run(
         self,
-        mut message_paid_events: UnboundedReceiver<TxHashWithSlot>,
+        mut message_paid_events: Receiver<TxHashWithSlot>,
         mut proof_composer: ProofComposerIo,
         mut message_sender: MessageSenderIo,
     ) -> anyhow::Result<()> {
@@ -208,10 +216,11 @@ impl TransactionManager {
 
     pub async fn process(
         &self,
-        message_paid_events: &mut UnboundedReceiver<TxHashWithSlot>,
+        message_paid_events: &mut Receiver<TxHashWithSlot>,
         proof_composer: &mut ProofComposerIo,
         message_sender: &mut MessageSenderIo,
     ) -> anyhow::Result<bool> {
+        let intake_available = self.transactions.read().await.len() < CAPACITY;
         // Reconcile pending work even when no channel receives a message.
         tokio::select! {
             _ = time::sleep(Duration::from_secs(12)) => {}
@@ -226,7 +235,7 @@ impl TransactionManager {
                     return Ok(true);
                 }
             }
-            event = message_paid_events.recv() => {
+            event = message_paid_events.recv(), if intake_available => {
                 let Some(event) = event else { return Ok(false) };
                 self.compose_proof(event).await?;
             }
@@ -246,7 +255,7 @@ impl TransactionManager {
         message_sender: &mut MessageSenderIo,
         proof_composer: &mut ProofComposerIo,
     ) -> anyhow::Result<bool> {
-        let transactions = self.transactions.read().await.clone();
+        let transactions = self.transactions.read().await;
         // Only unresolved account nonces fence other receipts. An authenticated
         // inclusion consumes the nonce even while its economic payout is pending.
         let pending_nonce = |transaction: &Transaction| {
@@ -276,17 +285,29 @@ impl TransactionManager {
             .filter(|transaction| {
                 !matches!(
                     &transaction.status,
-                    TxStatus::Failed { .. } | TxStatus::Completed
+                    TxStatus::Failed { .. } | TxStatus::Completed | TxStatus::Unprocessable { .. }
                 ) && pending_nonce(transaction).is_some()
             })
             .min_by_key(|transaction| (pending_nonce(transaction), transaction.uuid))
             .map(|transaction| transaction.uuid);
         let has_active_signed = signed_owner.is_some();
         let after = self.last_submission.read().await.unwrap_or(Uuid::nil());
-        for (_, tx) in transactions
+        let scheduled: Vec<_> = transactions
             .range((std::ops::Bound::Excluded(after), std::ops::Bound::Unbounded))
             .chain(transactions.range(..=after))
-        {
+            .take(PASS_LIMIT)
+            .map(|(uuid, _)| *uuid)
+            .collect();
+        drop(transactions);
+        for uuid in scheduled {
+            // Scan past ineligible rows, but do not move past an outstanding signing
+            // handoff: its response must give the next receipt the first chance.
+            if self.preparing_submissions.read().await.is_empty() {
+                *self.last_submission.write().await = Some(uuid);
+            }
+            let Some(tx) = self.transactions.read().await.get(&uuid).cloned() else {
+                continue;
+            };
             if signed_owner.is_some()
                 && signed_owner != Some(tx.uuid)
                 && tx
@@ -312,7 +333,13 @@ impl TransactionManager {
 
             match &tx.status {
                 TxStatus::ComposeProof => {
-                    if !proof_composer.compose_proof_for(tx_uuid, tx.tx.clone()) {
+                    if !proof_composer.can_accept() {
+                        continue;
+                    }
+                    if !proof_composer
+                        .compose_proof_for(tx_uuid, tx.tx.clone())
+                        .await
+                    {
                         log::info!("Proof composer connection closed, exiting...");
                         return Ok(false);
                     }
@@ -320,6 +347,18 @@ impl TransactionManager {
                 }
                 TxStatus::SubmitMessage | TxStatus::PreparingSubmission => {
                     if has_active_signed || !self.preparing_submissions.read().await.is_empty() {
+                        continue;
+                    }
+                    if tx
+                        .receipt
+                        .as_ref()
+                        .is_some_and(|receipt| receipt.submission_attempts.len() >= PASS_LIMIT)
+                    {
+                        let diagnostic = "Retained proof attempt bound reached; preserve originals and reconcile without signing".to_owned();
+                        if let Some(active) = self.transactions.write().await.get_mut(&tx_uuid) {
+                            active.status = TxStatus::NeedsReconciliation { diagnostic };
+                        }
+                        self.storage.save(self).await?;
                         continue;
                     }
                     let event = tx.receipt_event()?;
@@ -344,12 +383,10 @@ impl TransactionManager {
                         .as_ref()
                         .and_then(|receipt| receipt.submission_attempts.last())
                         .map(|attempt| attempt.signed_submission.clone());
-                    if !message_sender.prepare_message(
-                        tx_uuid,
-                        tx.tx.tx_hash,
-                        event,
-                        retry_original,
-                    ) {
+                    if !message_sender
+                        .prepare_message(tx_uuid, tx.tx.tx_hash, event, retry_original)
+                        .await
+                    {
                         log::info!("Message sender connection closed, exiting...");
                         return Ok(false);
                     }
@@ -392,13 +429,16 @@ impl TransactionManager {
                     self.preparing_submissions.write().await.insert(tx_uuid);
                     *self.last_submission.write().await = Some(tx_uuid);
                     self.storage.save(self).await?;
-                    if !message_sender.submit_prepared(
-                        tx_uuid,
-                        tx.tx.tx_hash,
-                        event,
-                        signed,
-                        tx.saved_settlement_observation.clone(),
-                    ) {
+                    if !message_sender
+                        .submit_prepared(
+                            tx_uuid,
+                            tx.tx.tx_hash,
+                            event,
+                            signed,
+                            tx.saved_settlement_observation.clone(),
+                        )
+                        .await
+                    {
                         log::info!("Message sender connection closed, exiting...");
                         return Ok(false);
                     }
@@ -417,20 +457,26 @@ impl TransactionManager {
                         self.preparing_submissions.write().await.insert(tx_uuid);
                         *self.last_submission.write().await = Some(tx_uuid);
                         let event = tx.receipt_event()?;
-                        if !message_sender.submit_prepared(
-                            tx_uuid,
-                            tx.tx.tx_hash,
-                            event,
-                            signed,
-                            tx.saved_settlement_observation.clone(),
-                        ) {
+                        if !message_sender
+                            .submit_prepared(
+                                tx_uuid,
+                                tx.tx.tx_hash,
+                                event,
+                                signed,
+                                tx.saved_settlement_observation.clone(),
+                            )
+                            .await
+                        {
                             log::info!("Message sender connection closed, exiting...");
                             return Ok(false);
                         }
                         log::info!(
                             "Exact signed transaction for {tx_uuid} is enqueued for reconciliation"
                         );
-                    } else if !message_sender.reconcile_receipt(tx_uuid, receipt.receipt_key) {
+                    } else if !message_sender
+                        .reconcile_receipt(tx_uuid, receipt.receipt_key)
+                        .await
+                    {
                         log::info!("Message sender connection closed, exiting...");
                         return Ok(false);
                     } else {
@@ -455,7 +501,9 @@ impl TransactionManager {
                     self.storage.save(self).await?;
                     continue;
                 }
-                TxStatus::Failed { .. } | TxStatus::Completed => continue,
+                TxStatus::Failed { .. } | TxStatus::Completed | TxStatus::Unprocessable { .. } => {
+                    continue
+                }
             }
 
             self.transactions_timestamp
@@ -469,16 +517,23 @@ impl TransactionManager {
 
     async fn compose_proof(&self, tx: TxHashWithSlot) -> anyhow::Result<()> {
         let tx_hash = tx.clone();
+        let archived = self.storage.cold_contains(&tx).await?;
         let mut transactions = self.transactions.write().await;
-        let already_seen = transactions.values().any(|existing| {
-            existing.tx.slot_number == tx.slot_number && existing.tx.tx_hash == tx.tx_hash
-        }) || self.completed.read().await.values().any(|existing| {
-            existing.tx.slot_number == tx.slot_number && existing.tx.tx_hash == tx.tx_hash
-        });
+        let already_seen = archived
+            || transactions.values().any(|existing| {
+                existing.tx.slot_number == tx.slot_number && existing.tx.tx_hash == tx.tx_hash
+            })
+            || self.completed.read().await.values().any(|existing| {
+                existing.tx.slot_number == tx.slot_number && existing.tx.tx_hash == tx.tx_hash
+            });
 
         if already_seen {
             log::info!("Ignoring replayed paid event {tx_hash:?}");
         } else {
+            anyhow::ensure!(
+                transactions.len() < CAPACITY,
+                "HOLD: inbound active capacity reached"
+            );
             let transaction = Transaction::new(tx, TxStatus::ComposeProof);
             log::info!(
                 "Received paid event {tx_hash:?}, transaction UUID: {}",
@@ -616,6 +671,14 @@ impl TransactionManager {
                     "Original native retry qualification pin changed for {tx_uuid}"
                 );
                 anyhow::ensure!(
+                    previous
+                        .retry_qualification
+                        .as_ref()
+                        .is_none_or(|qualification| signed.retry_qualification.as_ref()
+                            == Some(qualification)),
+                    "Original typed retry qualification changed for {tx_uuid}"
+                );
+                anyhow::ensure!(
                     signed.preserves_reconciliation(previous),
                     "Original reconciliation history/bytes/reply changed for {tx_uuid}"
                 );
@@ -635,16 +698,18 @@ impl TransactionManager {
         {
             let original = receipt.signed_submission.as_ref();
             if receipt_observation.as_ref().is_none_or(|observation| observation.finalized_block_number.is_none())
-                || original.is_none_or(|signed| !signed.has_finalized_dispatch_reply()
+                || original.is_none_or(|signed| !signed.has_finalized_original_disposition()
                     || signed.native_reconciliation.as_ref().is_some_and(|continuation|
                         !continuation.has_finalized_dispatch_reply()
                             || continuation.finalized_reply.as_ref().is_none_or(|reply|
                                 !matches!(message_sender::decode_complete_reply::<vft_manager_client::vft_manager::io::ReconcileReceipt>(&reply.payload),
                                     Ok(Ok(vft_manager_client::ReceiptStatus::Processed))))))
-                || submission.as_ref().is_none_or(|evidence| evidence.manager_reply.is_none()) {
+                || submission.as_ref().is_none_or(|evidence| original.is_none_or(|signed|
+                    if signed.has_finalized_dispatch_reply() { evidence.manager_reply.is_none() }
+                    else { evidence.error.as_ref() != signed.finalized_dispatch_error.as_ref() })) {
                 status = MessageStatus::NeedsReconciliation {
                     receipt_key,
-                    diagnostic: "Completion omitted the original finalized signed dispatch/reply evidence".into(),
+                    diagnostic: "Completion omitted original finalized disposition or independent settlement evidence".into(),
                     receipt_observation: receipt_observation.clone(),
                 };
             } else if let (Some(original), Some(pin)) = (original, receipt_observation.as_ref()) {
@@ -653,31 +718,31 @@ impl TransactionManager {
                     "HOLD: saved completion was queried at a different settlement pin");
             }
         }
-        if let MessageStatus::RetryableNoop {
-            receipt_observation,
-            ..
-        } = &status
-        {
+        if let MessageStatus::RetryableNoop { qualification, .. } = &status {
             let qualified = receipt.signed_submission.as_ref().is_some_and(|signed| {
-                (signed.inclusion_block_number.is_some()
-                    && signed.inclusion_block_hash.is_some()
-                    && signed.message_id.is_none()
-                    && signed.finalized_dispatch_error.is_some())
-                    || (signed.has_finalized_dispatch_reply()
-                        && signed
-                            .native_retry_qualification
-                            .as_ref()
-                            .is_some_and(|pin| {
-                                pin.finalized_block_number.is_some()
-                                    && receipt_observation.as_ref() == Some(pin)
-                                    && signed.validate_settlement_order(pin).is_ok()
-                            }))
+                signed.retry_qualification.as_ref() == Some(qualification)
+                    && qualification.observation.finalized_block_number.is_some()
+                    && signed
+                        .validate_settlement_order(&qualification.observation)
+                        .is_ok()
+                    && match qualification.reason {
+                        message_sender::RetryReason::DispatchBeforeMessage => {
+                            signed.inclusion_block_number.is_some()
+                                && signed.inclusion_block_hash.is_some()
+                                && signed.message_id.is_none()
+                                && signed.finalized_dispatch_error.is_some()
+                        }
+                        message_sender::RetryReason::PausedBeforeAdmission
+                        | message_sender::RetryReason::NativeOriginalNoEffect => {
+                            signed.has_finalized_dispatch_reply()
+                        }
+                    }
             });
-            if !qualified {
+            if !qualified || receipt.submission_attempts.len() >= PASS_LIMIT {
                 status = MessageStatus::NeedsReconciliation {
                     receipt_key,
-                    diagnostic: "Retry omitted exact finalized dispatch failure or pinned native original qualification".into(),
-                    receipt_observation: receipt_observation.clone(),
+                    diagnostic: "Retry lacks exact typed finalized qualification or reached retained attempt bound".into(),
+                    receipt_observation: Some(qualification.observation.clone()),
                 };
             }
         }
@@ -722,9 +787,36 @@ impl TransactionManager {
                 self.metrics.completed_transactions.inc();
                 self.transactions_timestamp.write().await.remove(&tx_uuid);
             }
+            MessageStatus::Unprocessable {
+                encoded_envelope_bytes,
+                required_gas,
+                approved_gas,
+                diagnostic,
+            } => {
+                anyhow::ensure!(
+                    tx.receipt
+                        .as_ref()
+                        .is_some_and(|receipt| receipt.signed_submission.is_none()
+                            && receipt.submission_attempts.is_empty()
+                            && receipt.handed_off_at_ms.is_none()),
+                    "HOLD: cannot archive an unprocessable receipt with an original nonce owner"
+                );
+                tx.status = TxStatus::Unprocessable {
+                    encoded_envelope_bytes,
+                    required_gas,
+                    approved_gas,
+                    diagnostic,
+                };
+                self.transactions_timestamp.write().await.remove(&tx_uuid);
+                transactions.insert(tx_uuid, tx);
+            }
             MessageStatus::Failure(message) => {
                 let receipt = tx.receipt.as_mut().expect("receipt was validated above");
                 if let Some(signed) = receipt.signed_submission.take() {
+                    anyhow::ensure!(
+                        receipt.submission_attempts.len() < PASS_LIMIT,
+                        "HOLD: retained proof attempt bound reached"
+                    );
                     receipt.submission_attempts.push(SubmissionAttempt {
                         signed_submission: signed,
                         response: submission,
@@ -738,7 +830,7 @@ impl TransactionManager {
             }
             MessageStatus::RetryableNoop {
                 diagnostic,
-                receipt_observation,
+                qualification,
                 ..
             } => {
                 let receipt = tx.receipt.as_mut().expect("receipt was validated above");
@@ -749,9 +841,7 @@ impl TransactionManager {
                     signed_submission: signed,
                     response: submission,
                 });
-                if let Some(observation) = receipt_observation {
-                    tx.receipt_observation = Some(observation);
-                }
+                tx.receipt_observation = Some(qualification.observation);
                 tx.status = TxStatus::RetryableSubmission {
                     diagnostic: diagnostic.clone(),
                     retry_at_ms: message_sender::now_ms().saturating_add(60_000),
@@ -792,7 +882,7 @@ mod native_retry_fixture;
 pub(super) mod tests {
     use super::{super::storage::tests::runtime_identity, *};
     use crate::message_relayer::common::EthereumSlotNumber;
-    use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel};
+    use tokio::sync::mpsc::{channel, error::TryRecvError};
 
     pub(in crate::message_relayer::eth_to_gear) fn signed_submission(
         receipt_key: (u64, u64),
@@ -806,6 +896,7 @@ pub(super) mod tests {
             finalized_reply_error: None,
             native_wrapper_approval: None,
             native_retry_qualification: None,
+            retry_qualification: None,
             chain_genesis_hash: "0x01".into(),
             manager: "0x02".into(),
             historical_proxy: "0x03".into(),
@@ -981,9 +1072,7 @@ pub(super) mod tests {
             })
             .await
             .unwrap();
-        let disk: serde_json::Value =
-            serde_json::from_slice(&tokio::fs::read(path.join("state.json")).await.unwrap())
-                .unwrap();
+        let disk = super::super::storage::read_journal_inventory(&path).unwrap();
         let saved = &disk["transactions"][uuid.to_string()]["receipt"]["signed_submission"];
         assert_eq!(
             saved["native_reconciliation_attempts"][0]["raw_extrinsic"],
@@ -1012,7 +1101,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn saved_completion_restores_original_pin_not_latest_polling_observation() {
+    async fn saved_completion_archives_original_pin_and_legacy_requires_requalification() {
         use super::super::storage::JSONStorage;
         let path = std::env::temp_dir().join(format!("inbound-historical-pin-{}", Uuid::now_v7()));
         let storage = Arc::new(JSONStorage::new(&path));
@@ -1053,70 +1142,96 @@ pub(super) mod tests {
         });
         tx.receipt_observation = Some(pin.clone());
         let uuid = tx.uuid;
+        let original = serde_json::to_value(&tx).unwrap();
         manager.completed.write().await.insert(uuid, tx);
         storage.save(&manager).await.unwrap();
         let restored = TransactionManager::new(storage.clone());
         storage.load(&restored).await.unwrap();
-        // Latest state may have evicted every receipt row; the request still carries hash 20.
-        restored
-            .transactions
-            .write()
-            .await
-            .get_mut(&uuid)
-            .unwrap()
-            .receipt_observation = Some(message_sender::FinalizedReceiptObservation {
-            finalized_block_number: Some(74),
-            finalized_block_hash: "0x74".into(),
-        });
-        let (requests, mut sent) = unbounded_channel();
-        let (_responses, received) = unbounded_channel();
-        let mut sender = MessageSenderIo::new(requests, received);
-        let (requests, _proof_requests) = unbounded_channel();
-        let (_responses, received) = unbounded_channel();
-        let mut composer = ProofComposerIo::new(requests, received);
-        restored.resume(&mut sender, &mut composer).await.unwrap();
-        match sent.try_recv().unwrap() {
-            message_sender::Request::SubmitPrepared { settlement_pin, .. } => {
-                assert_eq!(settlement_pin, Some(pin.clone()))
-            }
-            other => panic!("saved completion substituted unsigned/latest work: {other:?}"),
-        }
-        storage.save(&restored).await.unwrap();
-        let twice = TransactionManager::new(storage.clone());
-        storage.load(&twice).await.unwrap();
+        assert!(restored.transactions.read().await.is_empty());
+        assert!(restored.completed.read().await.is_empty());
+        let inventory = super::super::storage::read_journal_inventory(&path).unwrap();
+        assert_eq!(inventory["completed"][uuid.to_string()], original);
         assert_eq!(
-            twice.transactions.read().await[&uuid].saved_settlement_observation,
-            Some(pin)
+            inventory["completed"][uuid.to_string()]["receipt_observation"],
+            serde_json::to_value(&pin).unwrap()
         );
-        // A Processed-only legacy completion without a historical pin gets no latest shortcut.
-        manager
-            .completed
-            .write()
+        // Legacy inline completions still require explicit historical requalification;
+        // moving them into a separate fixture must not rewrite the sealed cold original.
+        for has_pin in [true, false] {
+            let legacy_path = path.join(if has_pin {
+                "legacy-pin"
+            } else {
+                "legacy-no-pin"
+            });
+            let legacy_storage = Arc::new(JSONStorage::new(&legacy_path));
+            legacy_storage
+                .bind_runtime_identity(runtime_identity())
+                .await
+                .unwrap();
+            let mut legacy = inventory.clone();
+            legacy["schema_version"] = serde_json::json!(5);
+            if !has_pin {
+                legacy["completed"][uuid.to_string()]["receipt_observation"] =
+                    serde_json::Value::Null;
+            }
+            tokio::fs::write(
+                legacy_path.join("state.json"),
+                serde_json::to_vec(&legacy).unwrap(),
+            )
             .await
-            .get_mut(&uuid)
-            .unwrap()
-            .receipt_observation = None;
-        storage.save(&manager).await.unwrap();
-        let legacy = TransactionManager::new(storage.clone());
-        storage.load(&legacy).await.unwrap();
-        let legacy = legacy.transactions.read().await;
-        let held = &legacy[&uuid];
-        assert!(held
-            .saved_settlement_observation
-            .as_ref()
-            .unwrap()
-            .finalized_block_number
-            .is_none());
-        assert!(held
-            .receipt
-            .as_ref()
-            .unwrap()
-            .signed_submission
-            .as_ref()
-            .unwrap()
-            .validate_settlement_order(held.saved_settlement_observation.as_ref().unwrap())
-            .is_err());
-        drop(legacy);
+            .unwrap();
+            let legacy_manager = TransactionManager::new(legacy_storage.clone());
+            legacy_storage.load(&legacy_manager).await.unwrap();
+            let held = legacy_manager.transactions.read().await[&uuid].clone();
+            let saved_pin = held.saved_settlement_observation.as_ref().unwrap();
+            if has_pin {
+                assert_eq!(saved_pin, &pin);
+                legacy_manager
+                    .transactions
+                    .write()
+                    .await
+                    .get_mut(&uuid)
+                    .unwrap()
+                    .receipt_observation = Some(message_sender::FinalizedReceiptObservation {
+                    finalized_block_number: Some(74),
+                    finalized_block_hash: "0x74".into(),
+                });
+                let (requests, mut sent) = channel(128);
+                let (_responses, received) = channel(128);
+                let mut sender = MessageSenderIo::new(requests, received);
+                let (requests, _proof_requests) = channel(128);
+                let (_responses, received) = channel(128);
+                let mut composer = ProofComposerIo::new(requests, received);
+                legacy_manager
+                    .resume(&mut sender, &mut composer)
+                    .await
+                    .unwrap();
+                match sent.try_recv().unwrap() {
+                    message_sender::Request::SubmitPrepared { settlement_pin, .. } => {
+                        assert_eq!(settlement_pin, Some(pin.clone()))
+                    }
+                    other => {
+                        panic!("legacy completion substituted unsigned/latest work: {other:?}")
+                    }
+                }
+            } else {
+                assert!(saved_pin.finalized_block_number.is_none());
+                assert!(held
+                    .receipt
+                    .as_ref()
+                    .unwrap()
+                    .signed_submission
+                    .as_ref()
+                    .unwrap()
+                    .validate_settlement_order(saved_pin)
+                    .is_err());
+            }
+            assert_eq!(
+                super::super::storage::read_journal_inventory(&path).unwrap()["completed"]
+                    [uuid.to_string()],
+                original
+            );
+        }
         tokio::fs::remove_dir_all(path).await.unwrap();
     }
 
@@ -1166,8 +1281,7 @@ pub(super) mod tests {
         manager.add_transaction(tx).await;
         storage.save(&manager).await.unwrap();
         // Schema5 history gains optional fields without losing raw bytes or cursors.
-        let committed = tokio::fs::read(path.join("state.json")).await.unwrap();
-        let mut legacy: serde_json::Value = serde_json::from_slice(&committed).unwrap();
+        let mut legacy = super::super::storage::read_journal_inventory(&path).unwrap();
         legacy["schema_version"] = serde_json::json!(5);
         legacy["transactions"][uuid.to_string()]["receipt"]["signed_submission"]
             .as_object_mut()
@@ -1222,10 +1336,8 @@ pub(super) mod tests {
             })
             .await
             .unwrap();
-        let persisted: serde_json::Value =
-            serde_json::from_slice(&tokio::fs::read(path.join("state.json")).await.unwrap())
-                .unwrap();
-        assert_eq!(persisted["schema_version"], 7);
+        let persisted = super::super::storage::read_journal_inventory(&path).unwrap();
+        assert_eq!(persisted["schema_version"], 8);
         assert_eq!(
             persisted["operator_extension"],
             legacy["operator_extension"]
@@ -1243,11 +1355,11 @@ pub(super) mod tests {
         for _ in 0..2 {
             let restored = TransactionManager::new(storage.clone());
             storage.load(&restored).await.unwrap();
-            let (requests, mut sent) = unbounded_channel();
-            let (_responses, received) = unbounded_channel();
+            let (requests, mut sent) = channel(128);
+            let (_responses, received) = channel(128);
             let mut sender = MessageSenderIo::new(requests, received);
-            let (requests, mut proof_requests) = unbounded_channel();
-            let (_responses, received) = unbounded_channel();
+            let (requests, mut proof_requests) = channel(128);
+            let (_responses, received) = channel(128);
             let mut composer = ProofComposerIo::new(requests, received);
             restored.resume(&mut sender, &mut composer).await.unwrap();
             match sent.try_recv().unwrap() {
@@ -1326,15 +1438,12 @@ pub(super) mod tests {
             })
             .await
             .unwrap();
+        let inventory = super::super::storage::read_journal_inventory(&path).unwrap();
         assert_eq!(
-            restored.completed.read().await[&uuid]
-                .receipt
-                .as_ref()
-                .unwrap()
-                .signed_submission
-                .as_ref(),
-            Some(&completed)
+            inventory["completed"][uuid.to_string()]["receipt"]["signed_submission"],
+            serde_json::to_value(&completed).unwrap()
         );
+        assert!(restored.completed.read().await.is_empty());
         assert_eq!(completed.raw_extrinsic, original.raw_extrinsic);
         assert_eq!(completed.nonce, original.nonce);
         tokio::fs::remove_dir_all(path).await.unwrap();
@@ -1425,7 +1534,13 @@ pub(super) mod tests {
                 status: MessageStatus::RetryableNoop {
                     receipt_key,
                     diagnostic: "finalized per-log failure".into(),
-                    receipt_observation: None,
+                    qualification: message_sender::RetryQualification {
+                        reason: message_sender::RetryReason::NativeOriginalNoEffect,
+                        observation: message_sender::FinalizedReceiptObservation {
+                            finalized_block_number: None,
+                            finalized_block_hash: String::new(),
+                        },
+                    },
                 },
                 submission: Some(evidence.clone()),
                 signed_submission: Some(signed.clone()),
@@ -1492,13 +1607,13 @@ pub(super) mod tests {
             finalized_block_number: Some(73),
             finalized_block_hash: "0xabcd".into(),
         };
-        let (send_requests, mut sent) = unbounded_channel();
-        let (send_responses, received) = unbounded_channel();
+        let (send_requests, mut sent) = channel(128);
+        let (send_responses, received) = channel(128);
         let mut sender = MessageSenderIo::new(send_requests, received);
-        let (proof_requests, mut composed) = unbounded_channel();
-        let (_proof_responses, received) = unbounded_channel();
+        let (proof_requests, mut composed) = channel(128);
+        let (_proof_responses, received) = channel(128);
         let mut composer = ProofComposerIo::new(proof_requests, received);
-        let (_paid, mut paid) = unbounded_channel();
+        let (_paid, mut paid) = channel(128);
         for (diagnostic, observation) in [
             ("Unknown at finalized block 73", Some(unknown.clone())),
             ("Could not pin the next finalized receipt query", None),
@@ -1514,6 +1629,7 @@ pub(super) mod tests {
                     submission: None,
                     signed_submission: None,
                 })
+                .await
                 .unwrap();
             assert!(tokio::time::timeout(
                 Duration::from_secs(5),
@@ -1635,21 +1751,23 @@ pub(super) mod tests {
         assert_eq!(manager.completed.read().await.len(), 1);
         assert!(manager.completed.read().await.contains_key(&completed_uuid));
         let path = std::env::temp_dir().join(format!("gear-eth-to-gear-replay-{}", Uuid::now_v7()));
-        let storage = super::super::storage::JSONStorage::new(&path);
+        let storage = Arc::new(super::super::storage::JSONStorage::new(&path));
         storage
             .bind_runtime_identity(runtime_identity())
             .await
             .unwrap();
         storage.save(&manager).await.unwrap();
 
-        let restored = TransactionManager::new(Arc::new(super::super::storage::NoStorage::new()));
+        let restored = TransactionManager::new(storage.clone());
         storage.load(&restored).await.unwrap();
-        restored.compose_proof(identity).await.unwrap();
-        assert_eq!(restored.transactions.read().await.len(), 1);
-        assert!(matches!(
-            restored.transactions.read().await[&completed_uuid].status,
-            TxStatus::NeedsReconciliation { .. }
-        ));
+        restored.compose_proof(identity.clone()).await.unwrap();
+        assert!(storage.cold_contains(&identity).await.unwrap());
+        assert!(restored.transactions.read().await.is_empty());
+        let inventory = super::super::storage::read_journal_inventory(&path).unwrap();
+        assert_eq!(
+            inventory["completed"][completed_uuid.to_string()]["status"],
+            "Completed"
+        );
         assert!(restored.completed.read().await.is_empty());
         tokio::fs::remove_dir_all(path).await.unwrap();
     }
@@ -1748,7 +1866,7 @@ pub(super) mod tests {
     }
     pub(in crate::message_relayer::eth_to_gear) fn receipt_fixtures(
     ) -> impl Iterator<Item = (TxHashWithSlot, EthToVaraEvent)> {
-        use alloy_rlp::Encodable;
+        use alloy_eips::eip2718::Encodable2718;
         use eth_events_electra_client::{BlockGenericForBlockBody, BlockInclusionProof};
         use ethereum_common::{
             beacon::electra::Block,
@@ -1787,8 +1905,7 @@ pub(super) mod tests {
                 })
                 .collect::<Vec<_>>();
             let merkle = utils::generate_merkle_proof(fixture.tx_index, &receipts).unwrap();
-            let mut receipt_rlp = Vec::new();
-            Encodable::encode(&merkle.receipt, &mut receipt_rlp);
+            let receipt_rlp = merkle.receipt.encoded_2718();
             let block = fixture.block.data.message;
             let event = EthToVaraEvent {
                 proof_block: BlockInclusionProof {
@@ -1835,8 +1952,7 @@ pub(super) mod tests {
         manager.add_transaction(transaction).await;
         manager.submit_message(uuid, event).await.unwrap();
         let state_path = path.join("state.json");
-        let mut legacy: serde_json::Value =
-            serde_json::from_slice(&tokio::fs::read(&state_path).await.unwrap()).unwrap();
+        let mut legacy = super::super::storage::read_journal_inventory(&path).unwrap();
         legacy["schema_version"] = serde_json::json!(4);
         let original = serde_json::to_vec(&legacy).unwrap();
         tokio::fs::write(&state_path, &original).await.unwrap();
@@ -1858,6 +1974,45 @@ pub(super) mod tests {
             retained, original,
             "HOLD must preserve the original UUID, hash and proof bytes"
         );
+    }
+
+    #[tokio::test]
+    async fn bounded_resume_scans_past_ineligible_receipts_without_moving_active_handoff() {
+        let manager = TransactionManager::new(Arc::new(super::super::storage::NoStorage::new()));
+        let (lock, event) = receipt_fixtures().next().unwrap();
+        for index in 0..PASS_LIMIT {
+            let mut tx = Transaction::new(lock.clone(), TxStatus::ComposeProof);
+            tx.uuid = Uuid::from_u128(index as u128 + 1);
+            manager
+                .transactions_timestamp
+                .write()
+                .await
+                .insert(tx.uuid, Instant::now());
+            manager.add_transaction(tx).await;
+        }
+        let mut fresh = Transaction::new(lock, TxStatus::ComposeProof);
+        fresh.uuid = Uuid::from_u128(PASS_LIMIT as u128 + 1);
+        let uuid = fresh.uuid;
+        manager.add_transaction(fresh).await;
+        manager.submit_message(uuid, event).await.unwrap();
+        let (requests, mut sent) = channel(128);
+        let (_responses, received) = channel(128);
+        let mut sender = MessageSenderIo::new(requests, received);
+        let (requests, _proof_requests) = channel(128);
+        let (_responses, received) = channel(128);
+        let mut composer = ProofComposerIo::new(requests, received);
+
+        manager.resume(&mut sender, &mut composer).await.unwrap();
+        assert!(matches!(sent.try_recv(), Err(TryRecvError::Empty)));
+        manager.resume(&mut sender, &mut composer).await.unwrap();
+        assert!(matches!(
+            sent.try_recv(),
+            Ok(message_sender::Request::PrepareMessage { tx_uuid, .. }) if tx_uuid == uuid
+        ));
+        assert_eq!(*manager.last_submission.read().await, Some(uuid));
+        manager.resume(&mut sender, &mut composer).await.unwrap();
+        assert!(matches!(sent.try_recv(), Err(TryRecvError::Empty)));
+        assert_eq!(*manager.last_submission.read().await, Some(uuid));
     }
 
     #[tokio::test]
@@ -1911,11 +2066,11 @@ pub(super) mod tests {
                 })
                 .await
                 .unwrap();
-            let (requests, mut sent) = unbounded_channel();
-            let (_responses, received) = unbounded_channel();
+            let (requests, mut sent) = channel(128);
+            let (_responses, received) = channel(128);
             let mut sender = MessageSenderIo::new(requests, received);
-            let (requests, _proof_requests) = unbounded_channel();
-            let (_responses, received) = unbounded_channel();
+            let (requests, _proof_requests) = channel(128);
+            let (_responses, received) = channel(128);
             let mut composer = ProofComposerIo::new(requests, received);
             manager.resume(&mut sender, &mut composer).await.unwrap();
             assert!(
@@ -2046,11 +2201,11 @@ pub(super) mod tests {
             manager.submit_message(uuid, event.clone()).await.unwrap();
             uuids.push(uuid);
         }
-        let (requests, mut sent) = unbounded_channel();
-        let (responses, received) = unbounded_channel();
+        let (requests, mut sent) = channel(128);
+        let (responses, received) = channel(128);
         let mut sender = MessageSenderIo::new(requests, received);
-        let (requests, _proof_requests) = unbounded_channel();
-        let (_responses, received) = unbounded_channel();
+        let (requests, _proof_requests) = channel(128);
+        let (_responses, received) = channel(128);
         let mut composer = ProofComposerIo::new(requests, received);
         let first_signed =
             signed_submission((fixtures[0].0.slot_number.0, fixtures[0].1.transaction_index));
@@ -2083,7 +2238,7 @@ pub(super) mod tests {
         }) if tx_uuid == uuids[0] && prepared.1 == first_signed)
         );
         assert!(matches!(sent.try_recv(), Err(TryRecvError::Empty)));
-        let (_paid, mut paid) = unbounded_channel();
+        let (_paid, mut paid) = channel(128);
         tokio::time::timeout(Duration::from_secs(5), async {
             let (result, ()) = tokio::join!(
                 restored.process(&mut paid, &mut composer, &mut sender),
@@ -2121,6 +2276,7 @@ pub(super) mod tests {
                             }),
                             signed_submission: Some(delivered),
                         })
+                        .await
                         .unwrap();
                 }
             );
@@ -2145,6 +2301,7 @@ pub(super) mod tests {
                 submission: None,
                 signed_submission: Some(second_signed.clone()),
             })
+            .await
             .unwrap();
         assert!(tokio::time::timeout(
             Duration::from_secs(5),
@@ -2215,6 +2372,11 @@ pub(super) mod tests {
             observation: qualification.clone(),
         });
         signed.native_retry_qualification = Some(qualification.clone());
+        let qualification = message_sender::RetryQualification {
+            reason: message_sender::RetryReason::NativeOriginalNoEffect,
+            observation: qualification,
+        };
+        signed.retry_qualification = Some(qualification.clone());
         {
             let mut transactions = manager.transactions.write().await;
             let transaction = transactions.get_mut(&uuid).unwrap();
@@ -2239,7 +2401,7 @@ pub(super) mod tests {
                 status: MessageStatus::RetryableNoop {
                     receipt_key,
                     diagnostic: "finalized per-log failure".into(),
-                    receipt_observation: Some(qualification.clone()),
+                    qualification: qualification.clone(),
                 },
                 submission: Some(evidence),
                 signed_submission: Some(signed.clone()),
@@ -2256,11 +2418,11 @@ pub(super) mod tests {
         {
             *retry_at_ms = 0;
         }
-        let (requests, mut sent) = unbounded_channel();
-        let (_responses, received) = unbounded_channel();
+        let (requests, mut sent) = channel(128);
+        let (_responses, received) = channel(128);
         let mut sender = MessageSenderIo::new(requests, received);
-        let (requests, _proof_requests) = unbounded_channel();
-        let (_responses, received) = unbounded_channel();
+        let (requests, _proof_requests) = channel(128);
+        let (_responses, received) = channel(128);
         let mut composer = ProofComposerIo::new(requests, received);
         tokio::time::timeout(
             Duration::from_secs(5),
@@ -2342,12 +2504,14 @@ pub(super) mod tests {
             })
             .await
             .unwrap();
-        let completed = restored.completed.read().await;
-        let receipt = completed[&uuid].receipt.as_ref().unwrap();
+        let inventory = super::super::storage::read_journal_inventory(&path).unwrap();
+        let completed: Transaction =
+            serde_json::from_value(inventory["completed"][uuid.to_string()].clone()).unwrap();
+        let receipt = completed.receipt.as_ref().unwrap();
         assert_eq!(receipt.signed_submission.as_ref(), Some(&retry));
         assert_eq!(receipt.submission_attempts.len(), 1);
         assert_eq!(receipt.submission_attempts[0].signed_submission, signed);
-        drop(completed);
+        assert!(restored.completed.read().await.is_empty());
         tokio::fs::remove_dir_all(path).await.unwrap();
     }
     #[tokio::test]
@@ -2404,11 +2568,11 @@ pub(super) mod tests {
             let loaded = storage.load(&restored).await;
             if mutation == "failed preparation" || mutation == "ambiguous handoff" {
                 loaded.unwrap();
-                let (requests, mut sent) = unbounded_channel();
-                let (_responses, received) = unbounded_channel();
+                let (requests, mut sent) = channel(128);
+                let (_responses, received) = channel(128);
                 let mut sender = MessageSenderIo::new(requests, received);
-                let (requests, _proof_requests) = unbounded_channel();
-                let (_responses, received) = unbounded_channel();
+                let (requests, _proof_requests) = channel(128);
+                let (_responses, received) = channel(128);
                 let mut composer = ProofComposerIo::new(requests, received);
                 restored.resume(&mut sender, &mut composer).await.unwrap();
                 if mutation == "ambiguous handoff" {
@@ -2437,5 +2601,121 @@ pub(super) mod tests {
             );
             tokio::fs::remove_dir_all(path).await.unwrap();
         }
+    }
+    // Reconstructed from supplied HTML VB-19/25: containment is not economic closure.
+    #[tokio::test]
+    async fn reconstructed_html_oversize_liability_does_not_fence_normal_receipt() {
+        use super::super::storage::{read_journal_inventory, tests::runtime_identity, JSONStorage};
+        let path = std::env::temp_dir().join(format!("inbound-oversize-{}", Uuid::now_v7()));
+        let storage = Arc::new(JSONStorage::new(&path));
+        storage
+            .bind_runtime_identity(runtime_identity())
+            .await
+            .unwrap();
+        let manager = TransactionManager::new(storage.clone());
+        let fixtures: Vec<_> = receipt_fixtures().collect();
+        let first = Transaction::new(fixtures[0].0.clone(), TxStatus::ComposeProof);
+        let uuid = first.uuid;
+        manager.add_transaction(first).await;
+        manager
+            .submit_message(uuid, fixtures[0].1.clone())
+            .await
+            .unwrap();
+        manager
+            .finalize_transaction(message_sender::Response {
+                tx_uuid: uuid,
+                status: MessageStatus::Unprocessable {
+                    encoded_envelope_bytes: 3_000_000,
+                    required_gas: None,
+                    approved_gas: Some(750_000_000_000),
+                    diagnostic: "full Redirect/extrinsic exceeds approved envelope limit".into(),
+                },
+                submission: None,
+                signed_submission: None,
+            })
+            .await
+            .unwrap();
+        assert!(manager.transactions.read().await.is_empty());
+        let retained = read_journal_inventory(&path).unwrap();
+        let blocked: Transaction =
+            serde_json::from_value(retained["transactions"][uuid.to_string()].clone()).unwrap();
+        assert!(matches!(blocked.status, TxStatus::Unprocessable { .. }));
+        assert_eq!(
+            blocked.receipt.as_ref().unwrap().payload,
+            fixtures[0].1.encode()
+        );
+        assert!(blocked
+            .receipt
+            .as_ref()
+            .unwrap()
+            .signed_submission
+            .is_none());
+        manager.compose_proof(fixtures[0].0.clone()).await.unwrap();
+        assert!(
+            manager.transactions.read().await.is_empty(),
+            "a replay must not allocate another original"
+        );
+        let next = Transaction::new(fixtures[1].0.clone(), TxStatus::ComposeProof);
+        let next_uuid = next.uuid;
+        manager.add_transaction(next).await;
+        manager
+            .submit_message(next_uuid, fixtures[1].1.clone())
+            .await
+            .unwrap();
+        let (requests, mut sent) = channel(128);
+        let (_responses, received) = channel(128);
+        let mut sender = MessageSenderIo::new(requests, received);
+        let (requests, _proofs) = channel(128);
+        let (_responses, received) = channel(128);
+        let mut composer = ProofComposerIo::new(requests, received);
+        manager.resume(&mut sender, &mut composer).await.unwrap();
+        assert!(
+            matches!(sent.try_recv().unwrap(), message_sender::Request::PrepareMessage { tx_uuid, .. } if tx_uuid == next_uuid)
+        );
+        tokio::fs::remove_dir_all(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reconstructed_html_full_ingress_still_drains_responses() {
+        let manager = TransactionManager::new(Arc::new(super::super::storage::NoStorage::new()));
+        let (identity, event) = receipt_fixtures().next().unwrap();
+        let first = Transaction::new(identity.clone(), TxStatus::ComposeProof);
+        let uuid = first.uuid;
+        manager.add_transaction(first).await;
+        manager.submit_message(uuid, event).await.unwrap();
+        for _ in 1..CAPACITY {
+            manager
+                .add_transaction(Transaction::new(identity.clone(), TxStatus::ComposeProof))
+                .await;
+        }
+        let (paid, mut ingress) = channel(128);
+        paid.send(identity).await.unwrap();
+        let (requests, _sent) = channel(128);
+        let (responses, received) = channel(128);
+        let mut sender = MessageSenderIo::new(requests, received);
+        let (requests, _proofs) = channel(128);
+        let (_responses, received) = channel(128);
+        let mut composer = ProofComposerIo::new(requests, received);
+        responses
+            .send(message_sender::Response {
+                tx_uuid: uuid,
+                status: MessageStatus::PrepareFailed("policy unavailable; no signing".into()),
+                submission: None,
+                signed_submission: None,
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            manager.process(&mut ingress, &mut composer, &mut sender),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(manager.failed.read().await.contains_key(&uuid));
+        assert!(
+            ingress.try_recv().is_ok(),
+            "capacity must stop intake, not consume/drop it"
+        );
     }
 }

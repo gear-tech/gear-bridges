@@ -19,6 +19,9 @@ pub struct LanePolicy {
     pub evm_manager: Option<Address>,
     pub token_delivery_required: bool,
     pub original_hash: Option<B256>,
+    /// Absent only in retained historical approvals; never authorizes new signing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_gas_per_message: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -32,6 +35,7 @@ struct ApprovedLane {
     evm_manager: Option<Address>,
     token_delivery_required: bool,
     original_hash: Option<B256>,
+    max_gas_per_message: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +98,7 @@ impl LaneApprovals {
                 evm_manager: lane.evm_manager,
                 token_delivery_required: lane.token_delivery_required,
                 original_hash: lane.original_hash,
+                max_gas_per_message: lane.max_gas_per_message,
             })
             .collect::<Vec<_>>();
         for policy in &policies {
@@ -133,6 +138,16 @@ impl LaneApprovals {
 }
 
 impl LanePolicy {
+    pub fn validate_signing_cap(&self, configured: Option<u64>) -> Result<()> {
+        ensure!(
+            self.original_hash.is_none()
+                && self.max_gas_per_message.is_some_and(|limit| limit > 0)
+                && configured == self.max_gas_per_message,
+            "HOLD: new signing requires the positive independently approved message gas ceiling"
+        );
+        Ok(())
+    }
+
     fn validate_shape(&self) -> Result<()> {
         ensure!(
             self.approval_sha256 != B256::ZERO
@@ -208,6 +223,7 @@ mod tests {
             evm_manager: Some(Address::repeat_byte(5)),
             token_delivery_required: true,
             original_hash: None,
+            max_gas_per_message: Some(1_000_000),
         }
     }
     #[test]
@@ -233,5 +249,26 @@ mod tests {
         assert!(LaneApprovals::load(&path, B256::repeat_byte(1)).is_err());
         assert!(LaneApprovals::load(&path, B256::from_slice(&Sha256::digest(bytes))).is_err());
         std::fs::remove_file(path).unwrap();
+    }
+
+    // Reconstructed from supplied HTML / audited7fe1b032 (VB-28).
+    #[test]
+    fn supplied_vb28_gas_approval_is_required_only_for_new_signing() {
+        let mut policy = policy();
+        policy.validate_signing_cap(Some(1_000_000)).unwrap();
+        assert!(policy.validate_signing_cap(None).is_err());
+        assert!(policy.validate_signing_cap(Some(999_999)).is_err());
+        policy.max_gas_per_message = None;
+        policy.validate_shape().unwrap();
+        assert!(policy.validate_signing_cap(None).is_err());
+        let historical = serde_json::to_value(&policy).unwrap();
+        assert!(historical.get("maxGasPerMessage").is_none());
+        let recovered: LanePolicy = serde_json::from_value(historical).unwrap();
+        assert_eq!(recovered, policy);
+        policy.max_gas_per_message = Some(0);
+        assert!(policy.validate_signing_cap(Some(0)).is_err());
+        policy.max_gas_per_message = Some(1_000_000);
+        policy.original_hash = Some(B256::repeat_byte(9));
+        assert!(policy.validate_signing_cap(Some(1_000_000)).is_err());
     }
 }

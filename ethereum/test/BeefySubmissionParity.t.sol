@@ -11,6 +11,60 @@ contract BeefySubmissionParityTest is BeefyFixtureTest {
         fixtures = vm.readFile("test/fixtures/beefy-interop.json");
     }
 
+    // VB-13 reconstructed from HTML, audited 7fe1b032. Both real signature protocols,
+    // not a bootstrap/mocked root; execution evidence is recorded by integration.
+    function testVB13ReconstructedAcceptedAnchorRingBothProtocols() public {
+        // Fixture parsing/signing across 130 updates is not a per-transaction gas measurement.
+        vm.pauseGasMetering();
+        uint256 index = caseIndex("synthetic-mmr-3-primary");
+        for (uint256 mode; mode < 2; mode++) {
+            BeefyClient client = newClient(index);
+            uint64 bootstrap = client.latestBeefyBlock();
+            assertFalse(client.isAcceptedAnchor(bootstrap, bytes32(0)));
+            assertFalse(client.isAcceptedAnchor(bootstrap, fixtureHash(index, "mmrRoot")));
+            assertFalse(client.verifyMMRLeafProof(bootstrap, bytes32(0), bytes32(0), new bytes32[](0), 0));
+            (, VaraBridgeMetadata.Snapshot memory s,,) = freshnessWitness(index);
+            vm.warp(uint256(s.sourceTimestampMs) / 1000);
+            bytes32[65] memory roots;
+            uint256[] memory bits = allSigners(index);
+            for (uint32 i; i < 65; i++) {
+                uint32 height = uint32(bootstrap) + i + 1;
+                BeefyClient.MMRLeaf memory leaf =
+                    leafForSnapshot(s, height - 1, 1, 3, fixtureHash(index, "authorityRoot"));
+                roots[i] = keccak256(leafBytes(leaf));
+                BeefyClient.Commitment memory c = commitment(index, height, 0, roots[i]);
+                BeefyClient.ValidatorProof[] memory proofs = _proofs(mode == 1, client, c, index, bits);
+                finishUpdate(mode == 1, client, c, bits, proofs, leaf, s, new bytes32[](0), 0);
+                assertTrue(client.isAcceptedAnchor(height, roots[i]));
+                assertTrue(client.verifyMMRLeafProof(height, roots[i], roots[i], new bytes32[](0), 0));
+                assertFalse(client.isAcceptedAnchor(height, roots[i] ^ bytes32(uint256(1))));
+                assertFalse(
+                    client.verifyMMRLeafProof(height, roots[i] ^ bytes32(uint256(1)), roots[i], new bytes32[](0), 0)
+                );
+                if (i < 64) {
+                    assertTrue(client.isAcceptedAnchor(bootstrap + 1, roots[0]));
+                    assertTrue(client.verifyMMRLeafProof(bootstrap + 1, roots[0], roots[0], new bytes32[](0), 0));
+                }
+                // Same-height aliases cannot replace the accepted pair or consume a ring slot.
+                c.payload[0].data = abi.encodePacked(roots[i] ^ bytes32(uint256(1)));
+                vm.expectRevert(BeefyClient.StaleCommitment.selector);
+                client.submitFiatShamir(c, bits, proofs, leaf, s, new bytes32[](0), 0);
+                assertTrue(client.isAcceptedAnchor(height, roots[i]));
+            }
+            assertFalse(client.isAcceptedAnchor(bootstrap + 1, roots[0]));
+            assertFalse(client.verifyMMRLeafProof(bootstrap + 1, roots[0], roots[0], new bytes32[](0), 0));
+            for (uint64 i = 1; i < 65; i++) {
+                assertTrue(client.isAcceptedAnchor(bootstrap + i + 1, roots[i]));
+            }
+            assertFalse(client.isAcceptedAnchor(bootstrap + 65, roots[63]));
+            vm.warp(uint256(s.sourceTimestampMs) / 1000 + 86_401);
+            assertTrue(client.isAcceptedAnchor(bootstrap + 65, roots[64]));
+            vm.expectRevert(BeefyClient.ClientExpired.selector);
+            client.verifyMMRLeafProof(bootstrap + 65, roots[64], roots[64], new bytes32[](0), 0);
+        }
+        vm.resumeGasMetering();
+    }
+
     function testBothProtocolsRotateSetsEmitAndPreserveFailedTickets() public {
         uint256 index = caseIndex("synthetic-mmr-3-primary");
         for (uint256 mode; mode < 2; mode++) {

@@ -30,14 +30,36 @@ pub(super) fn is_quiescent() -> bool {
     // Only these states fence every continuation from another economic child.
     bridge_builtin_operations::is_quiescent()
         && token_operations::is_quiescent()
-        && msg_tracker_ref().message_info.values().all(|info| {
+        && msg_tracker_ref().active_count == 0
+}
+
+pub(super) fn prune_terminal_requests(requests: Vec<MessageId>) -> u32 {
+    let mut removed = 0;
+    for request in requests {
+        if msg_tracker_ref()
+            .get_message_info(&request)
+            .is_some_and(|info| info.status.terminal())
+        {
+            msg_tracker_mut().remove_message_info(&request);
+            removed += 1;
+        }
+    }
+    removed
+}
+
+fn consume_terminal_failure(request: MessageId) {
+    if msg_tracker_ref()
+        .get_message_info(&request)
+        .is_some_and(|info| {
             matches!(
                 info.status,
                 MessageStatus::TokenDepositCompleted(false)
-                    | MessageStatus::BridgeResponseReceived(Some(_))
                     | MessageStatus::TokensReturnComplete(true)
             )
         })
+    {
+        msg_tracker_mut().remove_message_info(&request);
+    }
 }
 
 /// Lock/burn `vft` tokens (specific operation depends on the token supply type) and send
@@ -81,18 +103,19 @@ pub async fn request_bridging(
         transaction_details,
     );
 
-    match supply_type {
+    let deposit_result = match supply_type {
         TokenSupply::Ethereum => {
-            token_operations::burn(vara_token_id, sender, amount, &config, msg_id)
-                .await
-                .expect("Failed to burn tokens");
+            token_operations::burn(vara_token_id, sender, amount, &config, msg_id).await
         }
         TokenSupply::Gear => {
-            token_operations::lock(vara_token_id, sender, amount, &config, msg_id)
-                .await
-                .expect("Failed to lock tokens");
+            token_operations::lock(vara_token_id, sender, amount, &config, msg_id).await
         }
+    };
+    if let Err(error) = deposit_result {
+        consume_terminal_failure(msg_id);
+        return Err(error);
     }
+    service.ensure_running()?;
 
     // A recovery execution may already own the refund after the deposit reply.
     // It must fence this old continuation before any source queue request is sent.
@@ -125,21 +148,21 @@ pub async fn request_bridging(
         Err(e) => {
             // A recovery call can run after a definite failure reply hook but before
             // this continuation. Only the execution that claims the refund may send it.
+            service.ensure_running()?;
             if e == Error::MessageFailed && claim_token_refund(msg_id) {
                 match supply_type {
                     TokenSupply::Ethereum => {
                         token_operations::mint(vara_token_id, sender, amount, &config, msg_id)
-                            .await
-                            .expect("Failed to mint tokens");
+                            .await?;
                     }
                     TokenSupply::Gear => {
                         token_operations::unlock(vara_token_id, sender, amount, &config, msg_id)
-                            .await
-                            .expect("Failed to unlock tokens");
+                            .await?;
                     }
                 }
             }
 
+            consume_terminal_failure(msg_id);
             return Err(e);
         }
     };
@@ -214,6 +237,7 @@ pub async fn handle_interrupted_transfer(
             token_operations::unlock(vara_token_id, sender, amount, config, msg_id).await?;
         }
     }
+    consume_terminal_failure(msg_id);
 
     Ok(())
 }

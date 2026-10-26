@@ -2,7 +2,7 @@ use ethereum_client::{DepositEventEntry, PollingEthApi};
 use primitive_types::H160;
 use prometheus::IntCounter;
 use std::sync::Arc;
-use tokio::sync::mpsc::{unbounded_channel, Receiver, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use utils_prometheus::{impl_metered_service, MeteredService};
 
 use crate::{
@@ -73,8 +73,8 @@ impl DepositEventExtractor {
     pub async fn run(
         mut self,
         mut blocks: Receiver<EthereumBlockNumber>,
-    ) -> UnboundedReceiver<TxHashWithSlot> {
-        let (sender, receiver) = unbounded_channel();
+    ) -> Receiver<TxHashWithSlot> {
+        let (sender, receiver) = channel(128);
 
         tokio::task::spawn(async move {
             let mut attempts: u32 = 0;
@@ -120,7 +120,7 @@ impl DepositEventExtractor {
 
     async fn run_inner(
         &self,
-        sender: &UnboundedSender<TxHashWithSlot>,
+        sender: &Sender<TxHashWithSlot>,
         blocks: &mut Receiver<EthereumBlockNumber>,
         missing_blocks: &mut Vec<EthereumBlockNumber>,
     ) -> anyhow::Result<()> {
@@ -147,7 +147,7 @@ impl DepositEventExtractor {
     async fn process_block_events(
         &self,
         block: EthereumBlockNumber,
-        sender: &UnboundedSender<TxHashWithSlot>,
+        sender: &Sender<TxHashWithSlot>,
     ) -> anyhow::Result<()> {
         let header = finalized_block(&self.eth_api, block.0).await?;
         let cursor = BlockCursor {
@@ -200,10 +200,12 @@ impl DepositEventExtractor {
                 hex::encode(tx_hash.0), hex::encode(from.0), hex::encode(to.0),
                 hex::encode(token.0), amount, slot_number.0,
             );
-            sender.send(TxHashWithSlot {
-                slot_number,
-                tx_hash,
-            })?;
+            sender
+                .send(TxHashWithSlot {
+                    slot_number,
+                    tx_hash,
+                })
+                .await?;
         }
         self.metrics.total_deposits_found.inc_by(total);
         Ok(())
@@ -283,7 +285,7 @@ mod tests {
         let mut retained = Vec::new();
         for replay in [true, false] {
             let (blocks_tx, mut blocks) = tokio::sync::mpsc::channel(1);
-            let (sender, _receiver) = unbounded_channel();
+            let (sender, _receiver) = channel(128);
             let mut pending = if replay {
                 vec![EthereumBlockNumber(7)]
             } else {

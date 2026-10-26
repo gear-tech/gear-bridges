@@ -33,7 +33,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -75,7 +75,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -126,7 +126,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -175,7 +175,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: UnpauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: UnpauseProxyMessage({proxy: address(wrappedVara)}).pack(_unpauseControl(address(wrappedVara)))
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
@@ -212,7 +212,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: PauseProxyMessage({proxy: address(wrappedVara)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -261,7 +261,7 @@ contract WrappedVaraTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: UnpauseProxyMessage({proxy: address(wrappedVara)}).pack()
+            payload: UnpauseProxyMessage({proxy: address(wrappedVara)}).pack(_unpauseControl(address(wrappedVara)))
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
@@ -309,7 +309,7 @@ contract WrappedVaraTest is Test, Base {
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
                 proxy: address(wrappedVara), newImplementation: address(newImplementationMock), data: ""
-            }).pack()
+            }).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 

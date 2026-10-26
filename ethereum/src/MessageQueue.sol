@@ -5,6 +5,7 @@ pragma solidity ^0.8.37;
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -13,7 +14,7 @@ import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {SubstrateMerkleProof} from "src/beefy/utils/SubstrateMerkleProof.sol";
 import {IGovernance} from "src/interfaces/IGovernance.sol";
 import {IMessageHandler} from "src/interfaces/IMessageHandler.sol";
-import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {IMessageQueue, LegacyControl, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IPausable} from "src/interfaces/IPausable.sol";
 import {IQueueProgressVerifier} from "src/interfaces/IQueueProgressVerifier.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
@@ -67,6 +68,50 @@ contract MessageQueue is
     mapping(uint256 blockNumber => uint256 timestamp) private _blockRootTimestamps;
     address public beefyRecoveryTimelock;
 
+    // Append-only: retained proxy slots above must never move.
+    struct ControlEnvelope {
+        uint8 version;
+        uint64 sequence;
+        uint64 validUntil;
+        uint8 action;
+        address target;
+        uint64 incidentEpoch;
+        bytes32 requiredAdminAction;
+        bytes32 requiredBarrier;
+        bytes innerPayload;
+    }
+
+    struct AdminCompletion {
+        address target;
+        uint64 incidentEpoch;
+    }
+
+    struct Publication {
+        uint64 queueId;
+        uint64 sourceTimestampMs;
+        uint256 destinationBlock;
+        bytes32 root;
+    }
+    mapping(bytes32 => uint64) public executedControlSequence;
+    mapping(bytes32 => uint64) public canceledControlSequence;
+    mapping(bytes32 => bool) public retiredGovernanceStream;
+    mapping(address => uint64) public incidentEpoch;
+    mapping(bytes32 => AdminCompletion) public completedAdminActions;
+    bool public legacyPublicationFrozen;
+    uint256 public frozenLegacyMaxBlock;
+    bytes32 public stagedMigrationMessage;
+    bytes32 public stagedRecoveryMessage;
+    mapping(bytes32 => uint64) private _legacyControlExpiry;
+    bytes32 private _executingAdminMessage;
+    bytes32 public migrationAdminAction;
+    uint256 public migrationDestinationBlock;
+    mapping(uint256 => Publication) public publications;
+    bytes32 public migrationBarrier;
+    uint256 public migrationBarrierSourceBlock;
+    uint256 public migrationTimestamp;
+    bool public migrationResumePending;
+    mapping(bytes32 => bytes32) private _capturedMigrationPublicationHashes;
+
     /**
      * @custom:oz-upgrades-unsafe-allow constructor
      */
@@ -94,7 +139,7 @@ contract MessageQueue is
         address recoveryTimelock_
     ) public initializer {
         _initialize(governanceAdmin_, governancePauser_, emergencyStopAdmin_, emergencyStopObservers_, verifier_);
-        (, uint64 mmrStartBlock) = _validateBeefyVerifier();
+        (, uint64 mmrStartBlock) = _validateBeefyVerifier(_verifier);
         beefyRootMinimum = mmrStartBlock;
         _setBeefyRecoveryTimelock(recoveryTimelock_);
     }
@@ -109,24 +154,30 @@ contract MessageQueue is
     ) external onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(8) {
         _requirePaused();
         if (
-            beefyRootMinimum != 0 || _genesisBlock == 0 || address(_verifier) != address(expectedLegacyVerifier)
+            !legacyPublicationFrozen || frozenLegacyMaxBlock != expectedLegacyMaxBlock
+                || _executingAdminMessage != stagedMigrationMessage || _executingAdminMessage == bytes32(0)
+                || beefyRootMinimum != 0 || _genesisBlock == 0 || address(_verifier) != address(expectedLegacyVerifier)
                 || _maxBlockNumber != expectedLegacyMaxBlock
         ) {
             revert InvalidBeefyMigration();
         }
 
         _verifier = beefyVerifier;
-        (BeefyClient client, uint64 mmrStartBlock) = _validateBeefyVerifier();
+        (BeefyClient client, uint64 mmrStartBlock) = _validateBeefyVerifier(_verifier);
         if (
-            firstBeefyBlock <= expectedLegacyMaxBlock || firstBeefyBlock > type(uint32).max
-                || firstBeefyBlock < mmrStartBlock || firstBeefyBlock > expectedLegacyMaxBlock + MAX_BLOCK_DISTANCE
-                || !client.isLive() || client.latestMMRRoot() == bytes32(0)
+            firstBeefyBlock != expectedLegacyMaxBlock + 1 || firstBeefyBlock > type(uint32).max
+                || firstBeefyBlock < mmrStartBlock || !client.isLive() || client.latestMMRRoot() == bytes32(0)
                 || client.latestBeefyBlock() <= firstBeefyBlock
         ) {
             revert InvalidBeefyMigration();
         }
         beefyRootMinimum = firstBeefyBlock;
         _setBeefyRecoveryTimelock(recoveryTimelock_);
+        migrationAdminAction = _executingAdminMessage;
+        migrationDestinationBlock = block.number;
+        migrationTimestamp = block.timestamp;
+        migrationResumePending = true;
+        _clearLegacyStage();
         emit MigratedToBeefy(
             address(expectedLegacyVerifier), address(beefyVerifier), expectedLegacyMaxBlock, firstBeefyBlock
         );
@@ -141,17 +192,18 @@ contract MessageQueue is
             beefyRootMinimum == 0 || address(_verifier) != address(expectedVerifier)
                 || _maxBlockNumber != expectedMaxBlock || TimelockController(payable(msg.sender)).getMinDelay() == 0
         ) revert InvalidBeefyRecovery();
-        (BeefyClient previous, uint64 start) = _validateBeefyVerifier();
+        (BeefyClient previous, uint64 start) = _validateBeefyVerifier(_verifier);
         if (previous.isLive()) revert InvalidBeefyRecovery();
 
         _verifier = replacementVerifier;
-        (BeefyClient replacement, uint64 replacementStart) = _validateBeefyVerifier();
+        (BeefyClient replacement, uint64 replacementStart) = _validateBeefyVerifier(_verifier);
         if (
             replacementStart != start || replacement.sourceDomain() != previous.sourceDomain() || !replacement.isLive()
                 || replacement.latestMMRRoot() == bytes32(0)
                 || replacement.latestBeefyBlock() <= previous.latestBeefyBlock()
                 || replacement.latestBeefyBlock() <= _maxBlockNumber
         ) revert InvalidBeefyRecovery();
+        ++incidentEpoch[address(this)];
         if (!paused()) _pause();
         emit BeefyVerifierRecovered(address(expectedVerifier), address(replacementVerifier), expectedMaxBlock);
     }
@@ -376,6 +428,7 @@ contract MessageQueue is
      * @dev Reverts if block number is too far from max block number with `BlockNumberTooFar` error.
      */
     function submitMerkleRoot(uint256 blockNumber, bytes32 merkleRoot, bytes calldata proof) external {
+        if (legacyPublicationFrozen) revert LegacyPublicationFrozen();
         if (merkleRoot == bytes32(0)) {
             revert InvalidMerkleRoot();
         }
@@ -392,7 +445,7 @@ contract MessageQueue is
         bytes32 previousMerkleRoot = _blockNumbers[blockNumber];
         _checkSubmissionBlock(blockNumber, false);
 
-        if (!_verifier.safeVerifyProof(blockNumber, merkleRoot, proof)) {
+        if (!_verifyPublication(blockNumber, merkleRoot, proof)) {
             revert InvalidQueueRootProof();
         }
 
@@ -425,6 +478,7 @@ contract MessageQueue is
             }
 
             emit MerkleRoot(blockNumber, merkleRoot);
+            _recordPublication(blockNumber, merkleRoot, proof);
         }
     }
 
@@ -463,8 +517,15 @@ contract MessageQueue is
     }
 
     function _checkSubmissionBlock(uint256 sourceBlock, bool emptyProgress) private view {
+        if (sourceBlock > type(uint32).max) revert BlockNumberOverflow(sourceBlock);
         if (beefyRootMinimum == 0) {
-            revert InvalidBeefyVerifier();
+            // Recovery preserves the retained verifier's original publication lane.
+            if (emptyProgress) revert InvalidBeefyVerifier();
+            if (sourceBlock == 0) revert InvalidSourceBlock();
+            if (_genesisBlock != 0 && sourceBlock > _maxBlockNumber + MAX_BLOCK_DISTANCE) {
+                revert BlockNumberTooFar(sourceBlock, _maxBlockNumber + MAX_BLOCK_DISTANCE);
+            }
+            return;
         }
         if (sourceBlock > type(uint32).max) {
             revert BlockNumberOverflow(sourceBlock);
@@ -492,6 +553,7 @@ contract MessageQueue is
 
     /// @dev Move the authenticated empty queue height without creating a root or changing any maturity timestamp.
     function submitEmptyQueueProgress(uint256 sourceBlock, bytes calldata authenticatedSnapshotProof) external {
+        if (legacyPublicationFrozen) revert LegacyPublicationFrozen();
         bool isFromEmergencyStopAdmin = msg.sender == _emergencyStopAdmin;
 
         if (isChallengingRoot() && !isFromEmergencyStopAdmin) {
@@ -514,6 +576,7 @@ contract MessageQueue is
         }
 
         _maxBlockNumber = sourceBlock;
+        _recordPublication(sourceBlock, bytes32(0), authenticatedSnapshotProof);
         emit EmptyQueueProgress(sourceBlock);
     }
 
@@ -561,8 +624,9 @@ contract MessageQueue is
         bytes32 governanceAdminAddress = _governanceAdmin.governance();
         bytes32 governancePauserAddress = _governancePauser.governance();
 
-        bool isFromAdminOrPauser = message.source == governanceAdminAddress || message.source == governancePauserAddress;
-        bool canBypassPause = isFromAdminOrPauser;
+        bool isAdmin = message.source == governanceAdminAddress && message.destination == address(_governanceAdmin);
+        bool isPauser = message.source == governancePauserAddress && message.destination == address(_governancePauser);
+        bool canBypassPause = isAdmin || isPauser;
         if (paused() && !canBypassPause) {
             revert EnforcedPause();
         }
@@ -583,9 +647,9 @@ contract MessageQueue is
         }
 
         uint256 messageDelay;
-        if (message.source == governanceAdminAddress) {
+        if (isAdmin) {
             messageDelay = PROCESS_ADMIN_MESSAGE_DELAY;
-        } else if (message.source == governancePauserAddress) {
+        } else if (isPauser) {
             messageDelay = PROCESS_PAUSER_MESSAGE_DELAY;
         } else {
             messageDelay = PROCESS_USER_MESSAGE_DELAY;
@@ -604,10 +668,332 @@ contract MessageQueue is
 
         _processedMessages[message.nonce] = true;
 
-        IMessageHandler(message.destination).handleMessage(message.source, message.payload);
+        if (message.destination == address(_governanceAdmin) || message.destination == address(_governancePauser)) {
+            if (!isAdmin && !isPauser) revert InvalidGovernanceControl();
+            _dispatchControl(message, messageHash, isAdmin);
+        } else {
+            IMessageHandler(message.destination).handleMessage(message.source, message.payload);
+        }
 
         // forge-lint: disable-next-item(reentrancy-events)
         emit MessageProcessed(blockNumber, messageHash, message.nonce, message.destination);
+    }
+
+    function _verifyPublication(uint256 sourceBlock, bytes32 root, bytes calldata proof) private view returns (bool) {
+        if (beefyRootMinimum != 0) return _verifier.safeVerifyProof(sourceBlock, root, proof);
+        // Exact retained ZK verifier public-input layout, used only before BEEFY migration.
+        uint256[] memory inputs = new uint256[](2);
+        inputs[0] = uint256(root) >> 64;
+        inputs[1] = (uint256(uint64(uint256(root))) << 128) | (sourceBlock << 96);
+        (bool ok, bytes memory result) =
+            address(_verifier).staticcall(abi.encodeWithSignature("safeVerifyProof(bytes,uint256[])", proof, inputs));
+        return ok && result.length == 32 && abi.decode(result, (bool));
+    }
+
+    function stageLegacyMigration(
+        IVerifier expectedLegacyVerifier,
+        uint256 expectedLegacyMaxBlock,
+        LegacyControl calldata migration,
+        LegacyControl calldata recovery
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) reinitializer(7) {
+        _requirePaused();
+        if (
+            beefyRootMinimum != 0 || legacyPublicationFrozen || _genesisBlock == 0
+                || address(_verifier) != address(expectedLegacyVerifier) || _maxBlockNumber != expectedLegacyMaxBlock
+        ) revert InvalidLegacyStage();
+        bytes32 migrationHash = _validateLegacyControl(migration, this.migrateToBeefy.selector);
+        bytes32 recoveryHash = _validateLegacyControl(recovery, this.recoverLegacyPublication.selector);
+        if (migrationHash == recoveryHash || migration.message.nonce == recovery.message.nonce) {
+            revert InvalidLegacyStage();
+        }
+        // Bind the actual prepublished calldata, not the installation message's own hash.
+        bytes calldata migrationData = migration.message.payload[45:];
+        (IVerifier oldVerifier, IVerifier nextVerifier, uint256 cut, uint256 floor, address timelock) =
+            abi.decode(migrationData, (IVerifier, IVerifier, uint256, uint256, address));
+        (IVerifier recoveryVerifier, uint256 recoveryCut) =
+            abi.decode(recovery.message.payload[45:], (IVerifier, uint256));
+        if (
+            oldVerifier != expectedLegacyVerifier || recoveryVerifier != expectedLegacyVerifier
+                || cut != expectedLegacyMaxBlock || recoveryCut != cut || migration.message.payload.length != 205
+                || recovery.message.payload.length != 109
+        ) revert InvalidLegacyStage();
+        (BeefyClient client, uint64 mmrStartBlock) = _validateBeefyVerifier(nextVerifier);
+        if (
+            floor != cut + 1 || floor > type(uint32).max || floor < mmrStartBlock || !client.isLive()
+                || client.latestMMRRoot() == bytes32(0) || client.latestBeefyBlock() <= floor
+                || timelock.code.length == 0 || TimelockController(payable(timelock)).getMinDelay() == 0
+        ) revert InvalidLegacyStage();
+        legacyPublicationFrozen = true;
+        frozenLegacyMaxBlock = cut;
+        stagedMigrationMessage = migrationHash;
+        stagedRecoveryMessage = recoveryHash;
+        _legacyControlExpiry[migrationHash] = migration.validUntil;
+        _legacyControlExpiry[recoveryHash] = recovery.validUntil;
+        emit LegacyMigrationStaged(cut, migrationHash, recoveryHash);
+    }
+
+    function _validateLegacyControl(LegacyControl calldata control, bytes4 selector)
+        private
+        view
+        returns (bytes32 hash)
+    {
+        VaraMessage calldata message = control.message;
+        if (
+            message.source != _governanceAdmin.governance() || message.destination != address(_governanceAdmin)
+                || message.payload.length < 45 || uint8(message.payload[0]) != 3
+                || address(bytes20(message.payload[1:21])) != address(this)
+                || address(bytes20(message.payload[21:41])).code.length == 0
+                || bytes4(message.payload[41:45]) != selector || control.validUntil == 0
+                || block.timestamp > control.validUntil || _processedMessages[message.nonce]
+                || control.sourceBlock > _maxBlockNumber
+        ) revert InvalidLegacyStage();
+        (bool uups, bytes memory slot) =
+            address(bytes20(message.payload[21:41])).staticcall(abi.encodeWithSignature("proxiableUUID()"));
+        if (!uups || slot.length != 32 || abi.decode(slot, (bytes32)) != ERC1967Utils.IMPLEMENTATION_SLOT) {
+            revert InvalidLegacyStage();
+        }
+        uint256 timestamp = _effectiveRootTimestamp(control.sourceBlock);
+        hash = message.hashCalldata();
+        if (
+            timestamp == 0 || block.timestamp < timestamp + PROCESS_ADMIN_MESSAGE_DELAY
+                || !SubstrateMerkleProof.verify(
+                    _blockNumbers[control.sourceBlock], hash, control.leafIndex, control.totalLeaves, control.proof
+                )
+        ) revert InvalidLegacyStage();
+    }
+
+    function recoverLegacyPublication(IVerifier expectedLegacyVerifier, uint256 expectedLegacyMaxBlock)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        _requirePaused();
+        if (
+            !legacyPublicationFrozen || beefyRootMinimum != 0 || _executingAdminMessage == bytes32(0)
+                || _executingAdminMessage != stagedRecoveryMessage || _verifier != expectedLegacyVerifier
+                || frozenLegacyMaxBlock != expectedLegacyMaxBlock || _maxBlockNumber != expectedLegacyMaxBlock
+        ) revert InvalidLegacyStage();
+        _clearLegacyStage();
+        ++incidentEpoch[address(this)];
+        emit LegacyPublicationRecovered(expectedLegacyMaxBlock);
+    }
+
+    function _clearLegacyStage() private {
+        delete _legacyControlExpiry[stagedMigrationMessage];
+        delete _legacyControlExpiry[stagedRecoveryMessage];
+        delete stagedMigrationMessage;
+        delete stagedRecoveryMessage;
+        legacyPublicationFrozen = false;
+    }
+
+    function _recordPublication(uint256 sourceBlock, bytes32 root, bytes calldata proof) private {
+        if (beefyRootMinimum == 0) return;
+        // These exact fields have already been authenticated by the pinned v2 verifier.
+        (,,,, uint64 sourceTimestampMs, uint64 queueId) =
+            abi.decode(proof, (uint8, uint8, bool, bytes32, uint64, uint64));
+        publications[sourceBlock] = Publication(queueId, sourceTimestampMs, block.number, root);
+    }
+
+    /// @dev Capture canonical identity while blockhash is available; this is NOT a finality attestation.
+    function captureMigrationPublicationHash(uint256 sourceBlock) external returns (bytes32 publicationHash) {
+        Publication memory publication = publications[sourceBlock];
+        if (
+            migrationAdminAction == bytes32(0) || migrationBarrier != bytes32(0)
+                || publication.destinationBlock <= migrationDestinationBlock || sourceBlock < beefyRootMinimum
+                || publication.sourceTimestampMs <= migrationTimestamp * 1000
+                || _blockNumbers[sourceBlock] != publication.root
+        ) revert InvalidMigrationBarrier();
+        bytes32 identity = _migrationPublicationIdentity(sourceBlock, publication);
+        publicationHash = _capturedMigrationPublicationHashes[identity];
+        if (publicationHash != bytes32(0)) return publicationHash;
+        publicationHash = blockhash(publication.destinationBlock);
+        if (publicationHash == bytes32(0)) revert InvalidMigrationBarrier();
+        _capturedMigrationPublicationHashes[identity] = publicationHash;
+        emit MigrationPublicationHashCaptured(sourceBlock, identity, publicationHash);
+    }
+
+    function migrationPublicationBlockHash(uint256 sourceBlock) public view returns (bytes32) {
+        Publication memory publication = publications[sourceBlock];
+        if (_blockNumbers[sourceBlock] != publication.root) return bytes32(0);
+        return _capturedMigrationPublicationHashes[_migrationPublicationIdentity(sourceBlock, publication)];
+    }
+
+    function _migrationPublicationIdentity(uint256 sourceBlock, Publication memory publication)
+        private
+        view
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(block.chainid, address(this), migrationAdminAction, sourceBlock, publication));
+    }
+
+    /// @dev An approved admin attests finality after governance maturity, using the earlier canonical capture.
+    function recordMigrationBarrier(uint256 sourceBlock, bytes32 publicationBlockHash)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+        returns (bytes32 barrier)
+    {
+        Publication memory publication = publications[sourceBlock];
+        if (
+            migrationAdminAction == bytes32(0) || migrationBarrier != bytes32(0)
+                || publication.destinationBlock <= migrationDestinationBlock || sourceBlock < beefyRootMinimum
+                || publication.sourceTimestampMs <= migrationTimestamp * 1000 || publicationBlockHash == bytes32(0)
+                || migrationPublicationBlockHash(sourceBlock) != publicationBlockHash
+                || _blockNumbers[sourceBlock] != publication.root
+        ) revert InvalidMigrationBarrier();
+        barrier = keccak256(
+            abi.encode(
+                block.chainid,
+                address(this),
+                migrationAdminAction,
+                sourceBlock,
+                publication.queueId,
+                publication.root,
+                publication.destinationBlock,
+                publicationBlockHash
+            )
+        );
+        migrationBarrier = barrier;
+        migrationBarrierSourceBlock = sourceBlock;
+        emit MigrationBarrierRecorded(barrier, sourceBlock, publicationBlockHash);
+    }
+
+    function _dispatchControl(VaraMessage calldata message, bytes32 messageHash, bool isAdmin) private {
+        bytes32 stream = keccak256(abi.encode(message.source, message.destination));
+        if (retiredGovernanceStream[stream]) revert GovernanceControlConsumed();
+        if (_legacyControlExpiry[messageHash] != 0) {
+            if (!legacyPublicationFrozen || !isAdmin || block.timestamp > _legacyControlExpiry[messageHash]) {
+                revert InvalidLegacyStage();
+            }
+            _executingAdminMessage = messageHash;
+            IMessageHandler(message.destination).handleMessage(message.source, message.payload);
+            delete _executingAdminMessage;
+            completedAdminActions[messageHash] = AdminCompletion(address(this), incidentEpoch[address(this)]);
+            return;
+        }
+        if (legacyPublicationFrozen) revert LegacyPublicationFrozen();
+        ControlEnvelope memory control = _decodeControl(message.payload);
+        if (control.validUntil == 0 || block.timestamp > control.validUntil) revert GovernanceControlExpired();
+        if (control.sequence <= executedControlSequence[stream] || control.sequence <= canceledControlSequence[stream]) revert GovernanceControlConsumed();
+        executedControlSequence[stream] = control.sequence;
+        if (control.action == 4) {
+            if (!isAdmin || control.target != address(this)) revert InvalidGovernanceControl();
+            (bytes32 source, address destination, uint64 through) =
+                abi.decode(control.innerPayload, (bytes32, address, uint64));
+            if (
+                keccak256(control.innerPayload) != keccak256(abi.encode(source, destination, through))
+                    || !((destination == address(_governanceAdmin) && source == _governanceAdmin.governance())
+                        || (destination == address(_governancePauser) && source == _governancePauser.governance()))
+            ) revert InvalidGovernanceControl();
+            bytes32 canceled = keccak256(abi.encode(source, destination));
+            if (through <= canceledControlSequence[canceled]) revert GovernanceControlConsumed();
+            canceledControlSequence[canceled] = through;
+        } else {
+            _validateControlTarget(control, message.destination, isAdmin);
+            bool dispatch = true;
+            if (control.action == 0) {
+                bytes32 next;
+                bytes memory inner = control.innerPayload;
+                assembly ("memory-safe") { next := mload(add(inner, 33)) }
+                if (
+                    next == bytes32(0) || next == message.source
+                        || retiredGovernanceStream[keccak256(abi.encode(next, message.destination))]
+                ) {
+                    revert InvalidGovernanceControl();
+                }
+                retiredGovernanceStream[stream] = true;
+            } else if (control.action == 1) {
+                ++incidentEpoch[control.target];
+                dispatch = !PausableUpgradeable(control.target).paused();
+            } else if (control.action == 2) {
+                AdminCompletion memory dependency = completedAdminActions[control.requiredAdminAction];
+                if (
+                    control.incidentEpoch != incidentEpoch[control.target] || dependency.target != control.target
+                        || dependency.incidentEpoch != control.incidentEpoch
+                        || control.requiredAdminAction == bytes32(0)
+                ) revert GovernanceDependencyMissing();
+                if (control.target == address(this) && migrationResumePending) {
+                    if (
+                        control.requiredAdminAction != migrationAdminAction || migrationBarrier == bytes32(0)
+                            || control.requiredBarrier != migrationBarrier
+                    ) revert GovernanceDependencyMissing();
+                    migrationResumePending = false;
+                } else if (control.requiredBarrier != bytes32(0) && control.requiredBarrier != migrationBarrier) {
+                    revert InvalidGovernanceControl();
+                }
+                dispatch = PausableUpgradeable(control.target).paused();
+            }
+            if (dispatch) {
+                if (isAdmin) _executingAdminMessage = messageHash;
+                IMessageHandler(message.destination).handleMessage(message.source, control.innerPayload);
+                if (isAdmin) delete _executingAdminMessage;
+            }
+        }
+        if (isAdmin) {
+            completedAdminActions[messageHash] = AdminCompletion(control.target, incidentEpoch[control.target]);
+        }
+        emit GovernanceControlCompleted(messageHash, stream, control.sequence);
+    }
+
+    function _decodeControl(bytes calldata payload) private pure returns (ControlEnvelope memory control) {
+        if (payload.length < 1 || payload[0] != 0xff) revert InvalidGovernanceControl();
+        (
+            control.version,
+            control.sequence,
+            control.validUntil,
+            control.action,
+            control.target,
+            control.incidentEpoch,
+            control.requiredAdminAction,
+            control.requiredBarrier,
+            control.innerPayload
+        ) = abi.decode(payload[1:], (uint8, uint64, uint64, uint8, address, uint64, bytes32, bytes32, bytes));
+        if (
+            control.version != 1 || control.action > 4 || control.target == address(0)
+                || keccak256(payload[1:])
+                    != keccak256(
+                        abi.encode(
+                            control.version,
+                            control.sequence,
+                            control.validUntil,
+                            control.action,
+                            control.target,
+                            control.incidentEpoch,
+                            control.requiredAdminAction,
+                            control.requiredBarrier,
+                            control.innerPayload
+                        )
+                    )
+                || (control.action != 2
+                    && (control.incidentEpoch != 0
+                        || control.requiredAdminAction != bytes32(0)
+                        || control.requiredBarrier != bytes32(0)))
+        ) revert InvalidGovernanceControl();
+    }
+
+    function _validateControlTarget(ControlEnvelope memory control, address destination, bool isAdmin) private view {
+        bytes memory inner = control.innerPayload;
+        if (inner.length == 0 || uint8(inner[0]) != control.action) revert InvalidGovernanceControl();
+        if (control.action == 0) {
+            if (control.target != destination || inner.length != 33) revert InvalidGovernanceControl();
+            return;
+        }
+        if (inner.length < 21) revert InvalidGovernanceControl();
+        address target;
+        assembly ("memory-safe") { target := shr(96, mload(add(inner, 33))) }
+        if (
+            target != control.target || (control.action == 3 && (!isAdmin || inner.length < 41))
+                || (control.action != 3 && inner.length != 21)
+        ) revert InvalidGovernanceControl();
+        // Validate even redundant controls: skipping a call must not bypass the retained handler's target policy.
+        (bool wrappedOk, bytes memory wrapped) = destination.staticcall(abi.encodeWithSignature("wrappedVara()"));
+        (bool managerOk, bytes memory manager) = destination.staticcall(abi.encodeWithSignature("erc20Manager()"));
+        if (
+            !wrappedOk || !managerOk
+                || (target != address(this)
+                    && target != abi.decode(wrapped, (address))
+                    && target != abi.decode(manager, (address)))
+        ) {
+            revert InvalidGovernanceControl();
+        }
     }
 
     /**
@@ -649,11 +1035,11 @@ contract MessageQueue is
         _verifier = verifier_;
     }
 
-    function _validateBeefyVerifier() private view returns (BeefyClient, uint64) {
-        if (address(_verifier).code.length == 0) {
+    function _validateBeefyVerifier(IVerifier verifier_) private view returns (BeefyClient, uint64) {
+        if (address(verifier_).code.length == 0) {
             revert InvalidBeefyVerifier();
         }
-        VaraQueueRootVerifier rootVerifier = VaraQueueRootVerifier(address(_verifier));
+        VaraQueueRootVerifier rootVerifier = VaraQueueRootVerifier(address(verifier_));
         if (rootVerifier.messageQueue() != address(this) || rootVerifier.destinationChainId() != block.chainid) {
             revert InvalidBeefyVerifier();
         }

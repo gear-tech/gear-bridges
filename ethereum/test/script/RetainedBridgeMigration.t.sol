@@ -9,7 +9,7 @@ import {VaraQueueRootVerifier} from "src/VaraQueueRootVerifier.sol";
 import {BeefyClient} from "src/beefy/BeefyClient.sol";
 import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
 import {IERC20Mintable} from "src/interfaces/IERC20Mintable.sol";
-import {IMessageQueue, VaraMessage} from "src/interfaces/IMessageQueue.sol";
+import {GovernanceControl, IMessageQueue, LegacyControl, VaraMessage} from "src/interfaces/IMessageQueue.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 import {Hasher} from "src/libraries/Hasher.sol";
 import {
@@ -24,6 +24,17 @@ import {BeefyFixtureTest} from "test/BeefyInterop.t.sol";
 /// @dev Test-only surface: local pins below exercise chronology; production finality always uses canonical RPC/archive readback.
 contract RetainedMigrationHarness is RetainedBridgeMigration {
     mapping(bytes32 => string) private rpcResponses;
+    mapping(string => string) private evidenceSettings;
+
+    function evidenceConfig(string memory variable, string memory value) external {
+        evidenceSettings[variable] = value;
+    }
+
+    function _retainedEvidenceConfig(string memory variable) internal view override returns (string memory) {
+        string memory value = evidenceSettings[variable];
+        require(bytes(value).length != 0, "missing fixture evidence configuration");
+        return value;
+    }
 
     function rpcResponse(string memory method, string memory params, string memory response) external {
         rpcResponses[keccak256(abi.encode(method, params))] = response;
@@ -70,6 +81,29 @@ contract RetainedMigrationHarness is RetainedBridgeMigration {
         return retainedUpgradePayload(p);
     }
 
+    function freezeData(MigrationPlan memory p) external pure returns (bytes memory) {
+        return retainedFreezePayload(p);
+    }
+
+    function recoveryData(MigrationPlan memory p) external pure returns (bytes memory) {
+        return retainedRecoveryPayload(p);
+    }
+
+    function lifetime(MigrationPlan memory p) external view {
+        _retainedLifetime(p);
+    }
+
+    function effect(MigrationPlan memory p, GovernanceDelivery memory d, bytes32 hash)
+        external
+        returns (FinalizedPin memory)
+    {
+        return _authenticateRetainedGovernanceEffect(p, d, hash);
+    }
+
+    function custody(MigrationPlan memory p, FinalizedPin memory capture, CustodyLedger memory ledger) external {
+        _authenticateRetainedCustody(p, capture, ledger);
+    }
+
     function root(MigrationPlan memory p, GovernanceDelivery memory d, GovernanceAction a) external {
         registerRetainedGovernanceRoot(p, d, a);
     }
@@ -111,6 +145,8 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
     RetainedBridgeMigration.MigrationPlan internal approved;
     BeefyClient internal migrationClient;
 
+    RetainedBridgeMigration.GovernanceDelivery internal freezeDelivery;
+
     function setUp() public {
         vm.pauseGasMetering();
         // Keep deployment artifact/JSON allocations in a separate EVM call frame.
@@ -150,6 +186,8 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         messageQueue.submitMerkleRoot(100, keccak256("retained user root"), "");
         vm.clearMockedCalls();
         approved = _approvedPlan();
+        vm.prank(address(governanceAdmin));
+        erc20Manager.pause();
         // Actual BEEFY signatures and MMR verification, not a verifier mock for the new lane.
         customQueueProofFor(
             migrationClient,
@@ -202,8 +240,8 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         p.emergencyAdmin = messageQueue.emergencyStopAdmin();
         p.emergencyObservers = messageQueue.emergencyStopObservers();
         p.genesisBlock = 100;
-        p.legacyMax = 102;
-        p.firstBeefyBlock = 103;
+        p.legacyMax = 104;
+        p.firstBeefyBlock = 105;
         p.legacyInitializerVersion = uint64(
             uint256(vm.load(address(messageQueue), 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00))
         );
@@ -236,6 +274,8 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         TimelockController recovery = new TimelockController(1 hours, members, members, address(0));
         p.recovery = _identity(address(recovery));
         p.recoveryDelay = 1 hours;
+        p.finalityMargin = 15 minutes;
+        p.operationalMargin = 1 hours;
         p.recoveryRoles = new RetainedBridgeMigration.RolePin[](3);
         p.recoveryRoles[0] = RetainedBridgeMigration.RolePin(recovery.PROPOSER_ROLE(), address(this), true);
         p.recoveryRoles[1] = RetainedBridgeMigration.RolePin(recovery.EXECUTOR_ROLE(), address(this), true);
@@ -276,7 +316,7 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
             nonce,
             upgrade ? p.sourceAdmin : p.sourcePauser,
             upgrade ? p.governanceAdmin.account : p.governancePauser.account,
-            upgrade ? migration.upgradeData(p) : GovernancePacker.pack(PauseProxyMessage(p.queue.account))
+            upgrade ? migration.upgradeData(p) : abi.encodePacked(uint8(1), p.queue.account)
         );
         d.root = d.message.hash();
     }
@@ -302,14 +342,48 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
     }
 
     function _registerAndPause() private returns (RetainedBridgeMigration.GovernanceDelivery memory upgrade) {
+        upgrade = _registerAndPauseBeforeFreeze();
+        migration.execute(approved, freezeDelivery, RetainedBridgeMigration.GovernanceAction.Freeze);
+    }
+
+    function _registerAndPauseBeforeFreeze()
+        private
+        returns (RetainedBridgeMigration.GovernanceDelivery memory upgrade)
+    {
         RetainedBridgeMigration.GovernanceDelivery memory pause = _delivery(101, 5001, false);
         upgrade = _delivery(102, 5002, true);
         _registerLegacyRoot(pause, RetainedBridgeMigration.GovernanceAction.Pause);
         assertEq(messageQueue.maxBlockNumber(), 101);
         _registerLegacyRoot(upgrade, RetainedBridgeMigration.GovernanceAction.Upgrade);
+        _prepareFreeze(upgrade, 103, 104);
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
         migration.execute(approved, pause, RetainedBridgeMigration.GovernanceAction.Pause);
         assertTrue(messageQueue.paused());
+    }
+
+    function _prepareFreeze(
+        RetainedBridgeMigration.GovernanceDelivery memory upgrade,
+        uint256 recoveryBlock,
+        uint256 freezeBlock
+    ) private {
+        RetainedBridgeMigration.GovernanceDelivery memory recovery = _delivery(recoveryBlock, 5003, true);
+        recovery.message.payload = migration.recoveryData(approved);
+        recovery.root = recovery.message.hash();
+        approved.migrationControl = LegacyControl(
+            upgrade.message,
+            upgrade.sourceBlock,
+            upgrade.totalLeaves,
+            upgrade.leafIndex,
+            upgrade.proof,
+            uint64(block.timestamp + 1 days)
+        );
+        approved.recoveryControl =
+            LegacyControl(recovery.message, recoveryBlock, 1, 0, recovery.proof, uint64(block.timestamp + 1 days));
+        _registerLegacyRoot(recovery, RetainedBridgeMigration.GovernanceAction.Recovery);
+        freezeDelivery = _delivery(freezeBlock, 5004, true);
+        freezeDelivery.message.payload = migration.freezeData(approved);
+        freezeDelivery.root = freezeDelivery.message.hash();
+        _registerLegacyRoot(freezeDelivery, RetainedBridgeMigration.GovernanceAction.Freeze);
     }
 
     function testUnsafeIdentitiesRejectBeforeCreate() public {
@@ -384,7 +458,7 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         migration.validate(approved, true);
         assertEq(circleToken.balanceOf(address(erc20Manager)), balance);
         assertEq(messageQueue.verifier(), approved.verifier.account);
-        assertEq(messageQueue.beefyRootMinimum(), 103);
+        assertEq(messageQueue.beefyRootMinimum(), 105);
         assertEq(messageQueue.beefyRecoveryTimelock(), approved.recovery.account);
         assertTrue(messageQueue.isProcessed(5001));
         assertTrue(messageQueue.isProcessed(5002));
@@ -393,7 +467,7 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         migration.execute(approved, upgrade, RetainedBridgeMigration.GovernanceAction.Upgrade);
     }
 
-    function testExternalSupplyChangesPreserveMigrationButCustodyChangesReject() public {
+    function test_HTML7fe1b032_ExternalSupplyAndDonationDoNotChangeImmutablePins() public {
         RetainedBridgeMigration.MigrationPlan memory forkPlan = _forkMigrationPlan(
             approved.legacyImplementation.account,
             approved.implementation.account,
@@ -428,21 +502,17 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         assertTrue(circleToken.transfer(address(erc20Manager), 1));
         assertEq(circleToken.totalSupply(), supply + 8);
         assertEq(circleToken.balanceOf(address(erc20Manager)), custody + 1);
-        vm.expectRevert(
-            abi.encodeWithSelector(RetainedBridgeMigration.RetainedMigrationHold.selector, "retained state changed")
-        );
+        // Donation is retained surplus; operational custody ledger authenticates every delta separately.
         migration.validate(approved, true);
     }
 
-    function testInterveningRootRejectsStaleApprovedMaximum() public {
+    /// Reconstructed from HTML7fe1b032 VB-34: exact frozen cut rejects new legacy publication.
+    function test_HTML7fe1b032_FrozenCutCannotAdvance() public {
         RetainedBridgeMigration.GovernanceDelivery memory upgrade = _registerAndPause();
-        _mockLegacyRoot(103, keccak256("permissionless newer legacy root"));
-        messageQueue.submitMerkleRoot(103, keccak256("permissionless newer legacy root"), "");
-        vm.clearMockedCalls();
-        vm.expectRevert();
+        vm.expectRevert(IMessageQueue.LegacyPublicationFrozen.selector);
+        messageQueue.submitMerkleRoot(105, keccak256("newer legacy root"), "");
         migration.execute(approved, upgrade, RetainedBridgeMigration.GovernanceAction.Upgrade);
-        assertFalse(messageQueue.isProcessed(5002));
-        assertEq(messageQueue.verifier(), approved.legacyVerifier.account);
+        assertTrue(messageQueue.isProcessed(5002));
     }
 
     function testUnsignedOrExpiredBootstrapCannotMigrate() public {
@@ -455,7 +525,8 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
 
     function testCannotPrepareOrDeliverLegacyUnpauseWithPauseBatch() public {
         RetainedBridgeMigration.GovernanceDelivery memory d = _delivery(101, 7001, false);
-        d.message.payload = GovernancePacker.pack(UnpauseProxyMessage(address(messageQueue)));
+        d.control = GovernanceControl(1, uint64(block.timestamp + 1 days), 0, keccak256("not a completed action"), 0);
+        d.message.payload = GovernancePacker.pack(UnpauseProxyMessage(address(messageQueue)), d.control);
         d.root = d.message.hash();
         vm.expectRevert();
         migration.root(approved, d, RetainedBridgeMigration.GovernanceAction.Unpause);
@@ -475,8 +546,16 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
             RetainedBridgeMigration.GovernanceDelivery memory upgrade
         )
     {
-        approved.legacyMax = 104;
-        approved.firstBeefyBlock = 105;
+        approved.legacyMax = 106;
+        approved.firstBeefyBlock = 107;
+        customQueueProofFor(
+            migrationClient,
+            107,
+            110,
+            keccak256("later bootstrap"),
+            uint64(block.timestamp * 1000),
+            uint64(block.timestamp * 1000)
+        );
         bytes32 liability = keccak256("approved outstanding user liability");
         if (registerLiability) {
             _mockLegacyRoot(101, liability);
@@ -485,17 +564,24 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         }
         pause = _delivery(103, 9101, false);
         upgrade = _delivery(104, 9102, true);
-        RetainedBridgeMigration.LegacyRootPin[] memory roots = new RetainedBridgeMigration.LegacyRootPin[](4);
+        RetainedBridgeMigration.LegacyRootPin[] memory roots = new RetainedBridgeMigration.LegacyRootPin[](6);
         roots[0] = RetainedBridgeMigration.LegacyRootPin(100, messageQueue.getMerkleRoot(100));
         roots[1] = RetainedBridgeMigration.LegacyRootPin(101, liability);
         roots[2] = RetainedBridgeMigration.LegacyRootPin(103, pause.root);
         roots[3] = RetainedBridgeMigration.LegacyRootPin(104, upgrade.root);
+        _registerLegacyRoot(pause, RetainedBridgeMigration.GovernanceAction.Pause);
+        _registerLegacyRoot(upgrade, RetainedBridgeMigration.GovernanceAction.Upgrade);
+        _prepareFreeze(upgrade, 105, 106);
+        roots[4] = RetainedBridgeMigration.LegacyRootPin(105, messageQueue.getMerkleRoot(105));
+        roots[5] = RetainedBridgeMigration.LegacyRootPin(106, freezeDelivery.root);
         string memory cut = string.concat(
             '{"queue":"',
             vm.toString(address(messageQueue)),
             '","sourceDomain":"',
             vm.toString(approved.bootstrap.sourceDomain),
-            '","legacyMax":104,"firstBeefyBlock":105,"roots":"',
+            '","legacyMax":106,"firstBeefyBlock":107,"sourceCoverageDigest":"',
+            vm.toString(keccak256("fixture complete source inventory")),
+            '","roots":"',
             vm.toString(abi.encode(roots)),
             '"}'
         );
@@ -509,17 +595,21 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         vm.createDir("broadcast", true);
         vm.writeFile(_evidencePath("cut"), cut);
         vm.writeFile(_evidencePath("inventory"), inventory);
-        vm.setEnv("RETAINED_SOURCE_CUT", _evidencePath("cut"));
-        vm.setEnv("RETAINED_UNPAUSE_INVENTORY", _evidencePath("inventory"));
+        migration.evidenceConfig("RETAINED_SOURCE_CUT", _evidencePath("cut"));
+        migration.evidenceConfig("RETAINED_UNPAUSE_INVENTORY", _evidencePath("inventory"));
         approved.sourceCutApproval = keccak256(bytes(cut));
         approved.outstandingUnpauseInventory = keccak256(bytes(inventory));
         migration.sourceCut(approved, RetainedBridgeMigration.MigrationStage.Prepare);
-        _registerLegacyRoot(pause, RetainedBridgeMigration.GovernanceAction.Pause);
-        _registerLegacyRoot(upgrade, RetainedBridgeMigration.GovernanceAction.Upgrade);
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_ADMIN_MESSAGE_DELAY());
     }
 
     function _externalGovernance(RetainedBridgeMigration.GovernanceDelivery memory d) private {
+        if (
+            keccak256(d.message.payload) == keccak256(migration.upgradeData(approved))
+                && uint64(uint256(vm.load(address(messageQueue), RETAINED_INITIALIZER_SLOT))) != 7
+        ) {
+            migration.execute(approved, freezeDelivery, RetainedBridgeMigration.GovernanceAction.Freeze);
+        }
         vm.prank(address(0xE7EC));
         messageQueue.processMessage(d.sourceBlock, d.totalLeaves, d.leafIndex, d.message, d.proof);
         assertTrue(messageQueue.isProcessed(d.message.nonce));
@@ -626,34 +716,56 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         private
         returns (RetainedBridgeMigration.EmptyBarrier memory b, RetainedBridgeMigration.GovernanceDelivery memory d)
     {
+        return _barrierAndUnpauseRoot(earlyEmpty, earlyUnpause, bytes32(0));
+    }
+
+    function _barrierAndUnpauseRoot(bool earlyEmpty, bool earlyUnpause, bytes32 root)
+        private
+        returns (RetainedBridgeMigration.EmptyBarrier memory b, RetainedBridgeMigration.GovernanceDelivery memory d)
+    {
         RetainedBridgeMigration.GovernanceDelivery memory upgrade = _registerAndPause();
         migration.execute(approved, upgrade, RetainedBridgeMigration.GovernanceAction.Upgrade);
         b.upgradeReadback = _observation(10, "local finalized upgrade", vm.getBlockTimestamp());
         vm.warp(b.upgradeReadback.observedAt);
         vm.warp(vm.getBlockTimestamp() + 121);
         b.sourceBlock = 200;
+        vm.roll(100);
+        b.root = root;
         b.proof = encodeProof(
             customQueueProofForEpoch(
                 migrationClient,
                 200,
                 202,
-                bytes32(0),
+                root,
                 uint64((earlyEmpty ? b.upgradeReadback.state.timestamp + 121 : vm.getBlockTimestamp()) * 1000),
                 uint64(vm.getBlockTimestamp() * 1000),
                 7
             )
         );
-        messageQueue.submitEmptyQueueProgress(b.sourceBlock, b.proof);
+        if (root == bytes32(0)) messageQueue.submitEmptyQueueProgress(b.sourceBlock, b.proof);
+        else messageQueue.submitMerkleRoot(b.sourceBlock, root, b.proof);
         b.publication = _observation(100, "local finalized empty publication", vm.getBlockTimestamp());
         vm.warp(b.publication.observedAt);
+        vm.roll(164);
+        vm.setBlockhash(b.publication.state.number, b.publication.state.blockHash);
+        messageQueue.captureMigrationPublicationHash(b.sourceBlock);
+        vm.prank(address(governanceAdmin));
+        messageQueue.recordMigrationBarrier(b.sourceBlock, b.publication.state.blockHash);
         vm.warp(vm.getBlockTimestamp() + 121);
         d.sourceBlock = 201;
         d.totalLeaves = 1;
+        d.control = GovernanceControl(
+            8001,
+            uint64(block.timestamp + 1 days),
+            messageQueue.incidentEpoch(address(messageQueue)),
+            messageQueue.migrationAdminAction(),
+            messageQueue.migrationBarrier()
+        );
         d.message = VaraMessage(
             8001,
             approved.sourcePauser,
             approved.governancePauser.account,
-            GovernancePacker.pack(UnpauseProxyMessage(address(messageQueue)))
+            GovernancePacker.pack(UnpauseProxyMessage(address(messageQueue)), d.control)
         );
         d.root = d.message.hash();
         d.rootProof = encodeProof(
@@ -664,7 +776,7 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
                 d.root,
                 uint64((earlyUnpause ? b.publication.state.timestamp + 121 : vm.getBlockTimestamp()) * 1000),
                 uint64(vm.getBlockTimestamp() * 1000),
-                8
+                7 // Same authenticated QueueId is valid.
             )
         );
     }
@@ -693,7 +805,7 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         );
         migration.emptyChronology(approved, b);
         vm.expectRevert(
-            abi.encodeWithSelector(RetainedMigrationHold.selector, "unpause precedes finalized upgrade/empty epoch")
+            abi.encodeWithSelector(RetainedMigrationHold.selector, "unpause precedes finalized upgrade/progress")
         );
         migration.unpauseRoot(approved, d, b);
         assertEq(messageQueue.getMerkleRoot(d.sourceBlock), bytes32(0));
@@ -706,21 +818,21 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         assertEq(b.publication.observedAt, b.publication.state.timestamp + 768);
         assertEq(_retainedSnapshot(d.rootProof).sourceTimestampMs, (b.publication.state.timestamp + 121) * 1000);
         vm.expectRevert(
-            abi.encodeWithSelector(RetainedMigrationHold.selector, "unpause precedes finalized upgrade/empty epoch")
+            abi.encodeWithSelector(RetainedMigrationHold.selector, "unpause precedes finalized upgrade/progress")
         );
         migration.unpauseRoot(approved, d, b);
         assertEq(messageQueue.getMerkleRoot(d.sourceBlock), bytes32(0));
         messageQueue.submitMerkleRoot(d.sourceBlock, d.root, d.rootProof);
         vm.warp(vm.getBlockTimestamp() + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
         vm.expectRevert(
-            abi.encodeWithSelector(RetainedMigrationHold.selector, "unpause precedes finalized upgrade/empty epoch")
+            abi.encodeWithSelector(RetainedMigrationHold.selector, "unpause precedes finalized upgrade/progress")
         );
         migration.unpause(approved, d, b);
         assertFalse(messageQueue.isProcessed(d.message.nonce));
         assertTrue(messageQueue.paused());
     }
 
-    function testEarlyOrSameEpochUnpauseFailsWithoutRegistration() public {
+    function test_HTML7fe1b032_EarlyUnpauseFailsButSameQueueIdPasses() public {
         (RetainedBridgeMigration.EmptyBarrier memory b, RetainedBridgeMigration.GovernanceDelivery memory d) =
             _barrierAndUnpause();
         b.publication.state.number = b.upgradeReadback.state.number;
@@ -744,9 +856,8 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
                 7
             )
         );
-        vm.expectRevert();
         migration.unpauseRoot(approved, d, b);
-        assertEq(messageQueue.getMerkleRoot(d.sourceBlock), bytes32(0));
+        assertEq(messageQueue.getMerkleRoot(d.sourceBlock), d.root);
     }
 
     function _rpcTransaction(bytes32 hash) private view returns (string memory) {
@@ -955,6 +1066,13 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
             (upgrade.sourceBlock, upgrade.totalLeaves, upgrade.leafIndex, upgrade.message, upgrade.proof)
         );
         (action.upgrade.original, transaction, receipt) = _originalFixture(input, address(messageQueue), address(0));
+        action.upgrade.effectTransactionHash = action.upgrade.original.transactionHash;
+        receipt = _effectReceipt(action.upgrade.effectTransactionHash, upgrade);
+        migration.rpcResponse(
+            "eth_getTransactionReceipt",
+            string.concat('["', vm.toString(action.upgrade.effectTransactionHash), '"]'),
+            receipt
+        );
         action.upgradeReadback =
             RetainedBridgeMigration.FinalizedPin(20, keccak256("canonical block"), vm.getBlockTimestamp());
         action.barrier.upgradeReadback.state = action.upgradeReadback;
@@ -973,8 +1091,8 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
             '"}'
         );
         vm.writeFile(_evidencePath("observation"), observation);
-        vm.setEnv("RETAINED_UPGRADE_OBSERVATION", _evidencePath("observation"));
-        vm.setEnv("RETAINED_UPGRADE_OBSERVATION_HASH", vm.toString(keccak256(bytes(observation))));
+        migration.evidenceConfig("RETAINED_UPGRADE_OBSERVATION", _evidencePath("observation"));
+        migration.evidenceConfig("RETAINED_UPGRADE_OBSERVATION_HASH", vm.toString(keccak256(bytes(observation))));
         vm.warp(vm.getBlockTimestamp() + 121);
         action.barrier.sourceBlock = 200;
         action.barrier.proof = encodeProof(
@@ -1021,8 +1139,8 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
             '"}'
         );
         vm.writeFile(_evidencePath("barrier-observation"), barrierObservation);
-        vm.setEnv("RETAINED_BARRIER_OBSERVATION", _evidencePath("barrier-observation"));
-        vm.setEnv("RETAINED_BARRIER_OBSERVATION_HASH", vm.toString(keccak256(bytes(barrierObservation))));
+        migration.evidenceConfig("RETAINED_BARRIER_OBSERVATION", _evidencePath("barrier-observation"));
+        migration.evidenceConfig("RETAINED_BARRIER_OBSERVATION_HASH", vm.toString(keccak256(bytes(barrierObservation))));
     }
 
     function _allPredecessorStages(RetainedBridgeMigration.MigrationAction memory action, bool hold) private {
@@ -1040,52 +1158,23 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
         assertEq(messageQueue.verifier(), approved.verifier.account);
     }
 
-    function testEveryLaterStageRequiresOriginalUpgradeDespiteMatchingExternalState() public {
-        (RetainedBridgeMigration.MigrationAction memory action, string memory transaction, string memory receipt) =
-            _predecessorFixture();
-        string memory params = string.concat('["', vm.toString(action.upgrade.original.transactionHash), '"]');
+    /// Reconstructed from HTML7fe1b032 VB-33: effect and own-original disposition are independent.
+    function test_HTML7fe1b032_ExternalEffectAdvancesWithMissingOrRevertedOwnOriginal() public {
+        (RetainedBridgeMigration.MigrationAction memory action,, string memory receipt) = _predecessorFixture();
+        string memory effectParams = string.concat('["', vm.toString(action.upgrade.effectTransactionHash), '"]');
+        action.upgrade.delivery.proof = new bytes32[](1);
+        vm.expectRevert(abi.encodeWithSelector(RetainedMigrationHold.selector, "effect membership/state"));
+        migration.effect(approved, action.upgrade.delivery, action.upgrade.effectTransactionHash);
+        action.upgrade.delivery.proof = new bytes32[](0);
+        action.upgrade.original.transactionHash = keccak256("different own original");
+        action.upgrade.original.artifactHash = keccak256("preserved failed original artifact");
+        action.upgrade.original.artifact = "not read for administrative progress";
         _allPredecessorStages(action, false);
-        migration.rpcResponse("eth_getTransactionByHash", params, "null");
+        migration.rpcResponse("eth_getTransactionReceipt", effectParams, "null");
         _allPredecessorStages(action, true);
-        migration.rpcResponse("eth_getTransactionByHash", params, transaction);
-        migration.rpcResponse("eth_getTransactionReceipt", params, "null");
-        _allPredecessorStages(action, true);
-        migration.rpcResponse(
-            "eth_getTransactionReceipt",
-            params,
-            _fixtureReceipt(action.upgrade.original.transactionHash, address(messageQueue), address(0), false)
-        );
-        _allPredecessorStages(action, true);
-        migration.rpcResponse(
-            "eth_getTransactionReceipt",
-            params,
-            _fixtureReceipt(keccak256("competitor success"), address(messageQueue), address(0), true)
-        );
-        _allPredecessorStages(action, true);
-        migration.rpcResponse("eth_getTransactionReceipt", params, receipt);
-        migration.rpcResponse(
-            "eth_getTransactionByHash", params, _rpcTransaction(action.upgrade.original.transactionHash)
-        );
-        _allPredecessorStages(action, true);
-        migration.rpcResponse("eth_getTransactionByHash", params, transaction);
-        action.upgrade.original.artifactHash ^= bytes32(uint256(1));
-        _allPredecessorStages(action, true);
-        action.upgrade.original.artifactHash ^= bytes32(uint256(1));
-        migration.rpcResponse(
-            "eth_getBlockByNumber",
-            '["0x14",false]',
-            string.concat(
-                '{"number":20,"hash":"',
-                vm.toString(keccak256("canonical block")),
-                '","timestamp":',
-                vm.toString(action.upgradeReadback.timestamp),
-                ',"transactions":["',
-                vm.toString(keccak256("different canonical transaction")),
-                '"]}'
-            )
-        );
-        _allPredecessorStages(action, true);
-        vm.removeFile(action.upgrade.original.artifact);
+        migration.rpcResponse("eth_getTransactionReceipt", effectParams, receipt);
+        _allPredecessorStages(action, false);
+        vm.removeFile(_evidencePath("original"));
         vm.removeFile(_evidencePath("observation"));
         vm.removeFile(_evidencePath("barrier-observation"));
     }
@@ -1107,12 +1196,204 @@ contract RetainedBridgeMigrationTest is BeefyFixtureTest, Base {
             '"}'
         );
         vm.writeFile(_evidencePath("observation"), backdated);
-        vm.setEnv("RETAINED_UPGRADE_OBSERVATION_HASH", vm.toString(keccak256(bytes(backdated))));
+        migration.evidenceConfig("RETAINED_UPGRADE_OBSERVATION_HASH", vm.toString(keccak256(bytes(backdated))));
         vm.expectRevert(abi.encodeWithSelector(RetainedMigrationHold.selector, "invalid finality observation"));
         migration.predecessor(approved, action);
         assertTrue(messageQueue.paused());
         vm.removeFile(action.upgrade.original.artifact);
         vm.removeFile(_evidencePath("observation"));
         vm.removeFile(_evidencePath("barrier-observation"));
+    }
+
+    function _effectReceipt(bytes32 hash, RetainedBridgeMigration.GovernanceDelivery memory d)
+        private
+        view
+        returns (string memory)
+    {
+        return string.concat(
+            '{"transactionHash":"',
+            vm.toString(hash),
+            '","status":1,"transactionIndex":0,"blockNumber":20,"blockHash":"',
+            vm.toString(keccak256("canonical block")),
+            '","logs":[{"address":"',
+            vm.toString(address(messageQueue)),
+            '","topics":["',
+            vm.toString(IMessageQueue.MessageProcessed.selector),
+            '"],"data":"',
+            vm.toString(abi.encode(d.sourceBlock, d.message.hash(), d.message.nonce, d.message.destination)),
+            '"}]}'
+        );
+    }
+
+    /// Reconstructed from HTML7fe1b032 VB-36; positive isLive is not sufficient lifetime.
+    function test_HTML7fe1b032_NearExpiryCannotFreezeEvenWhileLive() public {
+        vm.warp(migrationClient.lastAuthenticatedSourceTimestampMs() / 1000 + 23 hours);
+        assertTrue(migrationClient.isLive());
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                RetainedMigrationHold.selector, "insufficient source-authenticated lifetime; refresh heartbeat"
+            )
+        );
+        migration.lifetime(approved);
+    }
+
+    /// Reconstructed from HTML7fe1b032 VB-34: race rolls installation and initializer back together.
+    function test_HTML7fe1b032_PreFreezeCutRaceRollsBackInstallation() public {
+        _registerAndPauseBeforeFreeze();
+        bytes32 implementation = vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT);
+        bytes32 initializer = vm.load(address(messageQueue), RETAINED_INITIALIZER_SLOT);
+        _mockLegacyRoot(105, keccak256("racing genuine publication"));
+        messageQueue.submitMerkleRoot(105, keccak256("racing genuine publication"), "");
+        vm.clearMockedCalls();
+        vm.expectRevert(IMessageQueue.InvalidLegacyStage.selector);
+        messageQueue.processMessage(freezeDelivery.sourceBlock, 1, 0, freezeDelivery.message, new bytes32[](0));
+        assertEq(vm.load(address(messageQueue), ERC1967Utils.IMPLEMENTATION_SLOT), implementation);
+        assertEq(vm.load(address(messageQueue), RETAINED_INITIALIZER_SLOT), initializer);
+        assertFalse(messageQueue.isProcessed(freezeDelivery.message.nonce));
+        assertEq(messageQueue.verifier(), approved.legacyVerifier.account);
+    }
+
+    function test_HTML7fe1b032_ExactRecoveryPreservesLegacyStateAndDisablesMigration() public {
+        RetainedBridgeMigration.GovernanceDelivery memory upgrade = _registerAndPause();
+        LegacyControl memory recovery = approved.recoveryControl;
+        messageQueue.processMessage(
+            recovery.sourceBlock, recovery.totalLeaves, recovery.leafIndex, recovery.message, recovery.proof
+        );
+        assertFalse(messageQueue.legacyPublicationFrozen());
+        assertTrue(messageQueue.paused());
+        assertEq(messageQueue.beefyRootMinimum(), 0);
+        assertEq(messageQueue.verifier(), approved.legacyVerifier.account);
+        assertEq(messageQueue.getMerkleRoot(100), keccak256("retained user root"));
+        assertFalse(messageQueue.isProcessed(upgrade.message.nonce));
+        vm.expectRevert();
+        migration.execute(approved, upgrade, RetainedBridgeMigration.GovernanceAction.Upgrade);
+    }
+
+    function test_HTML7fe1b032_NonemptySameQueueIdBarrierUnpauses() public {
+        (RetainedBridgeMigration.EmptyBarrier memory b, RetainedBridgeMigration.GovernanceDelivery memory d) =
+            _barrierAndUnpauseRoot(false, false, keccak256("nonempty progress"));
+        assertEq(_retainedSnapshot(b.proof).queueId, _retainedSnapshot(d.rootProof).queueId);
+        migration.unpauseRoot(approved, d, b);
+        vm.warp(block.timestamp + messageQueue.PROCESS_PAUSER_MESSAGE_DELAY());
+        migration.unpause(approved, d, b);
+        assertFalse(messageQueue.paused());
+    }
+
+    /// Reconstructed from HTML7fe1b032 VB-32: matched balance must not conceal unauthorized outflows.
+    function test_HTML7fe1b032_CustodyDonationConservedAndMaskedDeficitRejected() public {
+        vm.prank(deploymentArguments.deployerAddress);
+        IERC20Mintable(address(circleToken)).mint(address(erc20Manager), 10);
+        uint256 baseline = circleToken.balanceOf(address(erc20Manager));
+        RetainedBridgeMigration.CustodyLedger memory ledger;
+        ledger.token = address(circleToken);
+        ledger.balance = baseline;
+        ledger.requiredBacking = baseline;
+        ledger.releases = new RetainedBridgeMigration.CustodyDelta[](0);
+        vm.roll(30);
+        (RetainedBridgeMigration.OriginalTransaction memory original,,) =
+            _originalFixture(hex"12345678", address(messageQueue), address(0));
+        string memory incoming = _custodyLog(original.transactionHash, 0, address(0), address(erc20Manager), 1);
+        vm.prank(deploymentArguments.deployerAddress);
+        IERC20Mintable(address(circleToken)).mint(address(erc20Manager), 1);
+        _custodyResponses(original.transactionHash, string.concat("[", incoming, "]"));
+        migration.custody(approved, RetainedBridgeMigration.FinalizedPin(19, keccak256("capture"), 1), ledger);
+        assertEq(circleToken.balanceOf(address(erc20Manager)), baseline + 1);
+
+        ledger.balance = baseline + 1;
+        ledger.requiredBacking = baseline + 1;
+        vm.prank(address(erc20Manager));
+        assertTrue(circleToken.transfer(address(0xBAD), 1));
+        vm.prank(deploymentArguments.deployerAddress);
+        IERC20Mintable(address(circleToken)).mint(address(erc20Manager), 1);
+        string memory outgoing = _custodyLog(original.transactionHash, 0, address(erc20Manager), address(0xBAD), 1);
+        incoming = _custodyLog(original.transactionHash, 1, address(0), address(erc20Manager), 1);
+        _custodyResponses(original.transactionHash, string.concat("[", outgoing, ",", incoming, "]"));
+        assertEq(circleToken.balanceOf(address(erc20Manager)), ledger.balance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                RetainedMigrationHold.selector, "unexplained outflow/deficit, even if masked by donation"
+            )
+        );
+        migration.custody(approved, RetainedBridgeMigration.FinalizedPin(19, keccak256("capture"), 1), ledger);
+        vm.removeFile(original.artifact);
+    }
+
+    /// Reconstructed from HTML7fe1b032 VB-32: a matching custody balance cannot conceal managed issuance.
+    function test_HTML7fe1b032_ManagedSupplyRequiresExactEconomicDelta() public {
+        RetainedBridgeMigration.CustodyLedger memory ledger;
+        ledger.token = address(wrappedVara);
+        ledger.balance = wrappedVara.balanceOf(address(erc20Manager));
+        ledger.managedSupply = wrappedVara.totalSupply();
+        ledger.releases = new RetainedBridgeMigration.CustodyDelta[](0);
+        vm.roll(30);
+        migration.rpcResponse(
+            "eth_getLogs",
+            string.concat(
+                '[{"address":"',
+                vm.toString(address(wrappedVara)),
+                '","fromBlock":"0x14","toBlock":"0x1e","topics":["',
+                vm.toString(keccak256("Transfer(address,address,uint256)")),
+                '"]}]'
+            ),
+            "[]"
+        );
+        migration.custody(approved, RetainedBridgeMigration.FinalizedPin(19, keccak256("capture"), 1), ledger);
+        vm.prank(address(erc20Manager));
+        IERC20Mintable(address(wrappedVara)).mint(address(this), 1);
+        vm.expectRevert(abi.encodeWithSelector(RetainedMigrationHold.selector, "unexplained managed supply change"));
+        migration.custody(approved, RetainedBridgeMigration.FinalizedPin(19, keccak256("capture"), 1), ledger);
+    }
+
+    function _custodyLog(bytes32 hash, uint256 index, address from, address to, uint256 amount)
+        private
+        view
+        returns (string memory)
+    {
+        return string.concat(
+            '{"address":"',
+            vm.toString(address(circleToken)),
+            '","transactionHash":"',
+            vm.toString(hash),
+            '","blockNumber":20,"blockHash":"',
+            vm.toString(keccak256("canonical block")),
+            '","removed":false,"logIndex":',
+            vm.toString(index),
+            ',"topics":["',
+            vm.toString(keccak256("Transfer(address,address,uint256)")),
+            '","',
+            vm.toString(bytes32(uint256(uint160(from)))),
+            '","',
+            vm.toString(bytes32(uint256(uint160(to)))),
+            '"],"data":"',
+            vm.toString(abi.encode(amount)),
+            '"}'
+        );
+    }
+
+    function _custodyResponses(bytes32 hash, string memory logs) private {
+        migration.rpcResponse(
+            "eth_getLogs",
+            string.concat(
+                '[{"address":"',
+                vm.toString(address(circleToken)),
+                '","fromBlock":"0x14","toBlock":"0x1e","topics":["',
+                vm.toString(keccak256("Transfer(address,address,uint256)")),
+                '"]}]'
+            ),
+            logs
+        );
+        migration.rpcResponse(
+            "eth_getTransactionReceipt",
+            string.concat('["', vm.toString(hash), '"]'),
+            string.concat(
+                '{"transactionHash":"',
+                vm.toString(hash),
+                '","status":1,"transactionIndex":0,"blockNumber":20,"blockHash":"',
+                vm.toString(keccak256("canonical block")),
+                '","logs":',
+                logs,
+                "}"
+            )
+        );
     }
 }

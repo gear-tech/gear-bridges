@@ -23,7 +23,7 @@ use gear_common::api_provider::ApiProviderConnection;
 use primitive_types::{H160, H256};
 use sails_rs::calls::ActionIo;
 use std::{iter, sync::Arc};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tx_manager::TransactionManager;
 use utils_prometheus::MeteredService;
 
@@ -40,8 +40,8 @@ pub struct Relayer {
     tx_manager: TransactionManager,
 
     transaction_data_extractor: Option<TransactionDataExtractor>,
-    tx_events_sender: Option<UnboundedSender<TxHashWithSlot>>,
-    tx_events_receiver: Option<UnboundedReceiver<TxHashWithSlot>>,
+    tx_events_sender: Option<Sender<TxHashWithSlot>>,
+    tx_events_receiver: Option<Receiver<TxHashWithSlot>>,
 
     storage: Arc<dyn Storage>,
     _journal_ownership: Arc<JournalOwnership>,
@@ -75,10 +75,13 @@ impl Relayer {
         genesis_time: u64,
         from_eth_block: u64,
         eth_unprocessed_block_storage_path: String,
-        http_receiver: Option<UnboundedReceiver<EthTransaction>>,
+        http_receiver: Option<Receiver<EthTransaction>>,
         cutover_seal: Option<std::path::PathBuf>,
         approved_manager_code: Option<H256>,
+        root_minimum_receipt_slot: Option<u64>,
         native_wrapper_approval: Option<Arc<gear_common::native_wrapper::ApprovedNativeWrapper>>,
+        approved_gear_gas_limit: Option<u64>,
+        historical_receipts: Vec<gear_common::receipt_framing::HistoricalReceiptApproval>,
     ) -> anyhow::Result<Self> {
         cutover::reject_sealed(std::path::Path::new(&storage_path))?;
         cutover::reject_sealed(std::path::Path::new(&eth_unprocessed_block_storage_path))?;
@@ -139,6 +142,7 @@ impl Relayer {
                 &client,
                 cutover_seal.as_deref(),
                 approved_manager_code,
+                root_minimum_receipt_slot,
                 native_wrapper_approval.as_deref(),
             )
             .await?;
@@ -168,7 +172,13 @@ impl Relayer {
             None,
         )
         .with_native_wrapper_approval(native_wrapper_approval)
+        .with_historical_receipt_approvals(historical_receipts)?
         .with_signer_ownership(signer_ownership);
+        let message_sender = if let Some(limit) = approved_gear_gas_limit {
+            message_sender.with_approved_gear_gas_limit(limit)?
+        } else {
+            message_sender
+        };
 
         let proof_composer = proof_composer::ProofComposer::new(
             api_provider,
@@ -180,10 +190,11 @@ impl Relayer {
 
         let (transaction_data_extractor, tx_events_sender, tx_events_receiver) =
             if let Some(http_receiver) = http_receiver {
-                let (tx_events_sender, tx_events_receiver) = unbounded_channel();
+                let (tx_events_sender, tx_events_receiver) = channel(128);
                 let extractor = TransactionDataExtractor::new(
                     eth_api,
                     genesis_time,
+                    bridging_payment_address,
                     tx_events_sender.downgrade(),
                     http_receiver,
                 )

@@ -1,8 +1,25 @@
 use super::*;
 use checkpoint_light_client_client::service_replay_back::io::{Process, Start};
-use checkpoint_light_client_io::ReplayBackStatus;
+use checkpoint_light_client_io::{ReplayBackError, ReplayBackStatus};
 use ethereum_beacon_client::{self, BeaconClient};
 use futures::{stream, Stream, StreamExt};
+
+#[derive(Debug, thiserror::Error)]
+#[error("Replay state changed; rebuild remaining ancestry from current state: {0:?}")]
+pub(super) struct ReplayStateChanged(ReplayBackError);
+
+fn classify_reply(
+    result: Result<ReplayBackStatus, ReplayBackError>,
+) -> AnyResult<ReplayBackStatus> {
+    result.map_err(|error| match error {
+        ReplayBackError::AlreadyStarted
+        | ReplayBackError::NotStarted
+        | ReplayBackError::Verify(Error::StateChanged | Error::NotActual) => {
+            anyhow::Error::new(ReplayStateChanged(error))
+        }
+        error => anyhow!("Replay validation failed: {error:?}"),
+    })
+}
 
 pub struct Args<'a> {
     pub beacon_client: &'a BeaconClient,
@@ -186,9 +203,10 @@ async fn replay_back_slots_inner(
 ) -> AnyResult<ReplayBackStatus> {
     let payload = Process::encode_call(beacon_client.request_headers(slot_start, slot_end).await?);
     let reply = send_checkpoint_message(gear_api, program_id, payload, gas_limit).await?;
-    Process::decode_reply(reply)
-        .map_err(|e| anyhow!("Failed to decode original ReplayBack reply: {e:?}"))?
-        .map_err(|e| anyhow!("Backreplay failed: {e:?}"))
+    classify_reply(
+        Process::decode_reply(reply)
+            .map_err(|e| anyhow!("Failed to decode original ReplayBack reply: {e:?}"))?,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -210,14 +228,38 @@ async fn replay_back_slots_start(
         beacon_client.request_headers(slot_start, slot_end).await?,
     );
     let reply = send_checkpoint_message(gear_api, program_id, payload, gas_limit).await?;
-    Start::decode_reply(reply)
-        .map_err(|e| anyhow!("Failed to decode original ReplayBack start reply: {e:?}"))?
-        .map_err(|e| anyhow!("Failed to start ReplayBack: {e:?}"))
+    classify_reply(
+        Start::decode_reply(reply)
+            .map_err(|e| anyhow!("Failed to decode original ReplayBack start reply: {e:?}"))?,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_replay_errors_rebuild_state_without_hiding_invalid_proofs() {
+        for error in [
+            ReplayBackError::AlreadyStarted,
+            ReplayBackError::NotStarted,
+            ReplayBackError::Verify(Error::StateChanged),
+            ReplayBackError::Verify(Error::NotActual),
+        ] {
+            assert!(classify_reply(Err(error))
+                .unwrap_err()
+                .is::<ReplayStateChanged>());
+        }
+        assert!(
+            !classify_reply(Err(ReplayBackError::Verify(Error::InvalidHeaders)))
+                .unwrap_err()
+                .is::<ReplayStateChanged>()
+        );
+        assert!(matches!(
+            classify_reply(Ok(ReplayBackStatus::InProcess)).unwrap(),
+            ReplayBackStatus::InProcess
+        ));
+    }
 
     #[tokio::test]
     async fn exhausted_incomplete_replay_cannot_report_success() {

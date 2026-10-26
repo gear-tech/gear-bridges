@@ -93,6 +93,7 @@ mod tests {
             .await
             .unwrap();
         let exempt = MessageInBlock {
+            queue_id: None,
             message: Message {
                 nonce_be: [7; 32],
                 source: [1; 32],

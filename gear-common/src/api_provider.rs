@@ -32,6 +32,7 @@ pub struct ApiProviderConnection {
     sender: Option<UnboundedSender<ApiConnectionRequest>>,
     session: u64,
     api: Api,
+    endpoint: Option<String>,
 }
 
 impl ApiProviderConnection {
@@ -41,6 +42,7 @@ impl ApiProviderConnection {
             sender: None,
             session: 0,
             api,
+            endpoint: None,
         }
     }
     /// Whether the reconnecting provider service is available (not an API liveness probe).
@@ -83,6 +85,7 @@ impl ApiProviderConnection {
     /// Request a new API connection from the [`ApiProvider`]. This will return a new
     /// [`GearApi`](gclient::GearApi) instance with specified suri.
     pub fn gclient_client(&mut self, suri: &str) -> anyhow::Result<gclient::GearApi> {
+        crate::signer_ownership::validate_suri(suri, self.endpoint.as_deref())?;
         gclient::GearApi::from(self.api.clone())
             .with(suri)
             .map_err(|e| anyhow::anyhow!("failed to set suri: {e}"))
@@ -104,6 +107,7 @@ impl Clone for ApiProviderConnection {
             sender: self.sender.clone(),
             session: self.session,
             api: self.api.clone(),
+            endpoint: self.endpoint.clone(),
         }
     }
 }
@@ -143,6 +147,7 @@ impl ApiProvider {
             sender: Some(self.sender.clone()),
             session: self.session,
             api: self.api.clone(),
+            endpoint: Some(self.url.clone()),
         }
     }
 

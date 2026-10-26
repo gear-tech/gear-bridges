@@ -30,6 +30,12 @@ impl Messages {
         self.0.is_empty()
     }
 
+    pub fn retry_unavailable_candidates(&mut self) {
+        for message in &mut self.0 {
+            message.excluded_root = None;
+        }
+    }
+
     // None -> the inner vector is full so the message is rejected
     pub fn add(&mut self, message_new: accumulator::Request) -> Option<()> {
         if self.0.len() >= self.0.capacity() {
@@ -50,34 +56,12 @@ impl Messages {
         Some(())
     }
 
+    #[cfg(test)]
     pub fn drain_all(
         &mut self,
         merkle_root: &RelayedMerkleRoot,
-    ) -> Drain<'_, accumulator::Request> {
-        let index_end = match self.0.binary_search_by(|message| {
-            Self::compare(
-                message.authority_set_id,
-                message.block,
-                merkle_root.authority_set_id,
-                merkle_root.block,
-            )
-        }) {
-            Ok(i) => i + 1,
-            Err(i) => i,
-        };
-
-        let index_start = match self.0.binary_search_by(|message| {
-            Self::compare(
-                message.authority_set_id,
-                message.block,
-                merkle_root.authority_set_id,
-                GearBlockNumber(0),
-            )
-        }) {
-            Ok(i) | Err(i) => i,
-        };
-
-        self.0.drain(index_start..index_end)
+    ) -> impl Iterator<Item = accumulator::Request> {
+        self.drain(merkle_root, u64::MAX, |_| 0)
     }
     pub fn drain(
         &mut self,
@@ -87,9 +71,12 @@ impl Messages {
     ) -> impl Iterator<Item = accumulator::Request> {
         let mut removed = Vec::new();
         self.0.retain(|message| {
-            if message.authority_set_id == merkle_root.authority_set_id
-                && message.block <= merkle_root.block
-                && timestamp >= merkle_root.timestamp + delay(message.source)
+            if merkle_root.covers(message.queue_id, message.block)
+                && message.excluded_root != Some(*merkle_root)
+                && merkle_root
+                    .timestamp
+                    .checked_add(delay(message.source))
+                    .is_some_and(|at| timestamp >= at)
             {
                 removed.push(message.clone());
                 false
@@ -110,9 +97,14 @@ impl Messages {
 
         self.0.retain(|message| {
             let delay = delay(message.source);
-            if let Some(root) =
-                merkle_roots.find(message.authority_set_id, message.block, timestamp, delay)
-            {
+            if let Some(root) = merkle_roots.find(
+                message.authority_set_id,
+                message.queue_id,
+                message.block,
+                message.excluded_root,
+                timestamp,
+                delay,
+            ) {
                 removed.push((*root, message.clone()));
                 false
             } else {
@@ -158,27 +150,25 @@ impl MerkleRoots {
 
     pub fn find(
         &self,
-        authority_set_id: AuthoritySetId,
+        _authority_set_id: AuthoritySetId,
+        queue_id: u64,
         block_number: GearBlockNumber,
+        excluded_root: Option<RelayedMerkleRoot>,
         last_timestamp: u64,
         delay: u64,
     ) -> Option<&RelayedMerkleRoot> {
-        let end = match self.roots.binary_search_by(|root| {
-            (authority_set_id, block_number).cmp(&(root.authority_set_id, root.block))
-        }) {
-            Ok(i) => i + 1,
-            Err(i) => i,
-        };
-        self.roots[..end]
+        self.roots
             .iter()
             .map(|qualified| &qualified.root)
-            .rev()
-            .take_while(|root| root.authority_set_id == authority_set_id)
-            .find(|root| {
-                root.timestamp
-                    .checked_add(delay)
-                    .is_some_and(|at| last_timestamp >= at)
+            .filter(|root| {
+                root.covers(queue_id, block_number)
+                    && excluded_root != Some(**root)
+                    && root
+                        .timestamp
+                        .checked_add(delay)
+                        .is_some_and(|at| last_timestamp >= at)
             })
+            .min_by_key(|root| (root.block, root.timestamp))
     }
 
     pub fn len(&self) -> usize {
@@ -272,9 +262,133 @@ mod tests {
         }
     }
 
+    /// Reconstructed from supplied HTML VB-15 / audited 7fe1b032.
+    #[test]
+    fn queue_identity_cumulative_coverage_and_own_maturity() {
+        let root = RelayedMerkleRoot {
+            block: GearBlockNumber(110),
+            block_hash: [1; 32].into(),
+            authority_set_id: AuthoritySetId(7),
+            queue_id: Some(20),
+            merkle_root: [2; 32].into(),
+            timestamp: 1000,
+        };
+        let message = accumulator::Request {
+            authority_set_id: AuthoritySetId(7),
+            queue_id: 19,
+            block: GearBlockNumber(100),
+            block_hash: [3; 32].into(),
+            tx_uuid: Uuid::new_v4(),
+            source: ActorId::zero(),
+            excluded_root: None,
+        };
+        let mut roots = MerkleRoots::new(4);
+        roots.add(qualified(root)).unwrap();
+        let mut messages = Messages::new(4);
+        messages.add(message.clone()).unwrap();
+        assert!(messages.drain(&root, u64::MAX, |_| 0).next().is_none());
+        assert!(roots
+            .find(
+                message.authority_set_id,
+                19,
+                message.block,
+                None,
+                u64::MAX,
+                0
+            )
+            .is_none());
+        let cumulative = RelayedMerkleRoot {
+            block: GearBlockNumber(120),
+            authority_set_id: AuthoritySetId(8),
+            queue_id: Some(19),
+            timestamp: 2000,
+            ..root
+        };
+        roots.add(qualified(cumulative)).unwrap();
+        assert!(messages
+            .drain_timestamp(2299, |_| 300, &roots)
+            .next()
+            .is_none());
+        assert_eq!(
+            messages
+                .drain_timestamp(2300, |_| 300, &roots)
+                .collect::<Vec<_>>(),
+            vec![(cumulative, message.clone())]
+        );
+        assert!(roots
+            .find(
+                message.authority_set_id,
+                19,
+                GearBlockNumber(121),
+                None,
+                u64::MAX,
+                0
+            )
+            .is_none());
+        assert!(roots
+            .find(
+                message.authority_set_id,
+                19,
+                message.block,
+                Some(cumulative),
+                u64::MAX,
+                0
+            )
+            .is_none());
+        let unknown = RelayedMerkleRoot {
+            queue_id: None,
+            ..cumulative
+        };
+        assert!(!unknown.covers(0, message.block));
+        assert!(!unknown.covers(19, message.block));
+        let retained = serde_json::to_vec(&roots).unwrap();
+        let decoded: MerkleRoots = serde_json::from_slice(&retained).unwrap();
+        let restored = MerkleRoots::from_qualified(decoded.qualified_roots(), 4).unwrap();
+        messages
+            .add(accumulator::Request {
+                excluded_root: Some(cumulative),
+                ..message.clone()
+            })
+            .unwrap();
+        assert!(messages
+            .drain_timestamp(2300, |_| 300, &roots)
+            .next()
+            .is_none());
+        messages.retry_unavailable_candidates();
+        assert_eq!(
+            messages
+                .drain_timestamp(2300, |_| 300, &roots)
+                .collect::<Vec<_>>(),
+            vec![(cumulative, message.clone())]
+        );
+        let earlier = RelayedMerkleRoot {
+            block: GearBlockNumber(115),
+            timestamp: 1800,
+            ..cumulative
+        };
+        roots.add(qualified(earlier)).unwrap();
+        assert_eq!(
+            roots.find(
+                message.authority_set_id,
+                19,
+                message.block,
+                Some(cumulative),
+                2300,
+                300
+            ),
+            Some(&earlier),
+            "a null proof never excludes other roots by height"
+        );
+        assert_eq!(
+            restored.find(message.authority_set_id, 19, message.block, None, 2300, 300),
+            Some(&cumulative)
+        );
+    }
+
     #[test]
     fn bounded_root_history_preserves_authority_coverage() {
         let root = RelayedMerkleRoot {
+            queue_id: Some(1),
             block: GearBlockNumber(100),
             block_hash: [1; 32].into(),
             authority_set_id: AuthoritySetId(1),
@@ -295,35 +409,72 @@ mod tests {
         roots.add(qualified(root)).unwrap();
         roots.add(qualified(newer)).unwrap();
         assert_eq!(
-            roots.find(root.authority_set_id, root.block, 1300, 300),
+            roots.find(
+                root.authority_set_id,
+                root.authority_set_id.0,
+                root.block,
+                None,
+                1300,
+                300
+            ),
             Some(&root)
         );
         assert_eq!(
-            roots.find(root.authority_set_id, GearBlockNumber(101), 1300, 300),
+            roots.find(
+                root.authority_set_id,
+                root.authority_set_id.0,
+                GearBlockNumber(101),
+                None,
+                1300,
+                300
+            ),
             None
         );
         assert!(matches!(roots.add(qualified(newest)), Ok(Added::Removed(value)) if value == root));
         assert!(roots.add(qualified(root)).is_err());
         assert!(roots.add(qualified(newer)).is_err());
         assert_eq!(
-            roots.find(root.authority_set_id, root.block, 1400, 300),
+            roots.find(
+                root.authority_set_id,
+                root.authority_set_id.0,
+                root.block,
+                None,
+                1400,
+                300
+            ),
             Some(&newer)
         );
         let next_authority = RelayedMerkleRoot {
+            queue_id: Some(2),
             authority_set_id: AuthoritySetId(2),
             ..newest
         };
         roots.add(qualified(next_authority)).unwrap();
         assert_eq!(
-            roots.find(root.authority_set_id, root.block, 1400, 300),
+            roots.find(
+                root.authority_set_id,
+                root.authority_set_id.0,
+                root.block,
+                None,
+                1400,
+                300
+            ),
             None
         );
         let mut restored = MerkleRoots::from_qualified(roots.qualified_roots(), 2).unwrap();
         assert_eq!(
-            restored.find(root.authority_set_id, root.block, 1400, 300),
+            restored.find(
+                root.authority_set_id,
+                root.authority_set_id.0,
+                root.block,
+                None,
+                1400,
+                300
+            ),
             None
         );
         let last_authority = RelayedMerkleRoot {
+            queue_id: Some(3),
             authority_set_id: AuthoritySetId(3),
             ..newest
         };
@@ -331,14 +482,23 @@ mod tests {
             matches!(restored.add(qualified(last_authority)), Ok(Added::Removed(value)) if value == newest)
         );
         assert_eq!(
-            restored.find(root.authority_set_id, root.block, u64::MAX, 0),
+            restored.find(
+                root.authority_set_id,
+                root.authority_set_id.0,
+                root.block,
+                None,
+                u64::MAX,
+                0
+            ),
             None
         );
         assert!(restored.add(qualified(root)).is_err());
         assert_eq!(
             restored.find(
                 next_authority.authority_set_id,
+                next_authority.authority_set_id.0,
                 next_authority.block,
+                None,
                 1500,
                 300
             ),
@@ -349,6 +509,7 @@ mod tests {
     #[test]
     fn replay_requires_identical_root_and_inclusion_provenance() {
         let original = qualified(RelayedMerkleRoot {
+            queue_id: Some(1),
             block: GearBlockNumber(100),
             block_hash: [1; 32].into(),
             authority_set_id: AuthoritySetId(1),
@@ -375,6 +536,7 @@ mod tests {
         for block in 100..200 {
             roots
                 .add(qualified(RelayedMerkleRoot {
+                    queue_id: Some(1),
                     block: GearBlockNumber(block),
                     block_hash: [1; 32].into(),
                     authority_set_id: AuthoritySetId(1),
@@ -384,6 +546,7 @@ mod tests {
                 .unwrap();
         }
         let mut backfill = qualified(RelayedMerkleRoot {
+            queue_id: Some(1),
             block: GearBlockNumber(41),
             block_hash: [3; 32].into(),
             authority_set_id: AuthoritySetId(1),
@@ -396,7 +559,14 @@ mod tests {
         );
         assert_eq!(roots.len(), 100);
         assert_eq!(
-            roots.find(AuthoritySetId(1), GearBlockNumber(41), 2300, 300),
+            roots.find(
+                AuthoritySetId(1),
+                AuthoritySetId(1).0,
+                GearBlockNumber(41),
+                None,
+                2300,
+                300
+            ),
             Some(&backfill.root)
         );
         let restored = MerkleRoots::from_qualified(roots.qualified_roots(), 100).unwrap();
@@ -406,6 +576,7 @@ mod tests {
     #[test]
     fn messages() {
         let root = RelayedMerkleRoot {
+            queue_id: Some(1_183),
             block: GearBlockNumber(16_881_826),
             block_hash: hex!("410d4f4a053a00a32b3655350aa8bde8d458ff0d271ff9927a79fe0f7620f848")
                 .into(),
@@ -416,6 +587,8 @@ mod tests {
         };
         let data = [
             accumulator::Request {
+                queue_id: 1_180,
+                excluded_root: None,
                 block: GearBlockNumber(16_883_172),
                 block_hash: hex!(
                     "38f753a5d02c81e91ff8b3950c2cd03c526ced9abc0b6ef29803ee4250a0df85"
@@ -426,6 +599,8 @@ mod tests {
                 source: ActorId::zero(),
             },
             accumulator::Request {
+                queue_id: 1_183,
+                excluded_root: None,
                 block: GearBlockNumber(16_883_289),
                 block_hash: hex!(
                     "74dcef50f0cf4299a0774b147a748f3d5961d913afb9d0e74868a298255edea2"
@@ -436,6 +611,8 @@ mod tests {
                 source: ActorId::zero(),
             },
             accumulator::Request {
+                queue_id: 1_183,
+                excluded_root: None,
                 block: GearBlockNumber(16_881_824),
                 block_hash: hex!(
                     "24b437d833fc6b7e9aea9d987ca1411ae293d340427da57dd7d9888fda8b16a2"
@@ -446,6 +623,8 @@ mod tests {
                 source: ActorId::zero(),
             },
             accumulator::Request {
+                queue_id: 1_184,
+                excluded_root: None,
                 block: GearBlockNumber(16_883_636),
                 block_hash: hex!(
                     "410d4f4a053a00a32b3655350aa8bde8d458ff0d271ff9927a79fe0f7620f848"
@@ -490,6 +669,7 @@ mod tests {
         let base_timestamp = 1000u64;
 
         let root = RelayedMerkleRoot {
+            queue_id: Some(1_183),
             block: GearBlockNumber(16_881_826),
             block_hash: hex!("410d4f4a053a00a32b3655350aa8bde8d458ff0d271ff9927a79fe0f7620f848")
                 .into(),
@@ -501,6 +681,8 @@ mod tests {
 
         let data = [
             accumulator::Request {
+                queue_id: 1_183,
+                excluded_root: None,
                 block: GearBlockNumber(16_881_800),
                 block_hash: hex!(
                     "38f753a5d02c81e91ff8b3950c2cd03c526ced9abc0b6ef29803ee4250a0df85"
@@ -511,6 +693,8 @@ mod tests {
                 source: actor_fast, // Should be drained with delay=100
             },
             accumulator::Request {
+                queue_id: 1_183,
+                excluded_root: None,
                 block: GearBlockNumber(16_881_825),
                 block_hash: hex!(
                     "74dcef50f0cf4299a0774b147a748f3d5961d913afb9d0e74868a298255edea2"
@@ -521,6 +705,8 @@ mod tests {
                 source: actor_medium, // Should NOT be drained with delay=500
             },
             accumulator::Request {
+                queue_id: 1_183,
+                excluded_root: None,
                 block: GearBlockNumber(16_881_820),
                 block_hash: hex!(
                     "24b437d833fc6b7e9aea9d987ca1411ae293d340427da57dd7d9888fda8b16a2"
@@ -589,6 +775,7 @@ mod tests {
         let actor = ActorId::from([42; 32]);
 
         let root = RelayedMerkleRoot {
+            queue_id: Some(1),
             block: GearBlockNumber(100),
             block_hash: hex!("410d4f4a053a00a32b3655350aa8bde8d458ff0d271ff9927a79fe0f7620f848")
                 .into(),
@@ -599,6 +786,8 @@ mod tests {
         };
 
         let message = accumulator::Request {
+            queue_id: 1,
+            excluded_root: None,
             block: GearBlockNumber(100),
             block_hash: hex!("38f753a5d02c81e91ff8b3950c2cd03c526ced9abc0b6ef29803ee4250a0df85")
                 .into(),
@@ -653,6 +842,8 @@ mod tests {
         let data = [
             // Authority set 1000, block 100
             accumulator::Request {
+                queue_id: 1000,
+                excluded_root: None,
                 block: GearBlockNumber(100),
                 block_hash: hex!(
                     "1111111111111111111111111111111111111111111111111111111111111111"
@@ -664,6 +855,8 @@ mod tests {
             },
             // Authority set 1000, block 200
             accumulator::Request {
+                queue_id: 1000,
+                excluded_root: None,
                 block: GearBlockNumber(200),
                 block_hash: hex!(
                     "2222222222222222222222222222222222222222222222222222222222222222"
@@ -675,6 +868,8 @@ mod tests {
             },
             // Authority set 1001, block 50
             accumulator::Request {
+                queue_id: 1001,
+                excluded_root: None,
                 block: GearBlockNumber(50),
                 block_hash: hex!(
                     "3333333333333333333333333333333333333333333333333333333333333333"
@@ -686,6 +881,8 @@ mod tests {
             },
             // Authority set 1001, block 150
             accumulator::Request {
+                queue_id: 1001,
+                excluded_root: None,
                 block: GearBlockNumber(150),
                 block_hash: hex!(
                     "4444444444444444444444444444444444444444444444444444444444444444"
@@ -702,9 +899,9 @@ mod tests {
             messages.add(message.clone()).unwrap();
         }
 
-        // Test draining with authority set 1000, block 150
-        // The drain_all logic drains messages with the same authority set ID and block <= target block
+        // Drain only the matching QueueId and covered source height.
         let root = RelayedMerkleRoot {
+            queue_id: Some(1000),
             block: GearBlockNumber(150),
             block_hash: hex!("5555555555555555555555555555555555555555555555555555555555555555")
                 .into(),
@@ -716,16 +913,14 @@ mod tests {
 
         let removed: Vec<_> = messages.drain_all(&root).collect();
 
-        // Should drain messages with the same authority set (1000) and block <= 150
-        // Based on the compare function and drain_all logic:
-        // It drains messages from the start of the authority set to the target block
-        assert_eq!(removed.len(), 1); // Only block 100 matches (authority_set_id=1000, block<=150)
+        assert_eq!(removed.len(), 1); // Only block 100 matches QueueId 1000 and height <= 150.
         assert_eq!(removed[0].authority_set_id, AuthoritySetId(1000));
         assert_eq!(removed[0].block, GearBlockNumber(100));
         assert_eq!(messages.len(), 3);
 
-        // Test draining with higher authority set and block
+        // A different QueueId drains only its own messages.
         let root2 = RelayedMerkleRoot {
+            queue_id: Some(1001),
             block: GearBlockNumber(250),
             block_hash: hex!("7777777777777777777777777777777777777777777777777777777777777777")
                 .into(),
@@ -751,6 +946,7 @@ mod tests {
 
         // Create merkle roots with different timestamps
         let root1 = RelayedMerkleRoot {
+            queue_id: Some(1000),
             block: GearBlockNumber(100),
             block_hash: hex!("1111111111111111111111111111111111111111111111111111111111111111")
                 .into(),
@@ -761,6 +957,7 @@ mod tests {
         };
 
         let root2 = RelayedMerkleRoot {
+            queue_id: Some(1001),
             block: GearBlockNumber(200),
             block_hash: hex!("2222222222222222222222222222222222222222222222222222222222222222")
                 .into(),
@@ -785,6 +982,8 @@ mod tests {
         let messages_data = [
             // Message that should match with delay
             accumulator::Request {
+                queue_id: 1000,
+                excluded_root: None,
                 block: GearBlockNumber(50),
                 block_hash: hex!(
                     "3333333333333333333333333333333333333333333333333333333333333333"
@@ -796,6 +995,8 @@ mod tests {
             },
             // Message that should match with delay
             accumulator::Request {
+                queue_id: 1001,
+                excluded_root: None,
                 block: GearBlockNumber(150),
                 block_hash: hex!(
                     "4444444444444444444444444444444444444444444444444444444444444444"
@@ -807,6 +1008,8 @@ mod tests {
             },
             // Message that should not match any root due to high delay
             accumulator::Request {
+                queue_id: 1000,
+                excluded_root: None,
                 block: GearBlockNumber(50),
                 block_hash: hex!(
                     "5555555555555555555555555555555555555555555555555555555555555555"

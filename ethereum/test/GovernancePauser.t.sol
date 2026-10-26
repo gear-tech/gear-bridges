@@ -52,7 +52,7 @@ contract GovernancePauserTest is Test, Base {
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(IGovernance.InvalidSource.selector));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.InvalidGovernanceControl.selector));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), false);
     }
@@ -84,7 +84,7 @@ contract GovernancePauserTest is Test, Base {
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(IGovernance.InvalidPayload.selector));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.InvalidGovernanceControl.selector));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), false);
     }
@@ -118,7 +118,7 @@ contract GovernancePauserTest is Test, Base {
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(IGovernance.InvalidPayload.selector));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.InvalidGovernanceControl.selector));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), false);
     }
@@ -126,12 +126,15 @@ contract GovernancePauserTest is Test, Base {
     function test_HandleMessageWithChangeGovernance111() public {
         bytes32 previousGovernance = governancePauser.governance();
         bytes32 newGovernance = bytes32(uint256(0x22));
-        assertEq(ChangeGovernanceMessage({newGovernance: newGovernance}).pack().length, 33);
+        assertEq(
+            ChangeGovernanceMessage({newGovernance: newGovernance}).pack(_control(), address(governancePauser)).length,
+            385
+        );
         VaraMessage memory message = VaraMessage({
             nonce: messageNonce++,
             source: previousGovernance,
             destination: address(governancePauser),
-            payload: ChangeGovernanceMessage({newGovernance: newGovernance}).pack()
+            payload: ChangeGovernanceMessage({newGovernance: newGovernance}).pack(_control(), address(governancePauser))
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 
@@ -191,7 +194,7 @@ contract GovernancePauserTest is Test, Base {
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(IGovernance.InvalidPayload.selector));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.InvalidGovernanceControl.selector));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), false);
     }
@@ -225,7 +228,7 @@ contract GovernancePauserTest is Test, Base {
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(IGovernance.InvalidPayload.selector));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.InvalidGovernanceControl.selector));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), false);
     }
@@ -236,7 +239,7 @@ contract GovernancePauserTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: PauseProxyMessage({proxy: invalidProxy}).pack()
+            payload: PauseProxyMessage({proxy: invalidProxy}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 
@@ -258,7 +261,7 @@ contract GovernancePauserTest is Test, Base {
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(IGovernance.InvalidPayload.selector));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.InvalidGovernanceControl.selector));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), false);
     }
@@ -268,7 +271,7 @@ contract GovernancePauserTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: bytes.concat(PauseProxyMessage({proxy: address(messageQueue)}).pack(), "ff")
+            payload: bytes.concat(PauseProxyMessage({proxy: address(messageQueue)}).pack(_control()), "ff")
         });
         assertEq(messageQueue.isProcessed(message.nonce), false);
 
@@ -290,7 +293,7 @@ contract GovernancePauserTest is Test, Base {
         uint256 leafIndex = 0;
         bytes32[] memory proof2 = new bytes32[](0);
 
-        vm.expectRevert(abi.encodeWithSelector(IGovernance.InvalidPayload.selector));
+        vm.expectRevert(abi.encodeWithSelector(IMessageQueue.InvalidGovernanceControl.selector));
         messageQueue.processMessage(blockNumber, totalLeaves, leafIndex, message, proof2);
         assertEq(messageQueue.isProcessed(message.nonce), false);
     }

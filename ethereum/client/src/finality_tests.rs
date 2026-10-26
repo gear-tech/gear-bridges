@@ -30,10 +30,15 @@ struct State {
     receipt: Option<TransactionReceipt>,
     receipts: Vec<TransactionReceipt>,
     nonce: u64,
+    latest_nonce: Option<u64>,
+    gas_estimate: u64,
+    priority_fee: u128,
     account_proofs: BTreeMap<B256, alloy::rpc::types::EIP1186AccountProofResponse>,
     processed: bool,
     root: B256,
     requests: Vec<Value>,
+    logs: Vec<RpcLog>,
+    header_gate: Option<(u64, Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
 
 struct Fixture {
@@ -71,10 +76,15 @@ impl Fixture {
             receipt: None,
             receipts: vec![],
             nonce: 7,
+            latest_nonce: None,
+            gas_estimate: 30_000,
+            priority_fee: 1,
             account_proofs,
             processed: true,
             root: B256::repeat_byte(67),
             requests: vec![],
+            logs: Vec::new(),
+            header_gate: None,
         }));
         let shared = state.clone();
         let server = tokio::spawn(async move {
@@ -112,6 +122,21 @@ impl Fixture {
                             .unwrap();
                         }
                     };
+                    let gate = {
+                        let mut state = shared.lock().unwrap();
+                        if state.header_gate.as_ref().is_some_and(|(number, _, _)| {
+                            request["method"] == "eth_getBlockByNumber"
+                                && request["params"][0] == format!("0x{number:x}")
+                        }) {
+                            state.header_gate.take()
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some((_, reached, release)) = gate {
+                        reached.notify_one();
+                        release.notified().await;
+                    }
                     // Inclusion faults target the full-body fetch, not Beacon's header binding.
                     let inclusion_request =
                         request["method"] != "eth_getBlockByHash" || request["params"][1] == true;
@@ -143,7 +168,7 @@ impl Fixture {
                             let result = match request["method"].as_str().unwrap() {
                                 "eth_chainId" => json!(format!("0x{:x}", state.chain_id)),
                                 "eth_getBlockByNumber" => {
-                                    let number = if request["params"][0] == "finalized" { state.tip as u64 }
+                                    let number = if request["params"][0] == "finalized" || request["params"][0] == "latest" { state.tip as u64 }
                                     else { u64::from_str_radix(request["params"][0].as_str().unwrap().trim_start_matches("0x"), 16).unwrap() };
                                     if state.missing.contains(&number) { Value::Null }
                                     else { serde_json::to_value(state.chain.get(number as usize)).unwrap() }
@@ -155,7 +180,17 @@ impl Fixture {
                                 }
                                 "eth_getTransactionReceipt" => serde_json::to_value(&state.receipt).unwrap(),
                                 "eth_getBlockReceipts" => serde_json::to_value(&state.receipts).unwrap(),
-                                "eth_getTransactionCount" => json!(format!("0x{:x}", state.nonce)),
+                                "eth_getTransactionCount" => json!(format!("0x{:x}",
+                                    if request["params"][1] == "pending" { state.nonce }
+                                    else { state.latest_nonce.unwrap_or(state.nonce) })),
+                                "eth_estimateGas" => json!(format!("0x{:x}", state.gas_estimate)),
+                                "eth_feeHistory" => json!({
+                                    "oldestBlock": "0x0", "baseFeePerGas": vec!["0x1"; 11],
+                                    "gasUsedRatio": vec![0.5; 10],
+                                    "reward": vec![vec![format!("0x{:x}", state.priority_fee)]; 10]
+                                }),
+                                "eth_maxPriorityFeePerGas" => json!(format!("0x{:x}", state.priority_fee)),
+                                "eth_getLogs" => serde_json::to_value(&state.logs).unwrap(),
                                 "eth_getProof" => {
                                     let hash: B256 = serde_json::from_value(request["params"][2]["blockHash"].clone()).unwrap();
                                     serde_json::to_value(state.account_proofs.get(&hash)).unwrap()
@@ -305,7 +340,7 @@ async fn wrong_network_outage_and_private_forks_never_qualify_or_replace_fences(
         .verified_finalized_view_with_archive(&cleanup.directory, chain[0].header.hash)
         .await?;
     let checkpoint = view.checkpoint().clone();
-    let fence = std::fs::read(cleanup.directory.join("fence.json"))?;
+    let fence = std::fs::read(cleanup.directory.join("verified-head.json"))?;
     for fault in ["network", "genesis", "outage", "private", "malformed"] {
         {
             let mut state = witness.state.lock().unwrap();
@@ -327,7 +362,7 @@ async fn wrong_network_outage_and_private_forks_never_qualify_or_replace_fences(
             "{fault}"
         );
         assert_eq!(
-            std::fs::read(cleanup.directory.join("fence.json"))?,
+            std::fs::read(cleanup.directory.join("verified-head.json"))?,
             fence,
             "{fault}"
         );
@@ -777,16 +812,16 @@ async fn legacy_archives_all_requalify_before_checkpoint_promotion_and_restart()
     let genesis = chain[0].header.hash;
     let first = cleanup.directory.join("first");
     let second = cleanup.directory.join("second");
-    finality_archive::HeaderArchive::open(&first)?.witness(
-        genesis,
-        &chain[2].header.inner,
-        None,
-    )?;
-    finality_archive::HeaderArchive::open(&second)?.witness(
-        genesis,
-        &chain[4].header.inner,
-        None,
-    )?;
+    // Reconstructed from supplied HTML, audited 7fe1b032: preserve legacy obligations.
+    for (directory, height) in [(&first, 2), (&second, 4)] {
+        std::fs::create_dir_all(directory)?;
+        finality_archive::atomic_json(
+            &directory.join("fence.json"),
+            &json!({
+                "genesis": genesis, "tips": [&chain[height].header.inner]
+            }),
+        )?;
+    }
     register_archive(&first, genesis)?;
     register_archive(&second, genesis)?;
     register_archive(&first.join("."), genesis)?;
@@ -800,8 +835,11 @@ async fn legacy_archives_all_requalify_before_checkpoint_promotion_and_restart()
     api.verified_finalized_view().await?;
     for directory in [&first, &second] {
         let fence: Value = serde_json::from_slice(&std::fs::read(directory.join("fence.json"))?)?;
-        assert_eq!(fence["quorum_checkpoint"]["schema_version"], 2);
-        assert_eq!(fence["tips"].as_array().unwrap().len(), 1);
+        assert!(
+            fence.get("quorum_checkpoint").is_none(),
+            "legacy bytes are never promoted in place"
+        );
+        assert!(directory.join("verified-head.json").is_file());
     }
     let old = std::fs::read(second.join("fence.json"))?;
     drop(api);
@@ -830,7 +868,11 @@ async fn legacy_archives_all_requalify_before_checkpoint_promotion_and_restart()
     primary.state.lock().unwrap().missing.insert(7);
     assert!(api.verified_finalized_view().await.is_err());
     let partial: Value = serde_json::from_slice(&std::fs::read(first.join("fence.json"))?)?;
-    assert_eq!(partial["tips"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        partial["tips"].as_array().unwrap().len(),
+        1,
+        "unqualified tip must not grow fence"
+    );
     primary.state.lock().unwrap().missing.clear();
     api.verified_finalized_view().await?;
     std::fs::write(second.join("fence.json"), b"corrupt")?;
@@ -1458,21 +1500,21 @@ async fn data_witness_endpoint_policy_accepts_secure_and_distinct_loopback_confi
         (primary.url.as_str(), witness.url.as_str()),
         ("http://[::1]:12340", "http://[::1]:12341"),
     ] {
-        let mut signer = api.clone();
-        signer.url = Url::parse(primary_url)?;
-        let mut reader = polling.clone();
-        reader.url = Url::parse(primary_url)?;
-        let signer = signer
-            .with_data_witness(witness_url, 31337, chain[0].header.hash)
-            .await?;
-        let reader = reader
-            .with_data_witness(witness_url, 31337, chain[0].header.hash)
-            .await?;
-        assert!(signer.raw_witness_provider().is_ok());
-        assert!(reader.raw_witness_provider().is_ok());
-        assert!(signer.finality_identity().is_err());
-        assert!(reader.finality_identity().is_err());
+        assert_ne!(
+            finality_endpoint_identity(&Url::parse(primary_url)?)?,
+            finality_endpoint_identity(&Url::parse(witness_url)?)?,
+        );
     }
+    // Admission also qualifies the live witness identity; only owned fixtures
+    // can exercise that step without relying on external DNS or RPC services.
+    let signer = api
+        .with_data_witness(&witness.url, 31337, chain[0].header.hash)
+        .await?;
+    let reader = polling
+        .with_data_witness(&witness.url, 31337, chain[0].header.hash)
+        .await?;
+    assert!(signer.finality_identity().is_err());
+    assert!(reader.finality_identity().is_err());
     Ok(())
 }
 
@@ -1615,5 +1657,273 @@ async fn execution_rpc_redirects_never_contact_the_target() -> AnyResult<()> {
             .await
             .is_err()
     );
+    Ok(())
+}
+
+// Reconstructed from supplied HTML / audited7fe1b032; not the missing original PoC bundle.
+#[tokio::test]
+async fn supplied_vb43_unqualified_tips_do_not_grow_and_derived_pointer_recovers() -> AnyResult<()>
+{
+    let _serial = super::tests::ANCESTRY_TEST_LOCK.lock().await;
+    let chain = chain(181, 5);
+    let genesis = chain[0].header.hash;
+    let cleanup = temp_archive(genesis);
+    let archive = finality_archive::HeaderArchive::open(&cleanup.directory)?;
+    for header in &chain {
+        archive.witness(genesis, &header.header.inner, None)?;
+    }
+    assert!(!cleanup.directory.join("fence.json").exists());
+    assert!(!cleanup.directory.join("verified").exists());
+    drop(archive);
+    let primary = Fixture::new(chain.clone(), 4).await?;
+    let witness = Fixture::new(chain.clone(), 4).await?;
+    let api = primary.api(&witness).await?;
+    api.enable_finality_archive(&cleanup.directory, genesis)
+        .await?;
+    api.verified_finalized_view().await?;
+    let pointer = cleanup.directory.join("verified-head.json");
+    let expected = std::fs::read(&pointer)?;
+    std::fs::write(&pointer, b"damaged derived pointer")?;
+    api.verified_finalized_view().await?;
+    assert_eq!(std::fs::read(&pointer)?, expected);
+    let record = std::fs::read_dir(cleanup.directory.join("verified"))?
+        .next()
+        .unwrap()?
+        .path();
+    std::fs::write(&record, b"conflicting immutable original")?;
+    assert!(api.verified_finalized_view().await.is_err());
+    assert_eq!(std::fs::read(record)?, b"conflicting immutable original");
+    assert_eq!(std::fs::read(pointer)?, expected);
+    Ok(())
+}
+
+#[tokio::test]
+async fn supplied_o404_archive_attached_during_view_waits_for_next_qualification() -> AnyResult<()>
+{
+    let _serial = super::tests::ANCESTRY_TEST_LOCK.lock().await;
+    let chain = chain(182, 5);
+    let genesis = chain[0].header.hash;
+    let cleanup = temp_archive(genesis);
+    let primary = Fixture::new(chain.clone(), 4).await?;
+    let witness = Fixture::new(chain.clone(), 4).await?;
+    let api = primary.api(&witness).await?;
+    api.verified_finalized_view().await?;
+    let reached = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    witness.state.lock().unwrap().header_gate = Some((4, reached.clone(), release.clone()));
+    let pending = api.clone();
+    let task = tokio::spawn(async move { pending.verified_finalized_view().await });
+    tokio::time::timeout(Duration::from_secs(10), reached.notified()).await?;
+    let mut conflicting = chain[3].header.inner.clone();
+    conflicting.extra_data = vec![99].into();
+    finality_archive::atomic_json(
+        &cleanup.directory.join("fence.json"),
+        &json!({
+            "genesis": genesis, "tips": [conflicting]
+        }),
+    )?;
+    let original = std::fs::read(cleanup.directory.join("fence.json"))?;
+    api.enable_finality_archive(&cleanup.directory, genesis)
+        .await?;
+    release.notify_one();
+    task.await??;
+    assert!(!cleanup.directory.join("verified-head.json").exists());
+    assert!(api.verified_finalized_view().await.is_err());
+    assert_eq!(
+        std::fs::read(cleanup.directory.join("fence.json"))?,
+        original
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn supplied_vb44_reconnect_replaces_dead_witness_transport() -> AnyResult<()> {
+    let _serial = super::tests::ANCESTRY_TEST_LOCK.lock().await;
+    let chain = chain(183, 4);
+    let _cleanup = temp_archive(chain[0].header.hash);
+    let primary = Fixture::new(chain.clone(), 4).await?;
+    let witness = Fixture::new(chain, 4).await?;
+    let mut api = primary.api(&witness).await?;
+    let old = api.verified_finalized_view().await?.checkpoint().clone();
+    let socket = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let dead = Url::parse(&format!("http://{}", socket.local_addr()?))?;
+    drop(socket);
+    api.contracts.witness.as_mut().unwrap().provider =
+        RootProvider::builder().connect_client(connect_rpc(&dead, Some(0), None).await?);
+    assert!(api.verified_finalized_view().await.is_err());
+    let replacement = api.reconnect().await?;
+    assert!(Arc::ptr_eq(
+        &api.submission_lock,
+        &replacement.submission_lock
+    ));
+    let mut view = replacement.verified_finalized_view().await?;
+    view.verify_checkpoint(replacement.raw_provider(), &old)
+        .await?;
+    let mut polling = primary.polling(&witness).await?;
+    polling.witness.as_mut().unwrap().provider =
+        api.contracts.witness.as_ref().unwrap().provider.clone();
+    assert!(polling.verified_finalized_view().await.is_err());
+    let polling = polling.reconnect().await?;
+    let mut view = polling.verified_finalized_view().await?;
+    view.verify_checkpoint(&*polling, &old).await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn supplied_vb45_empty_discovery_disagreement_and_nonce_admission() -> AnyResult<()> {
+    let _serial = super::tests::ANCESTRY_TEST_LOCK.lock().await;
+    let (chain, _, raw) = receipt_chain(184, true).await?;
+    let _cleanup = temp_archive(chain[0].header.hash);
+    let primary = Fixture::new(chain.clone(), 1).await?;
+    let witness = Fixture::new(chain.clone(), 1).await?;
+    let api = primary.api(&witness).await?;
+    assert_eq!(api.qualified_signing_nonce().await?, 7);
+    assert_eq!(api.qualified_account_nonces(api.public_key).await?, (7, 7));
+    witness.state.lock().unwrap().latest_nonce = Some(8);
+    assert!(api.qualified_account_nonces(api.public_key).await.is_err());
+    primary.state.lock().unwrap().latest_nonce = Some(8);
+    assert!(
+        api.qualified_account_nonces(api.public_key).await.is_err(),
+        "pending below latest"
+    );
+    primary.state.lock().unwrap().latest_nonce = None;
+    witness.state.lock().unwrap().latest_nonce = None;
+    witness.state.lock().unwrap().nonce = 8;
+    assert!(api.qualified_signing_nonce().await.is_err());
+    primary.state.lock().unwrap().nonce = 6;
+    witness.state.lock().unwrap().nonce = 6;
+    assert!(api.qualified_signing_nonce().await.is_err());
+    let polling = primary.polling(&witness).await?;
+    witness.state.lock().unwrap().logs = vec![RpcLog::default()];
+    assert!(polling
+        .fetch_fee_paid_events_txs_at(H160::repeat_byte(1), 1, chain[1].header.hash.0.into())
+        .await
+        .is_err());
+    assert!(polling
+        .fetch_deposit_events_at(H160::repeat_byte(1), 1, chain[1].header.hash.0.into())
+        .await
+        .is_err());
+    assert!(api.fetch_merkle_roots_in_range(0, 1).await.is_err());
+    witness.state.lock().unwrap().logs.clear();
+    assert!(api.fetch_merkle_roots_in_range(0, 1).await?.is_empty());
+    let (config, directory) = primary.beacon_settings().await?;
+    let readonly = EthApi::new(
+        &primary.url,
+        &format!("{:#x}", Address::repeat_byte(9)),
+        None,
+        None,
+        None,
+    )
+    .await?
+    .with_beacon_finality(config, directory)
+    .await?
+    .with_data_witness(&witness.url, 31337, chain[0].header.hash)
+    .await?;
+    assert_eq!(readonly.public_key, Address::ZERO);
+    assert!(matches!(
+        readonly.reserve_submission().await,
+        Err(Error::SignerNotConfigured)
+    ));
+    assert!(matches!(
+        readonly.qualified_signing_nonce().await,
+        Err(Error::SignerNotConfigured)
+    ));
+    assert!(readonly
+        .get_finalized_submission_snapshot(&raw)
+        .await?
+        .is_some());
+    Ok(())
+}
+
+// Reconstructed from supplied HTML / audited7fe1b032 (VB-28), boundary fixture, not runtime settlement.
+#[tokio::test]
+async fn supplied_vb28_gas_admission_precedes_nonce_and_preserves_originals() -> AnyResult<()> {
+    use alloy::{consensus::Transaction, eips::Decodable2718};
+    let _serial = super::tests::ANCESTRY_TEST_LOCK.lock().await;
+    let (chain, _, _) = receipt_chain(185, true).await?;
+    let _cleanup = temp_archive(chain[0].header.hash);
+    let primary = Fixture::new(chain.clone(), 1).await?;
+    let witness = Fixture::new(chain.clone(), 1).await?;
+    let api = primary.api(&witness).await?;
+    let guard = api.reserve_submission().await?;
+    let guard = &guard;
+    let prepare = |api: EthApi| async move {
+        api.prepare_content_message(guard, 1, 1, 0, [1; 32], [2; 32], [3; 20], vec![], vec![])
+            .await
+    };
+    let no_nonce = || {
+        for fixture in [&primary, &witness] {
+            let state = fixture.state.lock().unwrap();
+            assert!(!state.requests.iter().any(|request| matches!(
+                request["method"].as_str(),
+                Some("eth_getTransactionCount" | "eth_sendRawTransaction")
+            )));
+        }
+    };
+    assert!(matches!(
+        prepare(api.clone()).await,
+        Err(Error::SigningPolicy(_))
+    ));
+    no_nonce();
+    let admitted = api.clone().with_max_gas_per_message(Some(30_000));
+    primary.state.lock().unwrap().gas_estimate = 30_001;
+    witness.state.lock().unwrap().gas_estimate = 30_001;
+    assert!(matches!(
+        prepare(admitted.clone()).await,
+        Err(Error::SigningPolicy(_))
+    ));
+    no_nonce();
+    primary.state.lock().unwrap().gas_estimate = 30_000;
+    assert!(matches!(
+        prepare(admitted.clone()).await,
+        Err(Error::SigningPolicy(_))
+    ));
+    no_nonce();
+    witness.state.lock().unwrap().gas_estimate = 30_000;
+    primary.state.lock().unwrap().priority_fee = 3_000_000_000;
+    witness.state.lock().unwrap().priority_fee = 3_000_000_000;
+    assert!(matches!(
+        prepare(admitted.clone()).await,
+        Err(Error::SigningPolicy(_))
+    ));
+    no_nonce();
+    primary.state.lock().unwrap().priority_fee = 1;
+    witness.state.lock().unwrap().priority_fee = 1;
+    let prepared = prepare(admitted.clone()).await?;
+    let envelope =
+        alloy::consensus::TxEnvelope::decode_2718(&mut prepared.raw_transaction.as_slice())?;
+    assert_eq!(envelope.gas_limit(), 30_000);
+    assert_eq!(envelope.nonce(), 7);
+    assert!(envelope.max_fee_per_gas() <= admitted.contracts.max_fee_per_gas);
+    assert!(
+        envelope.max_priority_fee_per_gas().unwrap() <= admitted.contracts.max_priority_fee_per_gas
+    );
+    for fixture in [&primary, &witness] {
+        let state = fixture.state.lock().unwrap();
+        for estimate in state
+            .requests
+            .iter()
+            .filter(|request| request["method"] == "eth_estimateGas")
+        {
+            assert_eq!(
+                estimate["params"][1],
+                serde_json::to_value(BlockId::hash_canonical(chain[1].header.hash))?
+            );
+        }
+    }
+    let original = prepared.raw_transaction.clone();
+    let changed = admitted.with_max_gas_per_message(None);
+    changed.validate_prepared_content_message(
+        &prepared,
+        1,
+        1,
+        0,
+        [1; 32],
+        [2; 32],
+        [3; 20],
+        vec![],
+        vec![],
+    )?;
+    assert_eq!(prepared.raw_transaction, original);
     Ok(())
 }

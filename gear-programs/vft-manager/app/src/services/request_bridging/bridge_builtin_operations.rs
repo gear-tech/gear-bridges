@@ -216,11 +216,7 @@ pub fn reconcile(
         return Err(Error::InvalidReconciliation);
     }
     let Some(info) = msg_tracker_mut().get_message_info(&request) else {
-        return if matches!(evidence.outcome, SourceRequestOutcome::Queued { .. }) {
-            Ok(evidence.outcome)
-        } else {
-            Err(Error::MessageNotFound)
-        };
+        return Ok(evidence.outcome);
     };
     match evidence.outcome.clone() {
         SourceRequestOutcome::Queued {

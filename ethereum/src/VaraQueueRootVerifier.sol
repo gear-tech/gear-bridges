@@ -6,7 +6,7 @@ import {VaraBridgeMetadata} from "src/beefy/VaraBridgeMetadata.sol";
 import {IQueueProgressVerifier} from "src/interfaces/IQueueProgressVerifier.sol";
 import {IVerifier} from "src/interfaces/IVerifier.sol";
 
-/// Authenticates Vara queue snapshots against the client's latest BEEFY root.
+/// Authenticates Vara queue snapshots against an exact retained accepted BEEFY root.
 contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
     BeefyClient public immutable beefyClient;
     address public immutable messageQueue;
@@ -131,11 +131,6 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
         if (!beefyClient.isLive()) {
             return false;
         }
-        bytes32 acceptedRoot = beefyClient.latestMMRRoot();
-        uint64 acceptedBlock = beefyClient.latestBeefyBlock();
-        if (acceptedRoot == bytes32(0) || acceptedBlock == 0) {
-            return false;
-        }
 
         if ((emptyProgress ? root != bytes32(0) : root == bytes32(0)) || !initialized) {
             return false;
@@ -155,7 +150,7 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
         if (uint64(sourceBlock) < beefyClient.mmrStartBlock() || sourceBlock >= anchorBlock) {
             return false;
         }
-        if (anchorBlock != acceptedBlock || anchorRoot != acceptedRoot || anchorRoot == bytes32(0)) {
+        if (!beefyClient.isAcceptedAnchor(anchorBlock, anchorRoot)) {
             return false;
         }
         if (VaraBridgeMetadata.hash(snapshot) != leaf.parachainHeadsRoot) {
@@ -173,7 +168,7 @@ contract VaraQueueRootVerifier is IVerifier, IQueueProgressVerifier {
                 leaf.parachainHeadsRoot
             )
         );
-        return beefyClient.verifyMMRLeafProof(leafHash, items, proofOrder);
+        return beefyClient.verifyMMRLeafProof(anchorBlock, anchorRoot, leafHash, items, proofOrder);
     }
 
     function _bridgeDomain(bytes32 sourceDomain, uint256 chainId, address queue) private pure returns (bytes32) {

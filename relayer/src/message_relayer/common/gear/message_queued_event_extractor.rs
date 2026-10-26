@@ -206,9 +206,15 @@ impl MessageQueuedEventExtractor {
                 .await?,
             )
         };
+        let queue_id = if messages.is_empty() {
+            None
+        } else {
+            Some(super::queue_id_at(&self.api_provider.client(), block_number, block_hash).await?)
+        };
         let messages = messages
             .into_iter()
             .map(|message| MessageInBlock {
+                queue_id,
                 message,
                 block: GearBlockNumber(block_number),
                 block_hash,

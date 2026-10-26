@@ -20,6 +20,7 @@ fn manager_init_config() -> InitConfig {
     InitConfig {
         gear_bridge_builtin: Default::default(),
         historical_proxy_address: Default::default(),
+        minimum_receipt_slot: 1,
         config: Config {
             gas_for_token_ops: 20_000_000_000,
             gas_for_reply_deposit: 10_000_000_000,
@@ -138,6 +139,7 @@ async fn test(supply_type: TokenSupply, amount: U256) -> Result<(bool, U256)> {
         .new(InitConfig {
             gear_bridge_builtin: Default::default(),
             historical_proxy_address: Default::default(),
+            minimum_receipt_slot: 1,
             config: Config {
                 gas_for_token_ops: 10_000_000_000,
                 gas_for_reply_deposit: 10_000_000_000,
@@ -684,7 +686,10 @@ async fn upgrade() -> Result<()> {
     // deploy another VftManager
     let factory = vft_manager_client::VftManagerFactory::new(remoting.clone());
     let vft_manager2_id = factory
-        .new(manager_init_config())
+        .new(InitConfig {
+            minimum_receipt_slot: 32u64.checked_add(1).unwrap(),
+            ..manager_init_config()
+        })
         .with_gas_limit(gas_limit)
         .send_recv(code_id, [salt, salt].concat())
         .await
@@ -706,8 +711,14 @@ async fn upgrade() -> Result<()> {
             .await
             .unwrap();
     }
+    let begin_generation = service
+        .cutover_status()
+        .recv(vft_manager_id)
+        .await
+        .unwrap()
+        .generation;
     service
-        .begin_cutover(vft_manager2_id, 32)
+        .begin_cutover(vft_manager2_id, 32, begin_generation)
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
@@ -1102,7 +1113,7 @@ async fn init() -> Result<()> {
 
     // teleport requests should fail since the VftManager is paused
     let result = service
-        .submit_receipt(0, 0, vec![])
+        .submit_receipt(1, 0, vec![])
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
@@ -1138,21 +1149,24 @@ async fn init() -> Result<()> {
         .map_err(|e| anyhow!("{e:?}"))?
         .is_empty());
 
-    // teleport requests should fail since the ERC20Manager address is not set
-    let result = service
-        .submit_receipt(0, 0, vec![])
-        .with_gas_limit(gas_limit)
-        .send_recv(vft_manager_id)
-        .await
-        .map_err(|e| anyhow!("{e:?}"));
-    assert!(result.is_err(), "result = {result:?}");
+    // Unmapped outbound tokens return a domain error without creating a tracker.
     let result = service
         .request_bridging(Default::default(), 0.into(), H160::from([1u8; 20]))
         .with_gas_limit(gas_limit)
         .send_recv(vft_manager_id)
         .await
-        .map_err(|e| anyhow!("{e:?}"));
-    assert!(result.is_err(), "result = {result:?}");
+        .map_err(|e| anyhow!("{e:?}"))?;
+    assert_eq!(
+        result,
+        Err(vft_manager_client::Error::NoCorrespondingEthAddress)
+    );
+    assert!(service
+        .request_briding_msg_tracker_state(0, 10)
+        .with_gas_limit(gas_limit)
+        .recv(vft_manager_id)
+        .await
+        .map_err(|e| anyhow!("{e:?}"))?
+        .is_empty());
 
     Ok(())
 }
@@ -1572,6 +1586,7 @@ async fn vft_burn_from() -> Result<()> {
         .new(InitConfig {
             gear_bridge_builtin: Default::default(),
             historical_proxy_address: accounts[0].0,
+            minimum_receipt_slot: 12u64.checked_add(1).unwrap(),
             config: service.get_config().recv(vft_manager_id).await.unwrap(),
         })
         .with_gas_limit(gas_limit)
@@ -1785,6 +1800,12 @@ async fn vft_burn_from() -> Result<()> {
         api.total_balance(vft_id).await?,
         wrapper_balance_before_hold
     );
+    let begin_generation = service
+        .cutover_status()
+        .recv(vft_manager_id)
+        .await
+        .unwrap()
+        .generation;
     send_admin_batch(
         &api,
         vec![
@@ -1794,7 +1815,11 @@ async fn vft_burn_from() -> Result<()> {
             ),
             (
                 vft_manager_id,
-                vft_manager_client::vft_manager::io::BeginCutover::encode_call(destination, 12),
+                vft_manager_client::vft_manager::io::BeginCutover::encode_call(
+                    destination,
+                    12,
+                    begin_generation,
+                ),
             ),
             (
                 destination,
@@ -1980,6 +2005,7 @@ async fn deploy_programs(
         .new(InitConfig {
             gear_bridge_builtin: Default::default(),
             historical_proxy_address: user_id,
+            minimum_receipt_slot: 1,
             config: Config {
                 gas_for_token_ops: 20_000_000_000,
                 gas_for_reply_deposit: 20_000_000_000,
@@ -2102,7 +2128,7 @@ async fn submit_receipt_works() -> Result<()> {
 
     // Send `submit_receipt` request to Vft-manager
     let result = service
-        .submit_receipt(0, 1, receipt_rlp)
+        .submit_receipt(1, 1, receipt_rlp)
         .with_gas_limit(gas_limit / 100 * 95)
         .send_recv(vft_manager_id)
         .await
@@ -2162,7 +2188,7 @@ async fn submit_receipt_works() -> Result<()> {
         .await
         .map_err(|e| anyhow!("{e:?}"))?;
 
-    assert_eq!(txs, vec![(0, 1)]);
+    assert_eq!(txs, vec![(1, 1)]);
     let token = vft_client::Vft::new(remoting.clone());
     assert_eq!(
         token.balance_of(user_id).recv(vft_token_id).await.unwrap(),
@@ -2184,14 +2210,14 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
     let gas = api.block_gas_limit().unwrap();
     let mut service = vft_manager_client::VftManager::new(remoting.clone());
     assert_eq!(
-        service.receipt_status(0, 1).recv(manager).await.unwrap(),
+        service.receipt_status(1, 1).recv(manager).await.unwrap(),
         ReceiptStatus::Unknown
     );
     let amount = U256::from(17_u64);
     let receipt = crate::create_receipt_rlp(H160([1; 20]), H160([99; 20]), user, erc20, amount);
     let mut listener = api.subscribe().await?;
     let result = service
-        .submit_receipt(0, 1, receipt.clone())
+        .submit_receipt(1, 1, receipt.clone())
         .with_gas_limit(gas)
         .send_recv(manager)
         .await
@@ -2231,10 +2257,10 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
         vec![]
     );
     assert_eq!(
-        service.receipt_status(0, 1).recv(manager).await.unwrap(),
+        service.receipt_status(1, 1).recv(manager).await.unwrap(),
         ReceiptStatus::Reserved
     );
-    let rejected = service.receipt_deposits(0, 1).recv(manager).await.unwrap();
+    let rejected = service.receipt_deposits(1, 1).recv(manager).await.unwrap();
     assert_eq!(rejected.len(), 1);
     assert_eq!(rejected[0].outcome, ReceiptDepositOutcome::Retryable);
     assert!(rejected[0].child.is_some());
@@ -2252,24 +2278,24 @@ async fn error_in_vft_propagated_correctly() -> Result<()> {
         .await
         .unwrap();
     service
-        .submit_receipt(0, 1, receipt.clone())
+        .submit_receipt(1, 1, receipt.clone())
         .with_gas_limit(gas)
         .send_recv(manager)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(
-        service.receipt_status(0, 1).recv(manager).await.unwrap(),
+        service.receipt_status(1, 1).recv(manager).await.unwrap(),
         ReceiptStatus::Processed
     );
-    let settled = service.receipt_deposits(0, 1).recv(manager).await.unwrap();
+    let settled = service.receipt_deposits(1, 1).recv(manager).await.unwrap();
     assert_eq!(settled[0].outcome, ReceiptDepositOutcome::Settled);
     assert_ne!(settled[0].child, rejected[0].child);
     assert_eq!(vft.balance_of(user).recv(token).await.unwrap(), amount);
     assert_eq!(vft.total_supply().recv(token).await.unwrap(), amount);
     assert_eq!(
         service
-            .submit_receipt(0, 1, receipt)
+            .submit_receipt(1, 1, receipt)
             .with_gas_limit(gas)
             .send_recv(manager)
             .await
@@ -2326,7 +2352,7 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
 
     // Send `submit_receipt` request to Vft-manager
     let reply_ticket = service
-        .submit_receipt(0, 1, receipt_rlp.clone())
+        .submit_receipt(1, 1, receipt_rlp.clone())
         .with_gas_limit(gas_limit / 100 * 95)
         .send(vft_manager_id)
         .await
@@ -2463,14 +2489,14 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
     assert_eq!(result, Err(Error::InvalidReply));
     assert_eq!(
         service
-            .receipt_status(0, 1)
+            .receipt_status(1, 1)
             .recv(vft_manager_id)
             .await
             .unwrap(),
         ReceiptStatus::Reserved
     );
     let retained = service
-        .receipt_deposits(0, 1)
+        .receipt_deposits(1, 1)
         .recv(vft_manager_id)
         .await
         .unwrap();
@@ -2479,7 +2505,7 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
     assert_eq!(retained[0].outcome, ReceiptDepositOutcome::Unknown);
     assert_eq!(
         service
-            .reconcile_receipt(0, 1)
+            .reconcile_receipt(1, 1)
             .with_gas_limit(gas_limit)
             .send_recv(vft_manager_id)
             .await
@@ -2488,7 +2514,7 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
     );
     assert_eq!(
         service
-            .submit_receipt(0, 1, receipt_rlp)
+            .submit_receipt(1, 1, receipt_rlp)
             .with_gas_limit(gas_limit)
             .send_recv(vft_manager_id)
             .await
@@ -2497,7 +2523,7 @@ async fn illegal_reply_in_handle_reply() -> Result<()> {
     );
     assert_eq!(
         service
-            .receipt_deposits(0, 1)
+            .receipt_deposits(1, 1)
             .recv(vft_manager_id)
             .await
             .unwrap(),
@@ -2545,7 +2571,7 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
 
     // Send `submit_receipt` request to Vft-manager
     let result = service
-        .submit_receipt(0, 1, receipt_rlp)
+        .submit_receipt(1, 1, receipt_rlp)
         .with_gas_limit(gas_limit / 100 * 95)
         .send_recv(vft_manager_id)
         .await
@@ -2611,7 +2637,7 @@ async fn vft_token_operation_timeout_works() -> Result<()> {
     assert!(txs.is_empty());
     assert_eq!(
         service
-            .receipt_status(0, 1)
+            .receipt_status(1, 1)
             .recv(vft_manager_id)
             .await
             .unwrap(),

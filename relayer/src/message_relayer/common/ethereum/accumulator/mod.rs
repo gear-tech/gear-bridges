@@ -21,6 +21,9 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
     pub authority_set_id: AuthoritySetId,
+    pub queue_id: u64,
+    /// One scheduling-cycle exclusion after unavailable proof evidence, never durable absence.
+    pub excluded_root: Option<RelayedMerkleRoot>,
     pub block: GearBlockNumber,
     pub block_hash: H256,
     pub tx_uuid: Uuid,
@@ -38,14 +41,6 @@ pub enum Response {
 
     /// Accumulator buffer is full and the message cannot be processed.
     Overflowed(Request),
-
-    /// Message is stuck and cannot be processed.
-    Stuck {
-        authority_set_id: AuthoritySetId,
-        block: GearBlockNumber,
-        tx_uuid: Uuid,
-        merkle_root: RelayedMerkleRoot,
-    },
 }
 pub struct RootUpdate {
     pub root: QualifiedMerkleRoot,
@@ -88,16 +83,21 @@ impl AccumulatorIo {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn send_message(
         &self,
         tx_uuid: Uuid,
         authority_set_id: AuthoritySetId,
+        queue_id: u64,
+        excluded_root: Option<RelayedMerkleRoot>,
         block: GearBlockNumber,
         block_hash: H256,
         source: ActorId,
     ) -> bool {
         let request = Request {
             authority_set_id,
+            queue_id,
+            excluded_root,
             block,
             block_hash,
             tx_uuid,
@@ -217,13 +217,10 @@ async fn run_inner(
             _ = poll_interval.tick() => {
                 let latest_block = this.eth_api.latest_block_number().await?;
 
-                if latest_block <= last_block {
-                    continue;
+                if latest_block > last_block {
+                    last_block = latest_block;
+                    last_timestamp = this.eth_api.get_block_timestamp(latest_block).await?;
                 }
-                last_block = latest_block;
-
-                let timestamp = this.eth_api.get_block_timestamp(latest_block).await?;
-                last_timestamp = timestamp;
 
                 let merkle_roots = this.merkle_roots.read().await;
                 for (merkle_root, message) in this.messages.drain_timestamp(last_timestamp, &message_delay, &merkle_roots) {
@@ -238,6 +235,7 @@ async fn run_inner(
                         return Ok(());
                     };
                 }
+                this.messages.retry_unavailable_candidates();
             }
             message = requests.recv() => {
                 match message {
@@ -245,7 +243,8 @@ async fn run_inner(
                         let merkle_roots = this.merkle_roots.read().await;
                         let delay = message_delay(message.source);
                         if let Some(merkle_root) =
-                            merkle_roots.find(message.authority_set_id, message.block, last_timestamp, delay)
+                            merkle_roots.find(message.authority_set_id, message.queue_id, message.block, message.excluded_root, last_timestamp, delay)
+                                .filter(|_| message.excluded_root.is_none())
                         {
                             log::trace!("Found merkle root for the message '{message:?}' with delay = {delay:?}");
                             messages_out.send(Response::Success {
@@ -282,25 +281,15 @@ async fn run_inner(
                 let RootUpdate { root: merkle_root, acknowledgement } = update;
 
                 let added = this.merkle_roots.write().await.add(merkle_root);
-                let roots = this.merkle_roots.read().await;
 
                 match added {
                     Ok(Added::Ok) => {}
 
-                    Ok(Added::Removed(merkle_root_old)) if roots.find(merkle_root_old.authority_set_id, merkle_root_old.block, u64::MAX, 0).is_none() => {
-                        log::warn!("Removing merkle root = {merkle_root_old:?}");
-                        let messages = this.messages.drain_all(&merkle_root_old);
-                        for message in messages {
-                            log::error!("Remove stuck message = {message:?}");
-                            messages_out.send(Response::Stuck {
-                                authority_set_id: message.authority_set_id,
-                                block: message.block,
-                                tx_uuid: message.tx_uuid,
-                                merkle_root: merkle_root_old,
-                            })?;
-                        }
+                    Ok(Added::Removed(merkle_root_old)) => {
+                        // Eviction bounds the cache, not the lifetime of a liability.
+                        // A later cumulative publication may still cover waiting messages.
+                        log::debug!("Evicted retained root {merkle_root_old:?}");
                     }
-                    Ok(Added::Removed(_)) => {}
 
                     Err(RootAddError::Conflict) => {
                         let _ = acknowledgement.map(|ack| ack.send(Err(anyhow::anyhow!("Conflicting finalized root provenance; HOLD"))));
@@ -311,7 +300,6 @@ async fn run_inner(
                         continue;
                     }
                 }
-                drop(roots);
 
                 log::trace!("Drain messages for merkle root = {merkle_root:?}, current timestamp = {last_timestamp}");
                 for message in this.messages.drain(&merkle_root, last_timestamp, &message_delay) {

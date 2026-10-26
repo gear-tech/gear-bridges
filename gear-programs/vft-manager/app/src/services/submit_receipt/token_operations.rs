@@ -36,12 +36,26 @@ pub(super) enum ChildFailure {
     UnlockFalse,
 }
 static mut CHILDREN: Option<collections::BTreeMap<MessageId, TxDetails>> = None;
+static mut ACTIVE_CHILDREN: u64 = 0;
+
+fn finish_child(child: MessageId) {
+    if let Some(details) = children().get_mut(&child) {
+        if !details.terminal {
+            details.terminal = true;
+            unsafe {
+                ACTIVE_CHILDREN = ACTIVE_CHILDREN
+                    .checked_sub(1)
+                    .expect("Child count underflow")
+            };
+        }
+    }
+}
 fn children() -> &'static mut collections::BTreeMap<MessageId, TxDetails> {
     unsafe { gstd::static_mut!(CHILDREN).get_or_insert_with(collections::BTreeMap::new) }
 }
 
 pub(super) fn is_quiescent() -> bool {
-    children().values().all(|child| child.terminal)
+    unsafe { ACTIVE_CHILDREN == 0 }
 }
 
 fn original_details(guard: &super::LogGuard<'_>) -> Option<TxDetails> {
@@ -50,7 +64,7 @@ fn original_details(guard: &super::LogGuard<'_>) -> Option<TxDetails> {
     ((details.slot, details.transaction_index) == guard.key
         && details.log_index == deposit.log_index
         && details.operation_id == deposit.operation_id
-        && details.token_id == deposit.token_id
+        && Some(details.token_id) == deposit.token_id
         && details.receiver == deposit.receiver
         && details.amount == deposit.amount
         && details.erc20_sender == deposit.sender)
@@ -115,7 +129,7 @@ pub(super) fn quiesce_original(guard: &super::LogGuard<'_>) -> Result<(), Error>
     if let Some(child) = guard.child {
         if children().contains_key(&child) {
             original_details(guard).ok_or(Error::InvalidReconciliation)?;
-            children().get_mut(&child).unwrap().terminal = true;
+            finish_child(child);
         }
     }
     Ok(())
@@ -146,8 +160,11 @@ where
     Action::Reply: Encode,
 {
     guard.check()?;
+    if guard.admin.is_none() {
+        VftManager::new().ensure_running()?;
+    }
     let expected_status = super::deposit_status(guard.key, guard.deposit.log_index);
-    let target = guard.deposit.token_id;
+    let target = guard.deposit.token_id.ok_or(Error::InvalidReconciliation)?;
     let authenticated = Rc::new(Cell::new(false));
     let reply = msg::send_bytes_with_gas_for_reply(
         target,
@@ -172,6 +189,9 @@ where
         .map_err(|error| Error::Internal(format!("{error:?}")))?
         .await;
     guard.check()?;
+    if guard.admin.is_none() {
+        VftManager::new().ensure_running()?;
+    }
     if super::deposit_status(guard.key, guard.deposit.log_index) != expected_status {
         return Err(Error::InvalidReconciliation);
     }
@@ -198,19 +218,30 @@ where
     decode_complete_reply::<Action>(&bytes, |e| Error::Internal(format!("{e:?}")))
 }
 
-async fn send<Action>(
+// Keep one dispatch/reply state machine in WASM rather than one per ActionIo type.
+async fn send(
     (slot, transaction_index): (u64, u64),
     deposit: &super::ReceiptDeposit,
-    params: &Action::Params,
     config: &Config,
     action: ChildAction,
-) -> Result<(), Error>
-where
-    Action: ActionIo,
-{
-    let token_id = deposit.token_id;
+) -> Result<(), Error> {
+    VftManager::new().ensure_running()?;
+    let token_id = deposit.token_id.ok_or(Error::InvalidReconciliation)?;
     let log_index = deposit.log_index;
-    let payload = Action::encode_call(params);
+    let payload = match action {
+        ChildAction::Mint => <Mint as ActionIo>::encode_call(&(deposit.receiver, deposit.amount)),
+        ChildAction::Unlock => <TransferFrom as ActionIo>::encode_call(&(
+            Syscall::program_id(),
+            deposit.receiver,
+            deposit.amount,
+        )),
+        ChildAction::Native => <RedeemEscrow as ActionIo>::encode_call(&(
+            deposit.operation_id,
+            Syscall::program_id(),
+            deposit.receiver,
+            deposit.amount,
+        )),
+    };
     let tx_details = TxDetails {
         slot,
         transaction_index,
@@ -235,6 +266,11 @@ where
     .expect("Dispatch/reply funding failed: roll back the entire child dispatch");
     let child = reply.waiting_reply_to;
     children().insert(child, tx_details);
+    unsafe {
+        ACTIVE_CHILDREN = ACTIVE_CHILDREN
+            .checked_add(1)
+            .expect("Child count overflow")
+    };
     super::record_child((slot, transaction_index), log_index, child);
     let guard = super::LogGuard::capture((slot, transaction_index), deposit, false)?;
     let reply = reply
@@ -332,11 +368,11 @@ pub fn handle_persistent_reply() {
             }
         }
     })();
+    finish_child(child);
     if status.is_ok() {
         // Completed progress retains the original child and replay evidence.
         children().remove(&child);
     } else {
-        children().get_mut(&child).unwrap().terminal = true;
         children().get_mut(&child).unwrap().failure = match &status {
             Err(Error::ReplyFailure(_)) => Some(ChildFailure::ErrorReply),
             Err(Error::TokenOperationRejected) => Some(ChildFailure::UnlockFalse),
@@ -369,14 +405,7 @@ pub(super) async fn mint_log(
     deposit: &super::ReceiptDeposit,
     config: &Config,
 ) -> Result<(), Error> {
-    send::<Mint>(
-        key,
-        deposit,
-        &(deposit.receiver, deposit.amount),
-        config,
-        ChildAction::Mint,
-    )
-    .await
+    send(key, deposit, config, ChildAction::Mint).await
 }
 
 pub(super) async fn unlock_log(
@@ -384,14 +413,7 @@ pub(super) async fn unlock_log(
     deposit: &super::ReceiptDeposit,
     config: &Config,
 ) -> Result<(), Error> {
-    send::<TransferFrom>(
-        key,
-        deposit,
-        &(Syscall::program_id(), deposit.receiver, deposit.amount),
-        config,
-        ChildAction::Unlock,
-    )
-    .await
+    send(key, deposit, config, ChildAction::Unlock).await
 }
 
 pub(super) async fn redeem_native_log(
@@ -407,19 +429,7 @@ pub(super) async fn redeem_native_log(
         // A new request must not inherit the completed error attempt's retry permission.
         super::set_deposit_status(key, deposit.log_index, super::DepositStatus::InFlight);
     }
-    send::<RedeemEscrow>(
-        key,
-        deposit,
-        &(
-            deposit.operation_id,
-            Syscall::program_id(),
-            deposit.receiver,
-            deposit.amount,
-        ),
-        config,
-        ChildAction::Native,
-    )
-    .await
+    send(key, deposit, config, ChildAction::Native).await
 }
 
 /// Reconcile the immutable original payout; retry backed wrapped credit, never a new payout.
@@ -441,7 +451,7 @@ pub(super) async fn reconcile_native_log(
     if guard.child.is_none() {
         return Err(Error::InvalidReconciliation);
     }
-    let mode = native_mode(deposit.token_id)?;
+    let mode = native_mode(deposit.token_id.ok_or(Error::InvalidReconciliation)?)?;
     let original = query_native::<GetRedemption>(&guard, &deposit.operation_id, config).await?;
     guard.check()?;
     let mut redemption = original.ok_or(Error::InvalidReconciliation)?;
@@ -525,7 +535,7 @@ pub(super) async fn reconcile_native_log(
                     deposit.receiver,
                     deposit.sender,
                     deposit.amount,
-                    deposit.token_id,
+                    deposit.token_id.ok_or(Error::InvalidReconciliation)?,
                 );
             } else {
                 super::emit_refunded(
@@ -772,7 +782,7 @@ mod tests {
                 transaction_index: 3,
                 erc20_sender: deposit.sender,
                 receiver: deposit.receiver,
-                token_id: deposit.token_id,
+                token_id: deposit.token_id.unwrap(),
                 amount: deposit.amount,
                 log_index: deposit.log_index,
                 action: ChildAction::Native,

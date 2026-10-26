@@ -425,6 +425,32 @@ mod tests {
         }
     }
 
+    fn identity_rpc_app(genesis: alloy::rpc::types::Block) -> axum::Router {
+        axum::Router::new().route(
+            "/",
+            axum::routing::post(move |axum::Json(request): axum::Json<serde_json::Value>| {
+                let genesis = genesis.clone();
+                async move {
+                    let result = match request["method"].as_str().unwrap() {
+                        "eth_chainId" => serde_json::json!("0x7a69"),
+                        "eth_getBlockByNumber" => {
+                            assert!(matches!(
+                                request["params"][0].as_str(),
+                                Some("0x0" | "finalized" | "latest")
+                            ));
+                            serde_json::json!(genesis)
+                        }
+                        "eth_getLogs" => serde_json::json!([]),
+                        method => panic!("unexpected identity fixture RPC: {method}"),
+                    };
+                    axum::Json(serde_json::json!({
+                        "jsonrpc": "2.0", "id": request["id"], "result": result
+                    }))
+                }
+            }),
+        )
+    }
+
     #[tokio::test]
     async fn classifies_http_errors_from_actual_event_readers() {
         for (status, expected) in [(429, RetryDecision::Retry), (401, RetryDecision::Fail)] {
@@ -440,7 +466,21 @@ mod tests {
                 }),
             );
             let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let mut genesis: alloy::rpc::types::Block = Default::default();
+            genesis.header.inner.extra_data = uuid::Uuid::new_v4().as_bytes().to_vec().into();
+            genesis.header.hash = genesis.header.inner.hash_slow();
+            let genesis_hash = genesis.header.hash;
+            let witness_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let witness_endpoint = format!("http://{}", witness_listener.local_addr().unwrap());
+            let witness = tokio::spawn(async move {
+                axum::serve(witness_listener, identity_rpc_app(genesis))
+                    .await
+                    .unwrap()
+            });
             let api = ethereum_client::PollingEthApi::new_with_retries(&endpoint, None, None)
+                .await
+                .unwrap()
+                .with_data_witness(&witness_endpoint, 31337, genesis_hash)
                 .await
                 .unwrap();
             let paid = api
@@ -466,6 +506,7 @@ mod tests {
                 expected
             );
             server.abort();
+            witness.abort();
             assert_eq!(classify_anyhow(&paid), expected);
             assert_eq!(classify_anyhow(&deposit), expected);
         }
@@ -486,19 +527,12 @@ mod tests {
             header: header.clone(),
             ..Default::default()
         };
-        let app = axum::Router::new().route(
-            "/",
-            axum::routing::post(move |axum::Json(request): axum::Json<serde_json::Value>| {
-                let genesis = genesis.clone();
-                async move {
-                    assert_eq!(request["method"], "eth_getBlockByNumber");
-                    assert_eq!(request["params"][0], "0x0");
-                    axum::Json(serde_json::json!({
-                        "jsonrpc": "2.0", "id": request["id"], "result": genesis
-                    }))
-                }
-            }),
-        );
+        let app = identity_rpc_app(genesis);
+        let witness_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let witness_endpoint = format!("http://{}", witness_listener.local_addr().unwrap());
+        let witness_app = app.clone();
+        let witness =
+            tokio::spawn(async move { axum::serve(witness_listener, witness_app).await.unwrap() });
         let (stop, stopped) = tokio::sync::oneshot::channel();
         let bootstrap = tokio::spawn(async move {
             axum::serve(bootstrap_listener, app)
@@ -508,6 +542,7 @@ mod tests {
                 .await
                 .unwrap();
         });
+        let genesis_hash = header.hash;
         let beacon = ethereum_client::beacon_finality::test_fixtures::LocalBeaconFixture::new(
             31337,
             header.hash,
@@ -519,6 +554,9 @@ mod tests {
             .await
             .unwrap()
             .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await
+            .unwrap()
+            .with_data_witness(&witness_endpoint, 31337, genesis_hash)
             .await
             .unwrap();
         stop.send(()).unwrap();
@@ -536,6 +574,7 @@ mod tests {
             .await
             .unwrap_err();
         server.abort();
+        witness.abort();
         for error in [block, deposit] {
             assert_eq!(classify_anyhow(&error), RetryDecision::Retry, "{error:#}");
         }

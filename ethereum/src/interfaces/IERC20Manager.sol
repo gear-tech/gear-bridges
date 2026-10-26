@@ -45,9 +45,15 @@ interface IERC20Manager is IPausable, IMessageHandler {
     error InvalidBridgingPayment();
 
     /**
-     * @dev Error thrown when the destination is zero.
+     * @dev Error thrown when the destination is zero or a forbidden native payout identity.
      */
     error InvalidRecipient();
+
+    error TokenAdmissionDisabled(address token);
+    event TokenAdmissionChanged(address indexed token, bool enabled);
+
+    /// @dev Registered retained tokens default to enabled; disabling does not prevent existing claims.
+    function tokenAdmissionEnabled(address token) external view returns (bool);
 
     /**
      * @dev Event emitted when bridging request is made.

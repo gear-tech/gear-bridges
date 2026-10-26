@@ -728,7 +728,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn loopback_challenge_estimation_outage_rescans_without_broadcast() {
+    async fn loopback_missing_signer_holds_without_broadcast() {
         use actix_web::{web, App, HttpResponse, HttpServer};
         use serde_json::{json, Value};
         use std::{
@@ -775,15 +775,12 @@ mod tests {
 
         assert!(matches!(
             &result,
-            Err(ethereum_client::Error::ChallengeRootPreBroadcast(_))
+            Err(ethereum_client::Error::SignerNotConfigured)
         ));
         let mut state = State::ChallengeRoot { tx_hash: None };
         assert!(state.record_submission(result).is_err());
-        assert_eq!(state, State::ScanForEvents);
-        assert_eq!(
-            *requests.lock().unwrap(),
-            ["eth_chainId", "eth_estimateGas"]
-        );
+        assert_eq!(state, State::Exit);
+        assert_eq!(*requests.lock().unwrap(), ["eth_chainId"]);
     }
 
     #[tokio::test]
@@ -887,7 +884,12 @@ mod tests {
                                         "transactionIndex": "0x0", "logIndex": "0x0", "removed": false,
                                     })
                                 }).collect();
-                                json!(logs)
+                                // Reconstructed from HTML / audited7fe1b032: primary omission.
+                                if witness_fault.load(Ordering::SeqCst) == 4 && !is_witness {
+                                    json!([])
+                                } else {
+                                    json!(logs)
+                                }
                             }
                             "eth_call" => {
                                 assert_eq!(params[1], json!({
@@ -946,7 +948,7 @@ mod tests {
 
         // A primary-only hot fork or state answer must never authorize a challenge.
         reorganized.store(true, Ordering::SeqCst);
-        for fault in [1, 2] {
+        for fault in [1, 2, 4] {
             witness_fault.store(fault, Ordering::SeqCst);
             state = State::ScanForEvents;
             let disagreement =

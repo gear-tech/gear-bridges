@@ -222,7 +222,11 @@ impl EthereumRootState {
                 new.root.block == old.root.block
                     && new.root.authority_set_id == old.root.authority_set_id
             }) {
-                anyhow::ensure!(new == old, "HOLD: retained root provenance changed");
+                let mut original = *old;
+                if original.root.queue_id.is_none() {
+                    original.root.queue_id = new.root.queue_id;
+                }
+                anyhow::ensure!(*new == original, "HOLD: retained root provenance changed");
             }
         }
         Ok(())
@@ -471,6 +475,7 @@ impl MerkleRootExtractor {
             .as_ref()
             .context("HOLD: root qualification was not initialized")?;
         state.validate()?;
+        let mut migrated: Option<EthereumRootState> = None;
         let mut pins = BTreeMap::new();
         if let Some(deployment) = &state.queue_deployment {
             anyhow::ensure!(
@@ -523,12 +528,29 @@ impl MerkleRootExtractor {
                         view,
                     )
                     .await?;
+                    let mut original = *root;
+                    if original.root.queue_id.is_none() {
+                        original.root.queue_id = qualified.root.queue_id;
+                    }
                     anyhow::ensure!(
-                        qualified == *root,
+                        qualified == original,
                         "HOLD: saved root event/source/timestamp identity changed"
                     );
+                    if qualified != *root {
+                        let migrated = migrated.get_or_insert_with(|| state.clone());
+                        let saved = migrated
+                            .roots
+                            .iter_mut()
+                            .find(|saved| saved.inclusion == root.inclusion)
+                            .expect("retained root is present in migration snapshot");
+                        *saved = qualified;
+                    }
                 }
             }
+        }
+        if let Some(migrated) = migrated {
+            self.cursor_storage.save_root_state(&migrated).await?;
+            self.state = Some(migrated);
         }
         Ok(())
     }
@@ -596,8 +618,18 @@ impl MerkleRootExtractor {
             .get_block_timestamp_by_hash(observation.block_number, observation.block_hash)
             .await?;
         let (block_hash, authority_set_id) = fetch_hash_auth_id(api_provider, source).await?;
+        let api = api_provider.client();
+        let queue_id =
+            crate::message_relayer::common::gear::queue_id_at(&api, source, block_hash).await?;
+        let address = gsdk::gear::storage().gear_eth_bridge().queue_merkle_root();
+        let source_root: H256 = api.api.storage_fetch_at(&address, Some(block_hash)).await?;
+        anyhow::ensure!(
+            source_root == observation.entry.merkle_root,
+            "HOLD: publication differs from finalized source queue root"
+        );
         Ok(QualifiedMerkleRoot {
             root: RelayedMerkleRoot {
+                queue_id: Some(queue_id),
                 block: GearBlockNumber(source),
                 block_hash,
                 authority_set_id,
@@ -1161,6 +1193,9 @@ mod tests {
             ));
             let socket = std::net::TcpListener::bind("127.0.0.1:0")?;
             let endpoint = format!("http://{}", socket.local_addr()?);
+            // Separate owned listeners exercise the production paired transport path.
+            let witness_socket = std::net::TcpListener::bind("127.0.0.1:0")?;
+            let witness_endpoint = format!("http://{}", witness_socket.local_addr()?);
             let server_blocks = blocks.clone();
             let server_calls = calls.clone();
             let server_head = head.clone();
@@ -1231,6 +1266,7 @@ mod tests {
             })
             .workers(1)
             .listen(socket)?
+            .listen(witness_socket)?
             .disable_signals()
             .run();
             let handle = server.handle();
@@ -1250,6 +1286,9 @@ mod tests {
             let api = EthApi::new(&endpoint, &format!("{:#x}", birth.queue), None, None, None)
                 .await?
                 .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+                .await?;
+            let api = api
+                .with_data_witness(&witness_endpoint, 31337, birth.genesis_hash)
                 .await?;
             head.store(requested_head, Ordering::SeqCst);
             Ok(Self {
@@ -1469,9 +1508,15 @@ mod tests {
             .filter(|call| call["method"] == "eth_getLogs")
             .cloned()
             .collect();
-        assert_eq!(scans.len(), 1);
-        assert_eq!(scans[0]["params"][0]["fromBlock"], "0x4");
-        assert_eq!(scans[0]["params"][0]["toBlock"], "0x4");
+        assert_eq!(
+            scans.len(),
+            2,
+            "both providers must scan the confirmed block"
+        );
+        for scan in &scans {
+            assert_eq!(scan["params"][0]["fromBlock"], "0x4");
+            assert_eq!(scan["params"][0]["toBlock"], "0x4");
+        }
         // Restart with the same authenticated floor, then poll the next confirmed block.
         rpc.head.store(12, Ordering::SeqCst);
         let mut restored = MerkleRootExtractor::new(
@@ -1692,6 +1737,7 @@ mod tests {
         assert_eq!(state.next_range(10_000), Some((9_998, 10_000)));
         state.roots.push(QualifiedMerkleRoot {
             root: RelayedMerkleRoot {
+                queue_id: Some(0),
                 block: GearBlockNumber(100),
                 block_hash: H256::repeat_byte(2),
                 timestamp: 1,

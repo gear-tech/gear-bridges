@@ -322,7 +322,7 @@ impl WasmProgram for AuthenticatedCheckpointFixture {
 
 #[tokio::test]
 async fn receipt_verifier_wasm_rejects_mutated_historical_proofs() {
-    use alloy_rlp::{Decodable, Encodable};
+    use alloy::eips::eip2718::Encodable2718;
     use eth_events_deneb_client::{
         traits::{EthEventsDenebFactory as _, EthereumEventClient as _},
         EthEventsDenebFactory, EthereumEventClient,
@@ -364,6 +364,8 @@ async fn receipt_verifier_wasm_rejects_mutated_historical_proofs() {
         "bad parent",
         "bad receipt proof",
         "RLP trailing",
+        // VB-20 reconstructed from HTML; audited revision 7fe1b032.
+        "network wrapper",
         "failed status",
         "post-state status",
     ] {
@@ -385,18 +387,21 @@ async fn receipt_verifier_wasm_rejects_mutated_historical_proofs() {
                 event.proof[0][0] ^= 1;
             }
             "RLP trailing" => event.receipt_rlp.push(0),
+            "network wrapper" => {
+                let mut wrapped = Vec::new();
+                alloy_rlp::Encodable::encode(&event.receipt_rlp.as_slice(), &mut wrapped);
+                event.receipt_rlp = wrapped;
+            }
             "failed status" | "post-state status" => {
                 let mut receipt =
-                    ethereum_common::utils::ReceiptEnvelope::decode(&mut &event.receipt_rlp[..])
-                        .unwrap();
+                    ethereum_common::utils::decode_canonical_receipt(&event.receipt_rlp).unwrap();
                 receipt.as_receipt_with_bloom_mut().unwrap().receipt.status =
                     if mutation == "failed status" {
                         false.into()
                     } else {
                         alloy::primitives::B256::ZERO.into()
                     };
-                event.receipt_rlp.clear();
-                receipt.encode(&mut event.receipt_rlp);
+                event.receipt_rlp = receipt.encoded_2718();
             }
             _ => unreachable!(),
         }
@@ -456,7 +461,7 @@ async fn receipt_verifier_wasm_rejects_mutated_historical_proofs() {
 #[tokio::test]
 async fn electra_and_fulu_receipt_wasm_bind_network_schedule() {
     extern crate std;
-    use alloy_rlp::Encodable;
+    use alloy::eips::eip2718::Encodable2718;
     use eth_events_electra_client::{
         traits::{EthEventsElectraFactory as _, EthereumEventClient as _},
         BlockGenericForBlockBody, BlockInclusionProof, EthEventsElectraFactory, EthToVaraEvent,
@@ -496,8 +501,7 @@ async fn electra_and_fulu_receipt_wasm_bind_network_schedule() {
         })
         .collect();
     let proof = utils::generate_merkle_proof(fixture.tx_index, &receipts).unwrap();
-    let mut receipt_rlp = Vec::new();
-    proof.receipt.encode(&mut receipt_rlp);
+    let receipt_rlp = proof.receipt.encoded_2718();
     let Fixture { remoting, proxy: _ } = setup_for_test().await;
     let code = remoting
         .system()

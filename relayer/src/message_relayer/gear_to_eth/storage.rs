@@ -79,6 +79,22 @@ struct CompletedNonce {
     first_paid: Option<PaidObservation>,
 }
 
+// One day at the nominal six-second block cadence, measured in finalized blocks.
+const UNPAID_RETENTION_BLOCKS: u32 = 14_400;
+const UNPAID_ARCHIVE_BATCH: usize = 128;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UnpaidArchiveEntry {
+    message: MessageInBlock,
+    genesis_hash: H256,
+    lane_identity: OutboundLaneIdentity,
+    original_snapshot: H256,
+}
+
+// Only these 256 shard digests remain hot; nonce indexes and observations are cold.
+type UnpaidArchiveIndex = BTreeMap<String, H256>;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct GearEventState {
@@ -92,12 +108,14 @@ struct GearEventState {
     queued: BTreeMap<String, MessageInBlock>,
     paid: BTreeMap<String, PaidObservation>,
     pending_pairs: BTreeMap<String, PendingEventPair>,
+    #[serde(default)]
+    unpaid_archive: BTreeMap<u8, H256>,
 }
 
 impl Default for GearEventState {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: 3,
             genesis_hash: None,
             start_block: None,
             lane_identity: None,
@@ -106,6 +124,7 @@ impl Default for GearEventState {
             queued: BTreeMap::new(),
             paid: BTreeMap::new(),
             pending_pairs: BTreeMap::new(),
+            unpaid_archive: BTreeMap::new(),
         }
     }
 }
@@ -147,6 +166,21 @@ fn ensure_event_bound(state: &GearEventState, block: u32) -> anyhow::Result<()> 
         "Gear event block precedes the configured start"
     );
     Ok(())
+}
+
+fn missing_queue_identity(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(fields) => {
+            (fields.contains_key("authority_set_id")
+                && fields.contains_key("block_hash")
+                && fields
+                    .get("queue_id")
+                    .is_none_or(serde_json::Value::is_null))
+                || fields.values().any(missing_queue_identity)
+        }
+        serde_json::Value::Array(values) => values.iter().any(missing_queue_identity),
+        _ => false,
+    }
 }
 
 fn decode_transaction_journal(contents: &str) -> anyhow::Result<Transaction> {
@@ -244,6 +278,16 @@ impl BlockStorage {
         block
             .messages
             .remove(&U256::from_big_endian(&message.message.nonce_be));
+    }
+
+    async fn retire_archived_observation(&self, message: &MessageInBlock) {
+        // This retires replay bookkeeping, not the message's financial liability.
+        let mut blocks = self.blocks.write().await;
+        if let Some(block) = blocks.get_mut(&message.block) {
+            block
+                .messages
+                .remove(&U256::from_big_endian(&message.message.nonce_be));
+        }
     }
 
     pub async fn is_message_pending(&self, block: GearBlockNumber, nonce_be: [u8; 32]) -> bool {
@@ -569,6 +613,222 @@ impl JSONStorage {
         }
     }
 
+    async fn archive_bytes(&self, bytes: &[u8]) -> anyhow::Result<H256> {
+        use sha2::Digest;
+        let digest = H256::from_slice(&sha2::Sha256::digest(bytes));
+        let directory = self.path.join("unpaid-archive");
+        tokio::fs::create_dir_all(&directory).await?;
+        let path = directory.join(hex::encode(digest.as_bytes()));
+        match tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .await
+        {
+            Ok(mut file) => {
+                file.write_all(bytes).await?;
+                file.sync_all().await?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                anyhow::ensure!(
+                    tokio::fs::read(&path).await? == bytes,
+                    "HOLD: conflicting or interrupted unpaid archive object"
+                );
+            }
+            Err(error) => return Err(error.into()),
+        }
+        tokio::fs::File::open(&directory).await?.sync_all().await?;
+        tokio::fs::File::open(&self.path).await?.sync_all().await?;
+        Ok(digest)
+    }
+
+    async fn archived_bytes(&self, digest: H256) -> anyhow::Result<Vec<u8>> {
+        use sha2::Digest;
+        let bytes = tokio::fs::read(
+            self.path
+                .join("unpaid-archive")
+                .join(hex::encode(digest.as_bytes())),
+        )
+        .await
+        .context("HOLD: missing unpaid archive evidence")?;
+        anyhow::ensure!(
+            sha2::Sha256::digest(&bytes).as_slice() == digest.as_bytes(),
+            "HOLD: unpaid archive digest mismatch"
+        );
+        Ok(bytes)
+    }
+
+    async fn unpaid_index(
+        &self,
+        state: &GearEventState,
+        shard: u8,
+    ) -> anyhow::Result<UnpaidArchiveIndex> {
+        match state.unpaid_archive.get(&shard) {
+            Some(digest) => Ok(serde_json::from_slice(
+                &self.archived_bytes(*digest).await?,
+            )?),
+            None => Ok(BTreeMap::new()),
+        }
+    }
+
+    async fn archived_unpaid(
+        &self,
+        state: &GearEventState,
+        nonce: [u8; 32],
+    ) -> anyhow::Result<Option<MessageInBlock>> {
+        let key = hex::encode(nonce);
+        let index = self.unpaid_index(state, nonce[31]).await?;
+        let Some(digest) = index.get(&key) else {
+            return Ok(None);
+        };
+        Ok(Some(self.unpaid_entry(state, nonce, *digest).await?))
+    }
+
+    async fn unpaid_entry(
+        &self,
+        state: &GearEventState,
+        nonce: [u8; 32],
+        digest: H256,
+    ) -> anyhow::Result<MessageInBlock> {
+        let key = hex::encode(nonce);
+        let entry: UnpaidArchiveEntry =
+            serde_json::from_slice(&self.archived_bytes(digest).await?)?;
+        anyhow::ensure!(
+            Some(entry.genesis_hash) == state.genesis_hash
+                && state.lane_identity.as_ref() == Some(&entry.lane_identity)
+                && entry.message.message.nonce_be == nonce
+                && entry.message.queue_id.is_some()
+                && entry
+                    .lane_identity
+                    .requires_first_fee(&entry.message.message.source),
+            "HOLD: unpaid archive identity changed"
+        );
+        let original: serde_json::Value =
+            serde_json::from_slice(&self.archived_bytes(entry.original_snapshot).await?)?;
+        anyhow::ensure!(
+            original["queued"].get(&key) == Some(&serde_json::to_value(&entry.message)?)
+                && original["paid"].get(&key).is_none()
+                && original["pending_pairs"].get(&key).is_none(),
+            "HOLD: unpaid archive lacks original unmatched evidence"
+        );
+        ensure_event_bound(state, entry.message.block.0)?;
+        anyhow::ensure!(
+            state
+                .queued_cursor
+                .is_some_and(|cursor| entry.message.block.0 <= cursor.block),
+            "HOLD: unpaid archive exceeds durable queued cursor"
+        );
+        Ok(entry.message)
+    }
+
+    async fn archive_unpaid(
+        &self,
+        state: &mut GearEventState,
+    ) -> anyhow::Result<Vec<MessageInBlock>> {
+        let Some(horizon) = state
+            .queued_cursor
+            .zip(state.paid_cursor)
+            .map(|(queued, paid)| queued.block.min(paid.block))
+            .and_then(|block| block.checked_sub(UNPAID_RETENTION_BLOCKS))
+        else {
+            return Ok(Vec::new());
+        };
+        let lane = state
+            .lane_identity
+            .as_ref()
+            .context("HOLD: missing unpaid archive lane")?;
+        let eligible = |key: &String, message: &MessageInBlock| {
+            message.block.0 <= horizon
+                && message.queue_id.is_some()
+                && lane.requires_first_fee(&message.message.source)
+                && !state.paid.contains_key(key)
+                && !state.pending_pairs.contains_key(key)
+        };
+        if !state
+            .queued
+            .iter()
+            .any(|(key, message)| eligible(key, message))
+        {
+            return Ok(Vec::new());
+        }
+        // Check disk ownership as well as the runtime index: replay may start before load().
+        let mut owned = HashSet::new();
+        let mut files = tokio::fs::read_dir(&self.path).await?;
+        while let Some(file) = files.next_entry().await? {
+            if file
+                .file_name()
+                .to_str()
+                .is_some_and(|name| Uuid::from_str(name).is_ok())
+            {
+                let tx =
+                    decode_transaction_journal(&tokio::fs::read_to_string(file.path()).await?)?;
+                owned.insert(tx.message.message.nonce_be);
+            }
+        }
+        owned.extend(self.known_active_nonces.read().await.keys().copied());
+        let candidates: Vec<_> = state
+            .queued
+            .iter()
+            .filter(|(key, message)| {
+                eligible(key, message) && !owned.contains(&message.message.nonce_be)
+            })
+            .take(UNPAID_ARCHIVE_BATCH)
+            .map(|(key, message)| (key.clone(), message.clone()))
+            .collect();
+        let raw = tokio::fs::read(self.path.join("gear_events.json")).await?;
+        let original: serde_json::Value = serde_json::from_slice(&raw)?;
+        let mut snapshot = None;
+        let mut indexes: BTreeMap<u8, UnpaidArchiveIndex> = BTreeMap::new();
+        let mut archived = Vec::new();
+        for (key, message) in candidates {
+            let nonce = message.message.nonce_be;
+            if self.completed_nonce_locked(state, nonce).await?.is_some() {
+                continue;
+            }
+            // Unknown row fields or a not-yet-durable row are ambiguous, not disposable.
+            if original["queued"].get(&key) != Some(&serde_json::to_value(&message)?) {
+                continue;
+            }
+            let original_snapshot = match snapshot {
+                Some(digest) => digest,
+                None => {
+                    let digest = self.archive_bytes(&raw).await?;
+                    snapshot = Some(digest);
+                    digest
+                }
+            };
+            let entry = UnpaidArchiveEntry {
+                message: message.clone(),
+                genesis_hash: state.genesis_hash.context("HOLD: missing archive source")?,
+                lane_identity: lane.clone(),
+                original_snapshot,
+            };
+            let digest = self.archive_bytes(&serde_json::to_vec(&entry)?).await?;
+            if let std::collections::btree_map::Entry::Vacant(entry) = indexes.entry(nonce[31]) {
+                entry.insert(self.unpaid_index(state, nonce[31]).await?);
+            }
+            let index = indexes.get_mut(&nonce[31]).expect("loaded unpaid shard");
+            if let Some(existing) = index.insert(key.clone(), digest) {
+                anyhow::ensure!(existing == digest, "HOLD: conflicting unpaid archive nonce");
+            }
+            state.queued.remove(&key);
+            archived.push(message);
+        }
+        for (shard, index) in indexes {
+            let digest = self.archive_bytes(&serde_json::to_vec(&index)?).await?;
+            state.unpaid_archive.insert(shard, digest);
+        }
+        Ok(archived)
+    }
+
+    async fn retire_archived_blocks(&self, messages: &[MessageInBlock]) {
+        for message in messages {
+            self.block_storage
+                .retire_archived_observation(message)
+                .await;
+        }
+    }
+
     pub async fn bind_outbound_lane(&self, identity: OutboundLaneIdentity) -> anyhow::Result<()> {
         anyhow::ensure!(
             identity.destination_chain_id != 0
@@ -663,7 +923,45 @@ impl JSONStorage {
             Ok(previous) if serde_json::from_slice::<serde_json::Value>(&previous)? == current => {
                 return Ok(())
             }
-            Ok(_) => {}
+            Ok(previous) => {
+                if name == "gear_events.json" && {
+                    let old: serde_json::Value = serde_json::from_slice(&previous)?;
+                    old["version"] != current["version"]
+                        || old["unpaid_archive"] != current["unpaid_archive"]
+                } {
+                    // Keep exact old-schema/unknown JSON bytes before publishing new pointers.
+                    self.archive_bytes(&previous).await?;
+                }
+                if missing_queue_identity(&serde_json::from_slice(&previous)?) {
+                    use sha2::Digest;
+                    let directory = self.path.join("queue-id-originals");
+                    tokio::fs::create_dir_all(&directory).await?;
+                    let original = directory.join(format!(
+                        "{}.json",
+                        hex::encode(sha2::Sha256::digest(&previous))
+                    ));
+                    match tokio::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&original)
+                        .await
+                    {
+                        Ok(mut file) => {
+                            file.write_all(&previous).await?;
+                            file.sync_all().await?;
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                            anyhow::ensure!(
+                                tokio::fs::read(&original).await? == previous,
+                                "HOLD: conflicting or interrupted QueueId original archive"
+                            );
+                        }
+                        Err(error) => return Err(error.into()),
+                    }
+                    tokio::fs::File::open(&directory).await?.sync_all().await?;
+                    tokio::fs::File::open(&self.path).await?.sync_all().await?;
+                }
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
@@ -709,9 +1007,41 @@ impl JSONStorage {
 
     async fn load_event_state_locked(&self) -> anyhow::Result<GearEventState> {
         let path = self.path.join("gear_events.json");
-        let state = match tokio::fs::read_to_string(path).await {
-            Ok(contents) => serde_json::from_str::<GearEventState>(&contents)
-                .context("Invalid Gear event journal")?,
+        let mut state = match tokio::fs::read_to_string(path).await {
+            Ok(contents) => {
+                let value: serde_json::Value = serde_json::from_str(&contents)?;
+                let state: GearEventState =
+                    serde_json::from_value(value.clone()).context("Invalid Gear event journal")?;
+                anyhow::ensure!(
+                    state.version != 3 || value.get("unpaid_archive").is_some(),
+                    "HOLD: missing unpaid archive index"
+                );
+                fn unknown_fields(
+                    original: &serde_json::Value,
+                    decoded: &serde_json::Value,
+                ) -> bool {
+                    match original {
+                        serde_json::Value::Object(fields) => fields.iter().any(|(key, value)| {
+                            decoded
+                                .get(key)
+                                .is_none_or(|decoded| unknown_fields(value, decoded))
+                        }),
+                        serde_json::Value::Array(values) => {
+                            values.iter().enumerate().any(|(i, value)| {
+                                decoded
+                                    .get(i)
+                                    .is_none_or(|decoded| unknown_fields(value, decoded))
+                            })
+                        }
+                        _ => false,
+                    }
+                }
+                anyhow::ensure!(
+                    !unknown_fields(&value, &serde_json::to_value(&state)?),
+                    "HOLD: unknown Gear event evidence must remain byte-for-byte unchanged"
+                );
+                state
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 tokio::fs::create_dir_all(&self.path).await?;
                 let mut entries = tokio::fs::read_dir(&self.path).await?;
@@ -724,10 +1054,11 @@ impl JSONStorage {
             Err(error) => return Err(error.into()),
         };
         anyhow::ensure!(
-            state.version == 2,
+            matches!(state.version, 2 | 3),
             "Unsupported Gear event journal schema {}",
             state.version
         );
+        state.version = 3;
         Ok(state)
     }
 
@@ -773,7 +1104,10 @@ impl JSONStorage {
         let key = hex::encode(message.message.nonce_be);
         ensure_event_bound(state, message.block.0)?;
         anyhow::ensure!(
-            state.queued.get(&key) == Some(message),
+            state
+                .queued
+                .get(&key)
+                .is_some_and(|saved| saved.same_original(message)),
             "HOLD: original queued evidence is missing or conflicting for nonce {key}"
         );
         let cursor = state
@@ -805,7 +1139,7 @@ impl JSONStorage {
         anyhow::ensure!(
             match (paid.as_ref(), state.pending_pairs.get(&key)) {
                 (Some(paid), Some(pair)) =>
-                    &pair.message == message
+                    pair.message.same_original(message)
                         && pair.fee_nonce == paid.nonce
                         && pair.paid_block == paid.block
                         && pair.paid_block_hash == paid.block_hash,
@@ -891,7 +1225,7 @@ impl JSONStorage {
         let tx = decode_transaction_journal(&contents)?;
         anyhow::ensure!(
             tx.uuid == owner.uuid
-                && tx.message == owner.message
+                && tx.message.same_original(&owner.message)
                 && matches!(&tx.status, TxStatus::Completed),
             "HOLD: completed nonce ownership conflicts with its original UUID journal"
         );
@@ -923,7 +1257,7 @@ impl JSONStorage {
             if let Some(owner) = owner {
                 anyhow::ensure!(
                     owner.uuid == tx.uuid
-                        && owner.message == tx.message
+                        && owner.message.same_original(&tx.message)
                         && matches!(&tx.status, TxStatus::Completed),
                     "HOLD: outbound UUID conflicts with completed nonce ownership"
                 );
@@ -954,7 +1288,7 @@ impl JSONStorage {
         if let Some(owner) = &existing {
             anyhow::ensure!(
                 owner.uuid == tx.uuid
-                    && owner.message == tx.message
+                    && owner.message.same_original(&tx.message)
                     && matches!(&tx.status, TxStatus::Completed),
                 "HOLD: outbound transaction conflicts with completed nonce ownership"
             );
@@ -1280,6 +1614,40 @@ impl Storage for JSONStorage {
             Err(error) => return Err(error.into()),
         }
         self.validate_event_transactions(tx_manager).await?;
+        {
+            let _guard = self.event_state_lock.lock().await;
+            let state = self.load_event_state_locked().await?;
+            let owned: HashSet<_> = tx_manager
+                .transactions
+                .read()
+                .await
+                .values()
+                .chain(tx_manager.completed.read().await.values())
+                .map(|tx| tx.message.message.nonce_be)
+                .collect();
+            for shard in state.unpaid_archive.keys() {
+                for (key, digest) in &self.unpaid_index(&state, *shard).await? {
+                    let nonce: [u8; 32] = hex::decode(key)?
+                        .try_into()
+                        .map_err(|_| anyhow::anyhow!("HOLD: invalid unpaid archive nonce"))?;
+                    anyhow::ensure!(
+                        nonce[31] == *shard && hex::encode(nonce) == *key,
+                        "HOLD: misplaced or noncanonical unpaid archive nonce"
+                    );
+                    let message = self.unpaid_entry(&state, nonce, *digest).await?;
+                    anyhow::ensure!(
+                        !state.queued.contains_key(key)
+                            && !state.paid.contains_key(key)
+                            && !state.pending_pairs.contains_key(key)
+                            && !owned.contains(&nonce),
+                        "HOLD: unpaid archive conflicts with hot ownership"
+                    );
+                    self.block_storage
+                        .retire_archived_observation(&message)
+                        .await;
+                }
+            }
+        }
         *self.known_active_nonces.write().await = tx_manager
             .transactions
             .read()
@@ -1338,7 +1706,7 @@ impl Storage for JSONStorage {
             return Ok(false);
         };
         anyhow::ensure!(
-            queued == message,
+            queued.same_original(message),
             "HOLD: requested message conflicts with original queued evidence"
         );
         let lane = state.lane_identity.as_ref().expect("event lane is bound");
@@ -1413,14 +1781,24 @@ impl Storage for JSONStorage {
                 .await?
             {
                 anyhow::ensure!(
-                    owner.message == *message,
+                    owner.message.same_original(message),
                     "HOLD: conflicting queued event for completed nonce {nonce}"
+                );
+                continue;
+            }
+            if let Some(archived) = self
+                .archived_unpaid(&state, message.message.nonce_be)
+                .await?
+            {
+                anyhow::ensure!(
+                    archived.same_original(message),
+                    "HOLD: queued event conflicts with unpaid archive"
                 );
                 continue;
             }
             if let Some(existing) = state.queued.get(&nonce) {
                 anyhow::ensure!(
-                    existing == message,
+                    existing.same_original(message),
                     "Conflicting queued event for message nonce {nonce}"
                 );
             } else if !replayed {
@@ -1434,7 +1812,10 @@ impl Storage for JSONStorage {
             return Ok(());
         }
         state.queued_cursor = Some(cursor);
-        self.save_event_state_locked(&state).await
+        let archived = self.archive_unpaid(&mut state).await?;
+        self.save_event_state_locked(&state).await?;
+        self.retire_archived_blocks(&archived).await;
+        Ok(())
     }
 
     async fn record_paid_block(
@@ -1457,6 +1838,19 @@ impl Storage for JSONStorage {
                 continue;
             }
             let key = hex::encode(nonce);
+            if let Some(message) = self.archived_unpaid(&state, *nonce).await? {
+                anyhow::ensure!(
+                    !state.queued.contains_key(&key)
+                        && !state.paid.contains_key(&key)
+                        && !state.pending_pairs.contains_key(&key),
+                    "HOLD: unpaid archive conflicts with hot observation"
+                );
+                state.queued.insert(key.clone(), message);
+                let mut index = self.unpaid_index(&state, nonce[31]).await?;
+                index.remove(&key);
+                let digest = self.archive_bytes(&serde_json::to_vec(&index)?).await?;
+                state.unpaid_archive.insert(nonce[31], digest);
+            }
             if !state.paid.contains_key(&key) {
                 state.paid.insert(
                     key.clone(),
@@ -1471,7 +1865,9 @@ impl Storage for JSONStorage {
             Self::pair_event(&mut state, &key);
         }
         state.paid_cursor = Some(cursor);
+        let archived = self.archive_unpaid(&mut state).await?;
         self.save_event_state_locked(&state).await?;
+        self.retire_archived_blocks(&archived).await;
         Ok(discovered)
     }
 
@@ -1644,6 +2040,7 @@ pub(crate) mod tests {
         let nonce_be = U256::from(nonce).to_big_endian();
 
         MessageInBlock {
+            queue_id: None,
             message: gear_rpc_client::dto::Message {
                 nonce_be,
                 source: [1u8; 32],
@@ -1729,6 +2126,314 @@ pub(crate) mod tests {
             .await
             .unwrap();
         (storage, message, paid)
+    }
+
+    // Reconstructed from supplied HTML VB-29/O2-03 (C11); original PoC unavailable.
+    async fn aged_unpaid_storage(path: &Path) -> (Arc<JSONStorage>, MessageInBlock) {
+        let storage = Arc::new(JSONStorage::new(path));
+        storage.bind_outbound_lane(lane_identity()).await.unwrap();
+        storage
+            .bind_event_chain(H256::repeat_byte(9), 10)
+            .await
+            .unwrap();
+        let mut message = msg_in_block(10, 7);
+        message.queue_id = Some(1);
+        storage
+            .record_queued_block(10, message.block_hash, &[message.clone()])
+            .await
+            .unwrap();
+        storage
+            .record_paid_block(10, message.block_hash, &[])
+            .await
+            .unwrap();
+        storage
+            .block_storage
+            .add_block(
+                message.block,
+                message.block_hash,
+                std::iter::once(message.message.nonce_be),
+            )
+            .await;
+        // Seed the already-scanned finalized empty range; no RPC/effect evidence is claimed.
+        let mut state = storage.load_event_state_locked().await.unwrap();
+        let tip = 10 + UNPAID_RETENTION_BLOCKS - 1;
+        state.queued_cursor = Some(GearEventCursor {
+            block: tip,
+            hash: H256::repeat_byte(4),
+        });
+        state.paid_cursor = state.queued_cursor;
+        storage.save_event_state_locked(&state).await.unwrap();
+        (storage, message)
+    }
+
+    #[tokio::test]
+    async fn reconstructed_html_unpaid_archive_late_fee_rehydrates_once() {
+        let path = std::env::temp_dir().join(format!("unpaid-late-fee-{}", Uuid::new_v4()));
+        let (storage, message) = aged_unpaid_storage(&path).await;
+        let tip = 10 + UNPAID_RETENTION_BLOCKS;
+        storage
+            .record_queued_block(tip, H256::repeat_byte(5), &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            storage.queued_observations().await.unwrap(),
+            vec![message.clone()]
+        );
+        let original = tokio::fs::read(path.join("gear_events.json"))
+            .await
+            .unwrap();
+        storage
+            .record_paid_block(tip, H256::repeat_byte(5), &[])
+            .await
+            .unwrap();
+        assert!(storage.queued_observations().await.unwrap().is_empty());
+        assert!(storage
+            .block_storage
+            .unprocessed_blocks()
+            .await
+            .blocks
+            .is_empty());
+        assert_eq!(
+            storage
+                .replay_from_block(10, GearEventStream::Queued)
+                .await
+                .unwrap(),
+            tip + 1
+        );
+        assert!(!storage
+            .outbound_nonce_owned(message.message.nonce_be)
+            .await
+            .unwrap());
+        assert!(!path
+            .join(JSONStorage::completed_nonce_file(message.message.nonce_be))
+            .exists());
+        // Original snapshot bytes remain available, including the previous cursor.
+        use sha2::Digest;
+        assert_eq!(
+            storage
+                .archived_bytes(H256::from_slice(&sha2::Sha256::digest(&original)))
+                .await
+                .unwrap(),
+            original
+        );
+        let restored = Arc::new(JSONStorage::new(&path));
+        let manager = TransactionManager::new(restored.clone());
+        restored.load(&manager).await.unwrap();
+        let nonce = message.message.nonce_be;
+        assert_eq!(
+            restored
+                .record_paid_block(tip + 1, H256::repeat_byte(6), &[nonce, nonce])
+                .await
+                .unwrap(),
+            vec![nonce]
+        );
+        assert_eq!(
+            restored.eligible_messages().await.unwrap(),
+            vec![message.clone()]
+        );
+        assert_eq!(restored.pending_event_pairs().await.unwrap().len(), 1);
+        assert!(restored
+            .record_paid_block(tip + 2, H256::repeat_byte(7), &[nonce])
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            restored.pending_event_pairs().await.unwrap()[0].message,
+            message
+        );
+        tokio::fs::remove_dir_all(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reconstructed_html_unpaid_archive_crash_and_missing_evidence_hold() {
+        let path = std::env::temp_dir().join(format!("unpaid-crash-{}", Uuid::new_v4()));
+        let (storage, message) = aged_unpaid_storage(&path).await;
+        let before = tokio::fs::read(path.join("gear_events.json"))
+            .await
+            .unwrap();
+        let mut state = storage.load_event_state_locked().await.unwrap();
+        let tip = 10 + UNPAID_RETENTION_BLOCKS;
+        state.queued_cursor.as_mut().unwrap().block = tip;
+        state.paid_cursor.as_mut().unwrap().block = tip;
+        let archived = storage.archive_unpaid(&mut state).await.unwrap();
+        assert_eq!(archived, vec![message.clone()]);
+        // Crash before pointer publication: immutable objects exist but the hot original owns work.
+        assert_eq!(
+            tokio::fs::read(path.join("gear_events.json"))
+                .await
+                .unwrap(),
+            before
+        );
+        assert_eq!(
+            JSONStorage::new(&path).queued_observations().await.unwrap(),
+            vec![message.clone()]
+        );
+        storage.save_event_state_locked(&state).await.unwrap();
+        // Crash after pointer publication but before block bookkeeping is repaired on restart.
+        storage.block_storage.save(&path).await.unwrap();
+        let restored = Arc::new(JSONStorage::new(&path));
+        restored
+            .load(&TransactionManager::new(restored.clone()))
+            .await
+            .unwrap();
+        assert!(restored
+            .block_storage
+            .unprocessed_blocks()
+            .await
+            .blocks
+            .is_empty());
+        let committed = tokio::fs::read(path.join("gear_events.json"))
+            .await
+            .unwrap();
+        let digest = *state.unpaid_archive.values().next().unwrap();
+        tokio::fs::remove_file(
+            path.join("unpaid-archive")
+                .join(hex::encode(digest.as_bytes())),
+        )
+        .await
+        .unwrap();
+        assert!(restored
+            .record_paid_block(tip + 1, H256::repeat_byte(8), &[message.message.nonce_be])
+            .await
+            .is_err());
+        assert_eq!(
+            tokio::fs::read(path.join("gear_events.json"))
+                .await
+                .unwrap(),
+            committed
+        );
+        assert!(JSONStorage::new(&path)
+            .load(&TransactionManager::new(restored))
+            .await
+            .is_err());
+        tokio::fs::remove_dir_all(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reconstructed_html_unpaid_archive_preserves_unknown_and_old_schema_bytes() {
+        let path = std::env::temp_dir().join(format!("unpaid-originals-{}", Uuid::new_v4()));
+        let (storage, message) = aged_unpaid_storage(&path).await;
+        let file = path.join("gear_events.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&tokio::fs::read(&file).await.unwrap()).unwrap();
+        value["version"] = serde_json::json!(2);
+        value.as_object_mut().unwrap().remove("unpaid_archive");
+        let old = serde_json::to_vec_pretty(&value).unwrap();
+        tokio::fs::write(&file, &old).await.unwrap();
+        let state = storage.load_event_state_locked().await.unwrap();
+        storage.save_event_state_locked(&state).await.unwrap();
+        use sha2::Digest;
+        assert_eq!(
+            storage
+                .archived_bytes(H256::from_slice(&sha2::Sha256::digest(&old)))
+                .await
+                .unwrap(),
+            old
+        );
+        value["queued"][hex::encode(message.message.nonce_be)]["unknown_original"] =
+            serde_json::json!({"signed": "opaque"});
+        let unknown = serde_json::to_vec_pretty(&value).unwrap();
+        tokio::fs::write(&file, &unknown).await.unwrap();
+        assert!(storage
+            .record_paid_block(10 + UNPAID_RETENTION_BLOCKS, H256::repeat_byte(5), &[])
+            .await
+            .is_err());
+        assert_eq!(tokio::fs::read(&file).await.unwrap(), unknown);
+        tokio::fs::remove_dir_all(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reconstructed_html_unpaid_archive_keeps_paid_signed_and_ambiguous_hot() {
+        let path = std::env::temp_dir().join(format!("unpaid-hot-{}", Uuid::new_v4()));
+        let (storage, message) = aged_unpaid_storage(&path).await;
+        let mut state = storage.load_event_state_locked().await.unwrap();
+        let tip = 10 + UNPAID_RETENTION_BLOCKS;
+        state.queued_cursor.as_mut().unwrap().block = tip;
+        state.paid_cursor.as_mut().unwrap().block = tip;
+        let mut paid = message.clone();
+        paid.message.nonce_be = U256::from(8).to_big_endian();
+        let paid_key = hex::encode(paid.message.nonce_be);
+        state.queued.insert(paid_key.clone(), paid.clone());
+        state.paid.insert(
+            paid_key.clone(),
+            PaidObservation {
+                nonce: paid.message.nonce_be,
+                block: 10,
+                block_hash: paid.block_hash,
+            },
+        );
+        JSONStorage::pair_event(&mut state, &paid_key);
+        let mut ambiguous = message.clone();
+        ambiguous.message.nonce_be = U256::from(9).to_big_endian();
+        ambiguous.queue_id = None;
+        state
+            .queued
+            .insert(hex::encode(ambiguous.message.nonce_be), ambiguous);
+        let mut signed = message.clone();
+        signed.message.nonce_be = U256::from(10).to_big_endian();
+        state
+            .queued
+            .insert(hex::encode(signed.message.nonce_be), signed.clone());
+        let transaction = completed_tx(signed).await;
+        let signed_path = path.join(transaction.uuid.to_string());
+        let original_signed = serde_json::to_vec(&transaction).unwrap();
+        tokio::fs::write(&signed_path, &original_signed)
+            .await
+            .unwrap();
+        storage.save_event_state_locked(&state).await.unwrap();
+        assert_eq!(
+            storage.archive_unpaid(&mut state).await.unwrap(),
+            vec![message]
+        );
+        assert_eq!(state.queued.len(), 3);
+        assert_eq!(state.pending_pairs.len(), 1);
+        assert_eq!(tokio::fs::read(signed_path).await.unwrap(), original_signed);
+        tokio::fs::remove_dir_all(path).await.unwrap();
+    }
+
+    /// Reconstructed from supplied HTML VB-15 / audited 7fe1b032: storage half
+    /// of migration; source qualification is exercised separately.
+    #[tokio::test]
+    async fn queue_identity_migration_archives_exact_original_before_replacement() {
+        use sha2::Digest;
+        let path = std::env::temp_dir().join(format!("queue-id-migration-{}", Uuid::new_v4()));
+        tokio::fs::create_dir_all(&path).await.unwrap();
+        let storage = JSONStorage::new(&path);
+        let mut tx = Transaction::new(msg_in_block(10, 7), TxStatus::WaitForMerkleRoot);
+        let raw = serde_json::to_string_pretty(&tx).unwrap().into_bytes();
+        let name = tx.uuid.to_string();
+        tokio::fs::write(path.join(&name), &raw).await.unwrap();
+        tx.message.queue_id = Some(17);
+        storage.write_atomic_json(&name, &tx).await.unwrap();
+        let archived = path
+            .join("queue-id-originals")
+            .join(format!("{}.json", hex::encode(sha2::Sha256::digest(&raw))));
+        assert_eq!(tokio::fs::read(&archived).await.unwrap(), raw);
+        let restored =
+            decode_transaction_journal(&tokio::fs::read_to_string(path.join(&name)).await.unwrap())
+                .unwrap();
+        assert_eq!(restored.uuid, tx.uuid);
+        assert_eq!(restored.message, tx.message);
+        let original = decode_transaction_journal(std::str::from_utf8(&raw).unwrap()).unwrap();
+        assert!(original.message.queue_id.is_none());
+        assert_eq!(original.message_hash, restored.message_hash);
+        assert!(original.message.same_original(&restored.message));
+        let mut unknown: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        unknown["future_evidence"] = serde_json::json!({"retain": [1, 2, 3]});
+        let unknown = serde_json::to_string(&unknown).unwrap();
+        tokio::fs::write(path.join(&name), &unknown).await.unwrap();
+        assert!(storage
+            .read_tx(path.join(&name), name.into())
+            .await
+            .is_err());
+        assert_eq!(
+            tokio::fs::read_to_string(path.join(tx.uuid.to_string()))
+                .await
+                .unwrap(),
+            unknown
+        );
+        assert_eq!(tokio::fs::read(archived).await.unwrap(), raw);
+        tokio::fs::remove_dir_all(path).await.unwrap();
     }
 
     #[tokio::test]
@@ -2562,6 +3267,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let root = crate::message_relayer::common::RelayedMerkleRoot {
+            queue_id: Some(0),
             block: GearBlockNumber(43),
             block_hash: H256::repeat_byte(8),
             timestamp: 123,
@@ -2859,7 +3565,7 @@ pub(crate) mod tests {
         let path = std::env::temp_dir().join(format!("gear-event-schema-{}", Uuid::new_v4()));
         tokio::fs::create_dir_all(&path).await.unwrap();
         let state = GearEventState {
-            version: 3,
+            version: 4,
             ..Default::default()
         };
         tokio::fs::write(
@@ -3093,6 +3799,7 @@ pub(crate) mod tests {
         let storage = Arc::new(JSONStorage::new(&path));
         storage.bind_outbound_lane(lane_identity()).await.unwrap();
         let stale = RelayedMerkleRoot {
+            queue_id: Some(0),
             block: GearBlockNumber(100),
             block_hash: H256::repeat_byte(1),
             authority_set_id: AuthoritySetId(1),
@@ -3117,6 +3824,7 @@ pub(crate) mod tests {
         assert!(storage.save_root_state(&premature).await.is_err());
         let canonical = QualifiedMerkleRoot {
             root: RelayedMerkleRoot {
+                queue_id: Some(0),
                 merkle_root: H256::repeat_byte(3),
                 ..stale
             },
@@ -3152,6 +3860,7 @@ pub(crate) mod tests {
         storage.save_root_state(&state).await.unwrap();
         let new = QualifiedMerkleRoot {
             root: RelayedMerkleRoot {
+                queue_id: Some(0),
                 block: GearBlockNumber(200),
                 ..canonical.root
             },

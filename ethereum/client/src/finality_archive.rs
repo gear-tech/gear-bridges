@@ -32,6 +32,13 @@ struct Fence {
     quorum_checkpoint: Option<crate::FinalityCheckpoint>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VerifiedRecord {
+    previous: Option<B256>,
+    checkpoint: crate::FinalityCheckpoint,
+}
+
 /// Atomically replace a derived cache; never use for immutable originals or journals.
 pub fn atomic_json(path: &Path, value: &impl Serialize) -> Result<()> {
     let directory = path.parent().context("proof path has no parent")?;
@@ -107,46 +114,97 @@ impl HeaderArchive {
         })
     }
 
-    pub(crate) fn retained_checkpoint(&self) -> Result<Option<crate::FinalityCheckpoint>> {
+    /// The pointer is only a cache. Reconstruct from the entire immutable chain;
+    /// missing links, forks and changed bytes never become a new bootstrap.
+    fn verified_records(&self) -> Result<Vec<(B256, VerifiedRecord)>> {
+        let directory = self.directory.join("verified");
+        if !directory.exists() {
+            return Ok(Vec::new());
+        }
+        let mut records = BTreeMap::new();
+        for entry in fs::read_dir(&directory)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name = name.to_str().context("invalid verified record filename")?;
+            ensure!(
+                !name.ends_with(".new"),
+                "pending immutable finality evidence; HOLD"
+            );
+            let digest: B256 = name
+                .strip_suffix(".json")
+                .context("unknown verified finality record")?
+                .parse()?;
+            let bytes = gear_common::durable::committed_bytes(&entry.path())?;
+            let record: VerifiedRecord = serde_json::from_slice(&bytes)?;
+            let canonical = serde_json::to_vec(&record)?;
+            ensure!(
+                B256::from(sp_core::hashing::sha2_256(&canonical)) == digest,
+                "changed immutable finality record; HOLD"
+            );
+            ensure!(
+                record.checkpoint.beacon().is_some(),
+                "non-Beacon verified record; HOLD"
+            );
+            ensure!(
+                records.insert(record.previous, (digest, record)).is_none(),
+                "forked immutable finality chain; HOLD"
+            );
+        }
+        let mut ordered = Vec::with_capacity(records.len());
+        let mut previous = None;
+        while let Some((digest, record)) = records.remove(&previous) {
+            previous = Some(digest);
+            ordered.push((digest, record));
+        }
+        ensure!(
+            records.is_empty(),
+            "missing immutable finality predecessor; HOLD"
+        );
+        Ok(ordered)
+    }
+
+    fn legacy_fence(&self) -> Result<Option<Fence>> {
         let path = self.directory.join("fence.json");
         if !path.exists() {
             return Ok(None);
         }
         ensure!(
             fs::metadata(&path)?.len() <= 64 * 1024 * 1024,
-            "oversized finalized generation fence; HOLD"
+            "oversized legacy finalized generation fence; HOLD"
         );
-        Ok(serde_json::from_slice::<Fence>(&fs::read(path)?)?.quorum_checkpoint)
+        Ok(Some(serde_json::from_slice(&fs::read(path)?)?))
     }
 
-    /// Retain every unresolved witnessed generation. A restart must bridge these
-    /// exact tips, not merely reach an old numeric height on a different branch.
+    pub(crate) fn retained_checkpoints(&self) -> Result<Vec<crate::FinalityCheckpoint>> {
+        let mut checkpoints = Vec::new();
+        if let Some(fence) = self.legacy_fence()? {
+            checkpoints.extend(fence.quorum_checkpoint);
+        }
+        checkpoints.extend(
+            self.verified_records()?
+                .into_iter()
+                .map(|(_, record)| record.checkpoint),
+        );
+        Ok(checkpoints)
+    }
+
+    /// Read existing obligations only. An unqualified observation cannot grow
+    /// durable authority; legacy fences remain byte-for-byte immutable.
     pub(crate) fn witness(
         &self,
         genesis: B256,
         head: &Header,
         approved: Option<&crate::FinalityCheckpoint>,
     ) -> Result<Vec<(u64, B256)>> {
-        let path = self.directory.join("fence.json");
-        let mut fence = if path.exists() {
-            ensure!(
-                fs::metadata(&path)?.len() <= 64 * 1024 * 1024,
-                "oversized finalized generation fence; HOLD"
-            );
-            let fence: Fence = serde_json::from_slice(&fs::read(&path)?)
-                .context("corrupt finalized generation fence; HOLD")?;
-            ensure!(
-                fence.genesis == genesis && !fence.tips.is_empty(),
-                "finalized archive belongs to another chain; HOLD"
-            );
-            fence
-        } else {
-            Fence {
-                genesis,
-                tips: Vec::new(),
-                quorum_checkpoint: None,
-            }
-        };
+        let fence = self.legacy_fence()?.unwrap_or(Fence {
+            genesis,
+            tips: Vec::new(),
+            quorum_checkpoint: None,
+        });
+        ensure!(
+            fence.genesis == genesis,
+            "finalized archive belongs to another chain; HOLD"
+        );
         let hash = head.hash_slow();
         if let Some(checkpoint) = &fence.quorum_checkpoint {
             ensure!(
@@ -167,14 +225,6 @@ impl HeaderArchive {
                     number != head.number || expected == hash,
                     "retained checkpoint conflicts with Beacon head; HOLD"
                 );
-            }
-            if checkpoint.legacy().is_some() {
-                let bytes = fs::read(&path)?;
-                let digest = B256::from(sp_core::hashing::sha2_256(&bytes));
-                gear_common::durable::immutable_json(
-                    &self.directory.join(format!("legacy-fence-{digest:x}.json")),
-                    &alloy::primitives::Bytes::from(bytes),
-                )?;
             }
         }
         let mut required = Vec::with_capacity(fence.tips.len());
@@ -200,13 +250,20 @@ impl HeaderArchive {
                 required.push((tip.number, old_hash));
             }
         }
-        if fence.tips.last().is_none_or(|tip| tip.hash_slow() != hash) {
+        for (_, record) in self.verified_records()? {
             ensure!(
-                fence.tips.len() < 32_768,
-                "unfinished finalized history exceeds the retained generation bound; HOLD"
+                record.checkpoint.genesis_hash() == genesis,
+                "verified finality record belongs to another chain; HOLD"
             );
-            fence.tips.push(head.clone());
-            atomic_json(&path, &fence)?;
+            for (number, expected) in record.checkpoint.fences()? {
+                ensure!(
+                    number <= head.number && (number != head.number || expected == hash),
+                    "verified finality record conflicts with candidate; HOLD"
+                );
+                if expected != hash {
+                    required.push((number, expected));
+                }
+            }
         }
         Ok(required)
     }
@@ -216,14 +273,34 @@ impl HeaderArchive {
             checkpoint.beacon().is_some(),
             "only Beacon checkpoints may complete an archive fence; HOLD"
         );
-        atomic_json(
-            &self.directory.join("fence.json"),
-            &Fence {
-                genesis: checkpoint.genesis_hash(),
-                tips: vec![checkpoint.common_header().clone()],
-                quorum_checkpoint: Some(checkpoint.clone()),
-            },
-        )
+        let records = self.verified_records()?;
+        fs::create_dir_all(self.directory.join("verified"))?;
+        // Persist the directory entry before publishing any authoritative record.
+        File::open(&self.directory)?.sync_all()?;
+        let previous = records.last().map(|(digest, _)| *digest);
+        let digest = if records
+            .last()
+            .is_some_and(|(_, record)| &record.checkpoint == checkpoint)
+        {
+            previous.unwrap()
+        } else {
+            let record = VerifiedRecord {
+                previous,
+                checkpoint: checkpoint.clone(),
+            };
+            let digest = B256::from(sp_core::hashing::sha2_256(&serde_json::to_vec(&record)?));
+            gear_common::durable::immutable_json(
+                &self
+                    .directory
+                    .join("verified")
+                    .join(format!("{digest:#x}.json")),
+                &record,
+            )?;
+            digest
+        };
+        // No authority is read from this pointer. A damaged/missing pointer is
+        // repaired only here, after all retained records and pins requalify.
+        atomic_json(&self.directory.join("verified-head.json"), &digest)
     }
 
     /// Read at most one bounded chunk. Corrupt header material is ignored as a

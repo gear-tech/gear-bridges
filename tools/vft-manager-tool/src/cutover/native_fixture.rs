@@ -98,8 +98,13 @@ async fn owned_native_cutover_fixture(finalize_after: Option<usize>) -> Result<(
         fee_bridge: 0,
         fee_incoming: 0,
     };
+    let (mut work, mut chain) = interrupted_coverage_fixture().await;
+    work.intent.source_receipt_floor = 1;
+    // NativeBoundaryRpc below explicitly constructs slot 32 for the finalize fixture.
+    let boundary_slot = if finalize_after.is_some() { 32 } else { work.intent.boundary.slot };
+    let successor_floor = boundary_slot.checked_add(1).context("fixture cutover floor overflow")?;
     let mut managers = Vec::with_capacity(2);
-    for _ in 0..2 {
+    for minimum_receipt_slot in [work.intent.source_receipt_floor, successor_floor] {
         managers.push(
             vft_manager_client::VftManagerFactory::new(remoting.clone())
                 .new(vft_manager_client::InitConfig {
@@ -107,6 +112,7 @@ async fn owned_native_cutover_fixture(finalize_after: Option<usize>) -> Result<(
                         "0xf2816ced0b15749595392d3a18b5a2363d6fefe5b3b6153739f218151b7acdbf",
                     )?),
                     historical_proxy_address: wrapper,
+                    minimum_receipt_slot,
                     config: config.clone(),
                 })
                 .with_gas_limit(gas)
@@ -115,10 +121,10 @@ async fn owned_native_cutover_fixture(finalize_after: Option<usize>) -> Result<(
         );
     }
     let (old, new) = (managers[0], managers[1]);
-    let (mut work, mut chain) = interrupted_coverage_fixture().await;
     let boundary_server = if finalize_after.is_some() {
         chain = native_registration_chain(hash_actor(new), work.intent.erc20_manager).await?;
         let (server, block) = NativeBoundaryRpc::new(&chain[0]).await?;
+        ensure!(block.slot == boundary_slot, "fixture boundary differs from constructor approval");
         let code = upload(&api, "CUTOVER_NATIVE_CHECKPOINT_WASM").await?;
         let root = H256::from_slice(block.tree_hash_root().as_bytes());
         let (_, checkpoint, _) = api.create_program_bytes(
@@ -343,7 +349,7 @@ async fn owned_native_cutover_fixture(finalize_after: Option<usize>) -> Result<(
         return native_finalize_restarts(&api, &connection, &args, &originals, stop == 5).await;
     }
     manager
-        .begin_cutover(new, work.intent.boundary.slot)
+        .begin_cutover(new, work.intent.boundary.slot, status(&api, hash_actor(old)).await?.0.generation)
         .with_gas_limit(gas)
         .send_recv(old)
         .await?;

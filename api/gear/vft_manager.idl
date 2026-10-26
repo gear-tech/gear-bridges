@@ -6,6 +6,9 @@ type InitConfig = struct {
   /// 
   /// For more info see [State::historical_proxy_address].
   historical_proxy_address: actor_id,
+  /// Immutable inclusive receipt floor from the approved starting checkpoint.
+  /// A successor must be constructed with its cutover boundary plus one.
+  minimum_receipt_slot: u64,
   /// Config that will be used to send messages to the other programs.
   /// 
   /// For more info see [Config].
@@ -175,6 +178,13 @@ type ReceiptDepositOutcome = enum {
   Held,
 };
 
+type CutoverAbort = struct {
+  generation: u64,
+  successor: actor_id,
+  last_receipt_slot: u64,
+  config_fingerprint: h256,
+};
+
 type CutoverStatus = struct {
   phase: CutoverPhase,
   predecessor: opt actor_id,
@@ -185,6 +195,9 @@ type CutoverStatus = struct {
   transfer_count: u32,
   completed_transfer_count: u32,
   in_flight_transfer_count: u32,
+  generation: u64,
+  predecessor_generation: opt u64,
+  custody_started: bool,
 };
 
 type CutoverPhase = enum {
@@ -214,10 +227,10 @@ type ReceiptDepositState = struct {
   log_index: u64,
   sender: h160,
   receiver: actor_id,
-  token_id: actor_id,
+  token_id: opt actor_id,
   eth_token_id: h160,
   amount: u256,
-  supply: TokenSupply,
+  supply: opt TokenSupply,
   native: bool,
   operation_id: h256,
   child: opt message_id,
@@ -236,6 +249,8 @@ type ReceiptRejectionEvidence = enum {
   NativeErrorAbsent: struct {
     child: message_id
   },
+  /// No mapping existed at admission; retained liability, never a refund.
+  UnmappedToken,
 };
 
 /// Entry for a single message in [MessageTracker].
@@ -298,9 +313,10 @@ constructor {
 };
 
 service VftManager {
+  AbortCutover : (expected_generation: u64) -> null;
   /// Add an account allowed to stop user operations for two days.
   AddEmergencyStopObserver : (observer: actor_id) -> null;
-  BeginCutover : (destination: actor_id, last_receipt_slot: u64) -> null;
+  BeginCutover : (destination: actor_id, last_receipt_slot: u64, expected_generation: u64) -> null;
   /// The method is intended for tests and is available only when the feature `mocks`
   /// is enabled. Sends a VFT-message to the sender to mint/unlock tokens depending
   /// on the `_supply_type`.
@@ -349,6 +365,8 @@ service VftManager {
   /// Can be called only by a [State::admin] or [State::pause_admin].
   Pause : () -> null;
   PrepareCutover : (source: actor_id, last_receipt_slot: u64) -> null;
+  /// Prune only consumed terminal trackers; financial originals remain retained.
+  PruneTerminalRequests : (requests: vec message_id) -> u32;
   /// Reconcile original native payout outcomes; this never starts an economic child.
   ReconcileReceipt : (slot: u64, transaction_index: u64) -> result (ReceiptStatus, Error);
   /// Reconcile only the immutable original request and its authenticated terminal
@@ -365,6 +383,7 @@ service VftManager {
   RequestBridging : (vara_token_id: actor_id, amount: u256, receiver: h160) -> result (struct { u256, h160 }, Error);
   /// Resolve one original deposit using no-effect proof or a retained native hold.
   ResolveReceiptDeposit : (slot: u64, transaction_index: u64, log_index: u64, operation_id: h256, child: opt message_id) -> result (ReceiptDepositOutcome, Error);
+  RestoreAbortedCutover : (expected_generation: u64) -> null;
   /// Change [State::admin]. Can be called only by a [State::admin].
   SetAdmin : (new_admin: actor_id) -> null;
   /// Change [State::pause_admin]. Can be called only by a [State::admin].
@@ -394,6 +413,7 @@ service VftManager {
   Upgrade : (destination: actor_id) -> null;
   /// Get current [State::admin] address.
   query Admin : () -> actor_id;
+  query CutoverAbort : (generation: u64) -> opt CutoverAbort;
   query CutoverStatus : () -> CutoverStatus;
   query CutoverTransfers : (start: u32, count: u32) -> vec CustodyTransferAttempt;
   /// Get accounts allowed to activate the bounded emergency stop.

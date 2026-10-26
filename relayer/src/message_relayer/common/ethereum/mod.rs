@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, vec::Drain};
+use std::cmp::Ordering;
 
 use super::{GearBlockNumber, RelayedMerkleRoot};
 

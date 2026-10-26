@@ -64,6 +64,11 @@ pub struct EthereumTxArgs {
         env = "ETH_MAX_PRIORITY_FEE_PER_GAS"
     )]
     pub max_priority_fee_per_gas: Option<u128>,
+
+    /// Explicit message gas-unit ceiling; must exactly match the approved lane.
+    /// Missing/zero disables new message signing, not retained-original reconciliation.
+    #[arg(long = "max-gas-per-message", env = "ETH_MAX_GAS_PER_MESSAGE")]
+    pub max_gas_per_message: Option<u64>,
 }
 
 #[derive(Args, Clone, Debug)]

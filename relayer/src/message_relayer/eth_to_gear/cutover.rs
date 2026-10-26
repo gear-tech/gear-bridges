@@ -1,4 +1,6 @@
 //! Immutable cutover seals. Reading an original lane never restores its mutable runtime.
+#[path = "cutover_preflight.rs"]
+pub mod preflight;
 use super::{
     message_sender::MessageSender, storage::InboundRuntimeIdentity, tx_manager::Transaction,
 };
@@ -126,6 +128,10 @@ struct ExternalCoverageIntent {
     source_receipt_floor: u64,
     boundary: CutoverBoundary,
     boundary_execution_timestamp: u64,
+    #[serde(default)]
+    coverage_policy: Option<preflight::CoveragePolicy>,
+    #[serde(default)]
+    cutover_generation: Option<u64>,
 }
 #[derive(Deserialize)]
 struct ExternalCoverageAdmission {
@@ -140,6 +146,8 @@ struct ExternalCoverageAdmission {
     #[serde(default)]
     fee_emitter: Option<primitive_types::H160>,
     #[serde(default)]
+    fee_emitters: Option<Vec<primitive_types::H160>>,
+    #[serde(default)]
     fee_event_observed: bool,
     #[serde(default)]
     signed: Option<super::message_sender::SignedSubmission>,
@@ -151,6 +159,8 @@ struct ExternalCoverageAdmission {
     external_original: Option<CanonicalExternalOriginal>,
     #[serde(default)]
     undispatched_old_admission: Option<Uuid>,
+    #[serde(default)]
+    unprocessable: Option<String>,
 }
 /// A foreign original never replaces a retained signature, native attempt, known reply or handoff.
 pub fn is_undispatched_old_admission(transaction: &Transaction) -> bool {
@@ -186,7 +196,7 @@ fn validate_report_versions(
         }
     }
     anyhow::ensure!(
-        matches!(version, 1..=4)
+        matches!(version, 1..=5)
             && coverage
                 .get("schema_version")
                 .and_then(|value| value.as_u64())
@@ -195,7 +205,7 @@ fn validate_report_versions(
                 .get("schema_version")
                 .and_then(|value| value.as_u64())
                 == Some(version.into())
-            && (matches!(version, 2..=4)
+            && (matches!(version, 2..=5)
                 || (!has_field(coverage, "exclusion")
                     && !has_field(coverage, "blocking_redemptions")
                     && !has_field(lifecycle, "exclusion")
@@ -216,6 +226,23 @@ fn validate_report_versions(
                 && !has_field(lifecycle, "native_wrapper_approval")),
         "HOLD: legacy report contains schema4 capability"
     );
+    if version < 5 {
+        anyhow::ensure!(
+            !has_field(coverage, "coverage_policy")
+                && !has_field(coverage, "fee_emitters")
+                && !has_field(coverage, "unprocessable")
+                && !has_field(coverage, "liability_history")
+                && !has_field(coverage, "cutover_generation")
+                && !has_field(lifecycle, "cutover_generation")
+                && !has_field(lifecycle, "coverage_policy"),
+            "HOLD: legacy report contains schema5 coverage authority"
+        );
+    } else {
+        anyhow::ensure!(
+            coverage["intent"]["coverage_policy"].is_object(),
+            "HOLD: schema5 report requires independent deployment/fee authority"
+        );
+    }
     Ok(())
 }
 
@@ -247,12 +274,23 @@ fn parse_coverage(
     Ok(serde_json::from_value(coverage)?)
 }
 
-fn validate_coverage_chain(seal: &CutoverSeal, blocks: &[CoveredBlock]) -> Result<()> {
+fn validate_coverage_chain(
+    seal: &CutoverSeal,
+    blocks: &[CoveredBlock],
+    policy: Option<&preflight::CoveragePolicy>,
+) -> Result<()> {
     anyhow::ensure!(
         blocks.first().is_some_and(|block| {
-            block.number == 0
-                && block.hash == seal.old_identity.ethereum_genesis_hash
-                && block.parent_hash == H256::zero()
+            policy.map_or_else(
+                || {
+                    block.number == 0
+                        && block.hash == seal.old_identity.ethereum_genesis_hash
+                        && block.parent_hash == H256::zero()
+                },
+                |policy| {
+                    block.number == policy.deployment_block && block.hash == policy.deployment_hash
+                },
+            )
         }) && blocks.last().is_some_and(|block| {
             block.number == seal.boundary.execution_number
                 && block.hash == seal.boundary.execution_hash
@@ -268,6 +306,9 @@ fn validate_coverage_chain(seal: &CutoverSeal, blocks: &[CoveredBlock]) -> Resul
                 "HOLD: canonical coverage has a gap or conflicting parent"
             );
         }
+    }
+    if let Some(policy) = policy {
+        policy.validate_deployment(blocks.first().context("HOLD: deployment block absent")?)?;
     }
     Ok(())
 }
@@ -448,13 +489,14 @@ pub async fn authenticate_manager_registrations(
 }
 
 /// Header authentication does not authenticate eth_call; compare both exact historical answers.
-pub async fn authenticated_fee_emitter(
+pub async fn authenticated_fee_emitters(
     eth: &ethereum_client::PollingEthApi,
     view: &mut ethereum_client::FinalizedView,
     manager_address: primitive_types::H160,
     configured_payment: Option<primitive_types::H160>,
+    approved_payments: Option<&[primitive_types::H160]>,
     receipt: &TransactionReceipt,
-) -> Result<Option<primitive_types::H160>> {
+) -> Result<Vec<primitive_types::H160>> {
     use alloy::{primitives::Address, rpc::types::BlockId};
     use ethereum_client::abi::{BridgingPayment, IERC20Manager};
     let hash = receipt
@@ -469,27 +511,33 @@ pub async fn authenticated_fee_emitter(
     let address = Address::from_slice(manager_address.as_bytes());
     let primary = IERC20Manager::new(address, &**eth);
     let witness = IERC20Manager::new(address, eth.raw_witness_provider()?);
-    let mut emitter = None;
+    let mut emitters = std::collections::BTreeSet::new();
     for log in receipt.inner.logs() {
         if log.inner.data.topics().first() != Some(&BridgingPayment::FeePaid::SIGNATURE_HASH) {
             continue;
         }
-        let approved = if let Some(payment) = configured_payment {
-            log.address().as_slice() == payment.as_bytes()
-        } else {
-            let first = tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                primary.isBridgingPayment(log.address()).block(at).call(),
-            )
-            .await??;
-            let second = tokio::time::timeout(
-                std::time::Duration::from_secs(10),
-                witness.isBridgingPayment(log.address()).block(at).call(),
-            )
-            .await??;
-            anyhow::ensure!(first == second, "HOLD: fee routing witnesses disagree");
-            first
-        };
+        if approved_payments.is_some_and(|approved| {
+            !approved.contains(&primitive_types::H160::from_slice(log.address().as_slice()))
+        }) {
+            continue;
+        }
+        let approved =
+            if let Some(payment) = configured_payment.filter(|_| approved_payments.is_none()) {
+                log.address().as_slice() == payment.as_bytes()
+            } else {
+                let first = tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    primary.isBridgingPayment(log.address()).block(at).call(),
+                )
+                .await??;
+                let second = tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    witness.isBridgingPayment(log.address()).block(at).call(),
+                )
+                .await??;
+                anyhow::ensure!(first == second, "HOLD: fee routing witnesses disagree");
+                first
+            };
         if approved {
             BridgingPayment::FeePaid::decode_log(&log.inner)
                 .context("HOLD: malformed authenticated FeePaid")?;
@@ -499,15 +547,45 @@ pub async fn authenticated_fee_emitter(
                     == manager_address,
                 "HOLD: approved fee payer manager differs from source"
             );
-            anyhow::ensure!(
-                emitter.is_none_or(|previous| previous == found),
-                "HOLD: multiple approved fee emitters"
-            );
-            emitter = Some(found);
+            emitters.insert(found);
         }
     }
     view.recheck(&**eth).await?;
-    Ok(emitter)
+    Ok(emitters.into_iter().collect())
+}
+
+/// Legacy singular evidence is read exactly; it cannot represent a multi-emitter receipt.
+pub async fn authenticated_fee_emitter(
+    eth: &ethereum_client::PollingEthApi,
+    view: &mut ethereum_client::FinalizedView,
+    manager: primitive_types::H160,
+    configured: Option<primitive_types::H160>,
+    receipt: &TransactionReceipt,
+) -> Result<Option<primitive_types::H160>> {
+    let emitters =
+        authenticated_fee_emitters(eth, view, manager, configured, None, receipt).await?;
+    anyhow::ensure!(
+        emitters.len() <= 1,
+        "HOLD: legacy singular fee evidence cannot represent multiple emitters"
+    );
+    Ok(emitters.first().copied())
+}
+
+pub fn validate_fee_evidence(
+    observed: &[primitive_types::H160],
+    singular: Option<primitive_types::H160>,
+    plural: Option<&[primitive_types::H160]>,
+    paid: bool,
+) -> Result<()> {
+    anyhow::ensure!(
+        paid != observed.is_empty()
+            && match plural {
+                Some(saved) => singular.is_none() && saved == observed,
+                None => observed == singular.as_slice(),
+            },
+        "HOLD: historical fee evidence changed"
+    );
+    Ok(())
 }
 
 async fn authenticate_coverage(
@@ -557,7 +635,14 @@ async fn authenticate_coverage(
         )
         .await?;
     }
-    validate_coverage_chain(seal, &coverage.blocks)?;
+    validate_coverage_chain(
+        seal,
+        &coverage.blocks,
+        coverage
+            .intent
+            .as_ref()
+            .and_then(|intent| intent.coverage_policy.as_ref()),
+    )?;
     let intent = coverage
         .intent
         .as_ref()
@@ -572,6 +657,18 @@ async fn authenticate_coverage(
                 .is_some_and(|block| block.header.timestamp == intent.boundary_execution_timestamp),
         "HOLD: sealed source-domain intent changed"
     );
+    if let Some(policy) = &intent.coverage_policy {
+        anyhow::ensure!(
+            intent.cutover_generation == Some(decode_status(&seal.retirement, false)?.generation),
+            "HOLD: sealed generation differs from prepared source"
+        );
+        anyhow::ensure!(
+            policy.ethereum_chain_id == seal.old_identity.ethereum_chain_id
+                && policy.ethereum_genesis_hash == seal.old_identity.ethereum_genesis_hash
+                && policy.erc20_manager == intent.erc20_manager,
+            "HOLD: sealed coverage policy changed original lane"
+        );
+    }
     if let Some(manager) = seal.old_identity.erc20_manager_address {
         anyhow::ensure!(
             manager == intent.erc20_manager,
@@ -606,7 +703,7 @@ async fn authenticate_coverage(
             continue;
         }
         for receipt in &block.receipts {
-            if !receipt.status() {
+            if !preflight::explicit_success(receipt) {
                 continue;
             }
             let mut deposit = false;
@@ -634,19 +731,24 @@ async fn authenticate_coverage(
                     && deposits.insert(receipt.transaction_hash),
                 "HOLD: sealed deposit coordinates or inventory changed"
             );
-            let emitter = authenticated_fee_emitter(
+            let emitters = authenticated_fee_emitters(
                 eth,
                 view,
                 intent.erc20_manager,
                 seal.old_identity.bridging_payment_address,
+                intent
+                    .coverage_policy
+                    .as_ref()
+                    .map(|policy| policy.fee_emitters.as_slice()),
                 receipt,
             )
             .await?;
-            anyhow::ensure!(
-                emitter == admission.fee_emitter
-                    && emitter.is_some() == admission.fee_event_observed,
-                "HOLD: sealed historical fee policy changed"
-            );
+            validate_fee_evidence(
+                &emitters,
+                admission.fee_emitter,
+                admission.fee_emitters.as_deref(),
+                admission.fee_event_observed,
+            )?;
         }
     }
     anyhow::ensure!(
@@ -682,7 +784,19 @@ fn validate_admission_block(
             && execution.parent_hash.0 .0 == block.parent_hash.0
             && execution.receipts_root.0 .0 == block.receipts_root.0
             && block.transactions.get(index) == Some(&admission.original_tx_hash)
-            && event.receipt_rlp == alloy_rlp::encode(&expected),
+            && coverage.intent.as_ref().map_or(
+                event.receipt_rlp == expected.encoded_2718(),
+                |intent| preflight::receipt_bytes_match(
+                    &event.receipt_rlp,
+                    receipt,
+                    intent.coverage_policy.as_ref(),
+                    intent
+                        .old_identity
+                        .as_ref()
+                        .map_or(H256::zero(), |identity| identity.vft_manager_address),
+                    event.proof_block.block.slot
+                )
+            ),
         "HOLD: admission proof/header/receipt/index/transaction hash linkage changed"
     );
     let mut db = ethereum_common::memory_db::new();
@@ -864,8 +978,8 @@ impl AuthenticatedCoverage {
 
 fn validate_admission_inventory(coverage: &ExternalCoverageReport) -> Result<()> {
     anyhow::ensure!(
-        matches!(coverage.schema_version, 1..=4)
-            && (matches!(coverage.schema_version, 2..=4)
+        matches!(coverage.schema_version, 1..=5)
+            && (matches!(coverage.schema_version, 2..=5)
                 || coverage
                     .admissions
                     .iter()
@@ -876,6 +990,10 @@ fn validate_admission_inventory(coverage: &ExternalCoverageReport) -> Result<()>
     let mut transactions = std::collections::BTreeSet::new();
     let mut ownership = std::collections::BTreeSet::new();
     for admission in &coverage.admissions {
+        anyhow::ensure!(
+            admission.unprocessable.is_none(),
+            "HOLD: unprocessable liability cannot be sealed"
+        );
         anyhow::ensure!(
             receipts.insert(admission.receipt_key)
                 && transactions.insert(admission.original_tx_hash)
@@ -950,9 +1068,14 @@ async fn verify_external_coverage(
             "HOLD: proof/key/block is outside original deployment coverage"
         );
         validate_admission_block(coverage, admission, &event)?;
-        if matches!(coverage.schema_version, 2..=4) {
+        if matches!(coverage.schema_version, 2..=5) {
             anyhow::ensure!(
-                admission.fee_event_observed == admission.fee_emitter.is_some(),
+                admission.fee_event_observed
+                    == admission
+                        .fee_emitters
+                        .as_ref()
+                        .map_or(admission.fee_emitter.is_some(), |emitters| !emitters
+                            .is_empty()),
                 "HOLD: fee evidence changed"
             );
         }
@@ -1307,14 +1430,37 @@ pub fn sealed_file(path: &Path) -> Result<SealedFile> {
         path,
     })
 }
-fn decode_status(pin: &FinalizedCutoverStatus) -> Result<CutoverStatus> {
+pub fn decode_status(pin: &FinalizedCutoverStatus, legacy: bool) -> Result<CutoverStatus> {
     anyhow::ensure!(
         pin.block_hash != H256::zero(),
         "HOLD: missing finalized cutover pin"
     );
     let mut bytes = pin.status.as_slice();
-    let status = CutoverStatus::decode(&mut bytes)?;
-    anyhow::ensure!(bytes.is_empty(), "HOLD: trailing cutover status bytes");
+    if let Ok(status) = CutoverStatus::decode(&mut bytes) {
+        anyhow::ensure!(bytes.is_empty(), "HOLD: trailing cutover status bytes");
+        return Ok(status);
+    }
+    anyhow::ensure!(legacy, "HOLD: generation-bound cutover status required");
+    // Historical projection only; zero is NOT authority to abort a historical generation.
+    let mut bytes = pin.status.as_slice();
+    let status = CutoverStatus {
+        phase: Decode::decode(&mut bytes)?,
+        predecessor: Decode::decode(&mut bytes)?,
+        successor: Decode::decode(&mut bytes)?,
+        minimum_receipt_slot: Decode::decode(&mut bytes)?,
+        last_receipt_slot: Decode::decode(&mut bytes)?,
+        config_fingerprint: Decode::decode(&mut bytes)?,
+        transfer_count: Decode::decode(&mut bytes)?,
+        completed_transfer_count: Decode::decode(&mut bytes)?,
+        in_flight_transfer_count: Decode::decode(&mut bytes)?,
+        generation: 0,
+        predecessor_generation: None,
+        custody_started: false,
+    };
+    anyhow::ensure!(
+        bytes.is_empty(),
+        "HOLD: trailing historical cutover status bytes"
+    );
     Ok(status)
 }
 impl CutoverSeal {
@@ -1374,7 +1520,7 @@ impl CutoverSeal {
         let old = &self.old_identity;
         let new = &self.new_identity;
         anyhow::ensure!(
-            matches!(self.schema_version, 1..=4)
+            matches!(self.schema_version, 1..=5)
                 && self.new_manager_code_id != H256::zero()
                 && self.config_fingerprint != H256::zero()
                 && self.boundary.beacon_root != H256::zero()
@@ -1427,8 +1573,8 @@ impl CutoverSeal {
                 "HOLD: capability approval does not bind sealed managers"
             );
         }
-        let retirement = decode_status(&self.retirement)?;
-        let readiness = decode_status(&self.readiness)?;
+        let retirement = decode_status(&self.retirement, self.schema_version < 5)?;
+        let readiness = decode_status(&self.readiness, self.schema_version < 5)?;
         anyhow::ensure!(
             retirement.phase == CutoverPhase::Retired
                 && retirement.successor == Some(new.vft_manager_address.0.into())
@@ -1450,6 +1596,12 @@ impl CutoverSeal {
                 && readiness.last_receipt_slot.is_none()
                 && readiness.config_fingerprint == retirement.config_fingerprint,
             "HOLD: cutover retirement/readiness status does not match seal"
+        );
+        anyhow::ensure!(
+            self.schema_version < 5
+                || (retirement.generation > 0
+                    && readiness.predecessor_generation == Some(retirement.generation)),
+            "HOLD: successor readiness belongs to another cutover generation"
         );
         let files = [
             &self.old_state,
@@ -1638,7 +1790,6 @@ pub async fn authenticate_status_pins(seal: &CutoverSeal, api: &GearApi) -> Resu
     );
     let latest = api.last_block_hash().await?;
     let finalized_number = api.block_number_at(latest).await?;
-    let manager = VftManager::new(GClientRemoting::new(api.clone()));
     for (identity, pin) in [
         (&seal.old_identity, &seal.retirement),
         (&seal.new_identity, &seal.readiness),
@@ -1648,13 +1799,20 @@ pub async fn authenticate_status_pins(seal: &CutoverSeal, api: &GearApi) -> Resu
                 && api.get_block_hash(pin.block_number).await? == pin.block_hash,
             "HOLD: cutover finalized history changed"
         );
-        let status = manager
-            .cutover_status()
-            .at_block(pin.block_hash.0.into())
-            .recv(identity.vft_manager_address.0.into())
+        use vft_manager_client::vft_manager::io::CutoverStatus as StatusIo;
+        let reply = api
+            .calculate_reply_for_handle_at(
+                None,
+                identity.vft_manager_address.0.into(),
+                StatusIo::encode_call(),
+                api.block_gas_limit()?,
+                0,
+                Some(pin.block_hash),
+            )
             .await?;
         anyhow::ensure!(
-            status.encode() == pin.status,
+            reply.code.is_success()
+                && reply.payload.strip_prefix(StatusIo::ROUTE) == Some(pin.status.as_slice()),
             "HOLD: saved cutover status changed"
         );
     }
@@ -1696,11 +1854,11 @@ pub struct OriginalJournal {
 }
 pub fn read_original_journal(path: &Path) -> Result<OriginalJournal> {
     let journal: OriginalJournal =
-        serde_json::from_slice(&committed_bytes(&path.join("state.json"))?)?;
+        serde_json::from_value(super::storage::read_journal_inventory(path)?)?;
     anyhow::ensure!(
-        matches!(journal.schema_version, 5..=7)
+        matches!(journal.schema_version, 5..=8)
             && journal.runtime_identity.is_some()
-            && (journal.schema_version == 7 || journal.predecessor_cutover.is_none()),
+            && (journal.schema_version >= 7 || journal.predecessor_cutover.is_none()),
         "HOLD: unsupported original journal identity/schema"
     );
     let mut transactions = std::collections::BTreeSet::new();
@@ -1789,7 +1947,14 @@ async fn verify_original_lane(
         String::new(),
         seal.old_identity.erc20_manager_address,
     )
-    .with_native_wrapper_approval(approved.cloned().map(std::sync::Arc::new));
+    .with_native_wrapper_approval(approved.cloned().map(std::sync::Arc::new))
+    .with_historical_receipt_approvals(
+        coverage
+            .intent
+            .as_ref()
+            .and_then(|intent| intent.coverage_policy.as_ref())
+            .map_or_else(Vec::new, |policy| policy.historical_receipts.clone()),
+    )?;
     authenticate_coverage(seal, &mut coverage, eth, view).await?;
     let authenticated = verify_external_coverage(seal, &journal, &coverage, &sender, api).await?;
     anyhow::ensure!(
@@ -1936,7 +2101,7 @@ fn validate_predecessor(seal: &CutoverSeal, prior: &CutoverSeal) -> Result<()> {
                 .slot
                 .checked_add(1)
                 .context("HOLD: predecessor boundary overflow")?
-            && decode_status(&seal.retirement)?.predecessor
+            && decode_status(&seal.retirement, seal.schema_version < 5)?.predecessor
                 == Some(prior.old_identity.vft_manager_address.0.into()),
         "HOLD: later cutover changed its original predecessor/floor"
     );
@@ -2137,11 +2302,24 @@ pub async fn initialize_successor(
     Ok(predecessor)
 }
 
+fn validate_root_domain(
+    status: &CutoverStatus,
+    approved_code: Option<H256>,
+    approved_floor: Option<u64>,
+) -> Result<()> {
+    anyhow::ensure!(approved_code.is_none() && status.predecessor.is_none()
+        && approved_floor.is_some_and(|floor| floor > 0 && floor == status.minimum_receipt_slot)
+        && matches!(status.phase, CutoverPhase::Active | CutoverPhase::Draining),
+        "HOLD: root lane requires its independently approved positive starting-checkpoint floor and no predecessor; replacement lanes require a cutover seal");
+    Ok(())
+}
+
 /// Transport endpoints may change; the approved replacement, seal and both journal bindings may not.
 pub async fn authenticate_startup(
     identity: &InboundRuntimeIdentity,
     seal_path: Option<&Path>,
     approved_code: Option<H256>,
+    root_minimum_receipt_slot: Option<u64>,
     api: &GearApi,
     eth: &ethereum_client::PollingEthApi,
     approval: Option<&ApprovedNativeWrapper>,
@@ -2155,6 +2333,10 @@ pub async fn authenticate_startup(
         .recv(identity.vft_manager_address.0.into())
         .await?;
     let predecessor = if let Some(path) = seal_path {
+        anyhow::ensure!(
+            root_minimum_receipt_slot.is_none(),
+            "HOLD: successor floor is approved only by its immutable cutover seal"
+        );
         let (seal, hash) = verify_markers(path)?;
         anyhow::ensure!(
             &seal.new_identity == identity && approved_code == Some(seal.new_manager_code_id),
@@ -2198,9 +2380,7 @@ pub async fn authenticate_startup(
         );
         Some(seal.predecessor(hash))
     } else {
-        anyhow::ensure!(approved_code.is_none() && status.predecessor.is_none()
-            && status.minimum_receipt_slot == 0 && matches!(status.phase,CutoverPhase::Active|CutoverPhase::Draining),
-            "HOLD: replacement lane requires its immutable cutover seal and independent code approval");
+        validate_root_domain(&status, approved_code, root_minimum_receipt_slot)?;
         None
     };
     let finalized = api.last_block_hash().await?;
@@ -2362,12 +2542,19 @@ async fn authenticate_original_call(
     Ok(())
 }
 
-/// Authenticate a retained original and its pre-retry native qualification without preparing any call.
+/// Authenticate typed retry evidence, retaining the historical native-only evidence reader.
 pub async fn authenticate_archived_native_retry(
     sender: &MessageSender,
     payload: &eth_events_electra_client::EthToVaraEvent,
     original: &super::message_sender::SignedSubmission,
 ) -> Result<()> {
+    if let Some(qualification) = &original.retry_qualification {
+        let mut connection = sender.api_provider.clone();
+        let api = connection.gclient();
+        return sender
+            .verify_retry_qualification(&api, payload, original, qualification)
+            .await;
+    }
     use super::message_sender::decode_complete_reply;
     use historical_proxy_client::historical_proxy::io::Redirect;
     use vft_manager_client::vft_manager::io::SubmitReceipt;
@@ -2451,7 +2638,7 @@ async fn verify_archived_proof(
         "HOLD: archived owned proof signer changed"
     );
     validate_original_identity(identity, payload, original)?;
-    if original.message_id.is_some() {
+    if original.retry_qualification.is_some() || original.message_id.is_some() {
         return authenticate_archived_native_retry(sender, payload, original).await;
     }
     for continuation in original
@@ -2583,6 +2770,47 @@ mod tests {
     };
     use gear_common::signer_ownership::{lock_cutover_signer, lock_signer, release_cutover_signer};
     use std::sync::Arc;
+
+    // VB-12 reconstructed from HTML; audited 7fe1b032, candidate baseline 3ccf409.
+    #[test]
+    fn root_domain_requires_exact_independent_floor_and_no_predecessor() {
+        let mut status = CutoverStatus {
+            phase: CutoverPhase::Active,
+            predecessor: None,
+            successor: None,
+            minimum_receipt_slot: 10,
+            last_receipt_slot: None,
+            config_fingerprint: None,
+            transfer_count: 0,
+            completed_transfer_count: 0,
+            in_flight_transfer_count: 0,
+            generation: 0,
+            predecessor_generation: None,
+            custody_started: false,
+        };
+        assert!(validate_root_domain(&status, None, Some(10)).is_ok());
+        for floor in [None, Some(0), Some(9), Some(11)] {
+            assert!(validate_root_domain(&status, None, floor).is_err());
+        }
+        assert!(validate_root_domain(&status, Some(H256::repeat_byte(1)), Some(10)).is_err());
+        status.phase = CutoverPhase::Draining;
+        assert!(validate_root_domain(&status, None, Some(10)).is_ok());
+        status.predecessor = Some(H256::repeat_byte(2).0.into());
+        assert!(validate_root_domain(&status, None, Some(10)).is_err());
+        status.predecessor = None;
+        for phase in [
+            CutoverPhase::AwaitingSource,
+            CutoverPhase::Ready,
+            CutoverPhase::Retired,
+            CutoverPhase::Transferring,
+        ] {
+            status.phase = phase;
+            assert!(validate_root_domain(&status, None, Some(10)).is_err());
+        }
+        status.phase = CutoverPhase::Active;
+        status.minimum_receipt_slot = 0;
+        assert!(validate_root_domain(&status, None, Some(0)).is_err());
+    }
 
     fn original_fixture() -> super::super::message_sender::SignedSubmission {
         serde_json::from_value(serde_json::json!({
@@ -2998,6 +3226,65 @@ mod tests {
         )
         .await
         .unwrap();
+        // Reconstructed from HTML7fe1b032 VB-23: two independently approved historical
+        // payment emitters remain one receipt, not an ambiguous or silently unpaid deposit.
+        let mut dual_value = serde_json::to_value(&receipt).unwrap();
+        let mut second_log = dual_value["logs"][0].clone();
+        second_log["address"] = serde_json::json!(Address::repeat_byte(4));
+        second_log["logIndex"] = serde_json::json!("0x1");
+        dual_value["logs"].as_array_mut().unwrap().push(second_log);
+        let dual: TransactionReceipt = serde_json::from_value(dual_value).unwrap();
+        let approved = [
+            primitive_types::H160::repeat_byte(3),
+            primitive_types::H160::repeat_byte(4),
+        ];
+        assert_eq!(
+            super::authenticated_fee_emitters(
+                &eth,
+                &mut view,
+                manager,
+                Some(approved[0]),
+                Some(&approved),
+                &dual
+            )
+            .await
+            .unwrap(),
+            approved
+        );
+        assert!(
+            authenticated_fee_emitter(&eth, &mut view, manager, None, &dual)
+                .await
+                .is_err()
+        );
+        assert!(super::validate_fee_evidence(&approved, None, Some(&approved), true).is_ok());
+        assert!(super::validate_fee_evidence(&approved, Some(approved[0]), None, true).is_err());
+
+        // Reconstructed VB-24: preserve pre-Byzantium PostState in trie bytes, without
+        // interpreting its presence as successful economic admission.
+        let root = alloy_primitives::B256::repeat_byte(9);
+        let mut historical = receipt.clone();
+        historical.inner = ReceiptEnvelope::Legacy(
+            Receipt {
+                status: alloy::consensus::Eip658Value::PostState(root),
+                cumulative_gas_used: 21_000,
+                logs: receipt.inner.logs().to_vec(),
+            }
+            .with_bloom(),
+        );
+        let expected = ReceiptEnvelope::Legacy(
+            Receipt {
+                status: alloy::consensus::Eip658Value::PostState(root),
+                cumulative_gas_used: 21_000,
+                logs: vec![log],
+            }
+            .with_bloom(),
+        );
+        assert_eq!(
+            ethereum_common::utils::map_receipt_envelope(historical.as_ref()).encoded_2718(),
+            expected.encoded_2718()
+        );
+        assert!(!super::preflight::explicit_success(&historical));
+        assert_eq!(original, serde_json::to_vec(&receipt).unwrap());
         rpc.conflicting_calls.store(true, Ordering::SeqCst);
         assert!(
             authenticated_fee_emitter(&eth, &mut view, manager, None, &receipt)
@@ -3270,7 +3557,7 @@ mod tests {
             },
             proof: merkle.proof,
             transaction_index: fixture.tx_index,
-            receipt_rlp: alloy_rlp::encode(&merkle.receipt),
+            receipt_rlp: merkle.receipt.encoded_2718(),
         };
         let mut admission: ExternalCoverageAdmission =
             serde_json::from_value(terminal_admission(None)).unwrap();
@@ -3318,6 +3605,14 @@ mod tests {
             TxStatus::ComposeProof,
         );
         assert!(is_undispatched_old_admission(&transaction));
+        // Reconstructed from HTML7fe1b032 VB-19/25: cold containment is not exclusion.
+        transaction.status = TxStatus::Unprocessable {
+            encoded_envelope_bytes: 3_000_000,
+            required_gas: None,
+            approved_gas: Some(1),
+            diagnostic: "retained oversize liability".into(),
+        };
+        assert!(!is_undispatched_old_admission(&transaction));
         transaction.status = TxStatus::PreparedSubmission;
         assert!(!is_undispatched_old_admission(&transaction));
         transaction.status = TxStatus::Completed;
@@ -3382,6 +3677,9 @@ mod tests {
             transfer_count: 1,
             completed_transfer_count: 1,
             in_flight_transfer_count: 0,
+            generation: 1,
+            predecessor_generation: None,
+            custody_started: true,
         };
         let readiness = CutoverStatus {
             phase: CutoverPhase::Ready,
@@ -3393,6 +3691,9 @@ mod tests {
             transfer_count: 1,
             completed_transfer_count: 0,
             in_flight_transfer_count: 0,
+            generation: 1,
+            predecessor_generation: Some(1),
+            custody_started: false,
         };
         CutoverSeal {
             schema_version: 1,
@@ -3645,11 +3946,13 @@ mod tests {
         chain_seal.boundary.execution_number = 1;
         chain_seal.boundary.execution_hash = last.hash;
         chain_seal.validate().unwrap();
-        validate_coverage_chain(&chain_seal, &[first.clone(), last.clone()]).unwrap();
-        assert!(validate_coverage_chain(&chain_seal, std::slice::from_ref(&last)).is_err());
+        validate_coverage_chain(&chain_seal, &[first.clone(), last.clone()], None).unwrap();
+        assert!(validate_coverage_chain(&chain_seal, std::slice::from_ref(&last), None).is_err());
         let wrong_parent = empty_covered_block(1, H256::repeat_byte(3));
         chain_seal.boundary.execution_hash = wrong_parent.hash;
-        assert!(validate_coverage_chain(&chain_seal, &[first.clone(), wrong_parent]).is_err());
+        assert!(
+            validate_coverage_chain(&chain_seal, &[first.clone(), wrong_parent], None).is_err()
+        );
         let mut malformed = first;
         malformed.raw_transactions.push(vec![0]);
         assert!(validate_covered_block(&malformed).is_err());

@@ -27,16 +27,18 @@ pub const TX_HISTORY_DEPTH: usize = 50_000_000;
 /// Per-log progress lets one authenticated receipt account for every deposit without
 /// repeating effects already completed by an earlier attempt.
 static mut RECEIPT_PROGRESS: Option<BTreeMap<(u64, u64), ReceiptProgress>> = None;
+// Unmapped authenticated deposits remain liabilities after admission rejection.
+static mut UNMAPPED_LIABILITIES: u64 = 0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ReceiptDeposit {
     pub log_index: u64,
     pub sender: H160,
     pub receiver: ActorId,
-    pub token_id: ActorId,
+    pub token_id: Option<ActorId>,
     pub eth_token_id: H160,
     pub amount: U256,
-    pub supply: TokenSupply,
+    pub supply: Option<TokenSupply>,
     pub native: bool,
     pub operation_id: H256,
 }
@@ -76,10 +78,17 @@ pub enum ReceiptRejectionEvidence {
     NativeErrorAbsent {
         child: MessageId,
     },
+    /// No mapping existed at admission; retained liability, never a refund.
+    UnmappedToken,
 }
 
 fn initial_deposit_status(deposit: &ReceiptDeposit) -> DepositStatus {
-    let rejection = if deposit.receiver.is_zero() {
+    let rejection = if deposit.token_id.is_none() || deposit.supply.is_none() {
+        ReceiptRejectionEvidence::UnmappedToken
+    } else if deposit.receiver.is_zero()
+        || (deposit.native
+            && deposit.receiver == ActorId::from(*b"geargeargeargeargeargeargeargear"))
+    {
         ReceiptRejectionEvidence::InvalidRecipient
     } else if deposit.amount.is_zero() {
         ReceiptRejectionEvidence::InvalidAmount
@@ -106,7 +115,8 @@ fn validate_retained_rejection(log: &ReceiptLogProgress) -> Result<(), Error> {
         DepositStatus::Rejected(
             ReceiptRejectionEvidence::InvalidRecipient
             | ReceiptRejectionEvidence::InvalidAmount
-            | ReceiptRejectionEvidence::NativeAmountOverflow,
+            | ReceiptRejectionEvidence::NativeAmountOverflow
+            | ReceiptRejectionEvidence::UnmappedToken,
         ) if log.child.is_some() => Err(Error::InvalidReconciliation),
         _ => Ok(()),
     }
@@ -141,10 +151,10 @@ pub struct ReceiptDepositState {
     pub log_index: u64,
     pub sender: H160,
     pub receiver: ActorId,
-    pub token_id: ActorId,
+    pub token_id: Option<ActorId>,
     pub eth_token_id: H160,
     pub amount: U256,
-    pub supply: TokenSupply,
+    pub supply: Option<TokenSupply>,
     pub native: bool,
     pub operation_id: H256,
     pub child: Option<MessageId>,
@@ -239,7 +249,7 @@ pub(super) fn emit_settled(key: (u64, u64), log: u64) {
             deposit_count: p.deposits.len() as u64,
             operation_id: d.operation_id,
             eth_token_id: d.eth_token_id,
-            vara_token_id: d.token_id,
+            vara_token_id: d.token_id.expect("Settled deposit has a mapping"),
             sender: d.sender,
             receiver: d.receiver,
             amount: d.amount,
@@ -286,7 +296,7 @@ pub(super) fn emit_refunded(
             deposit_count: p.deposits.len() as u64,
             operation_id: d.operation_id,
             eth_token_id: d.eth_token_id,
-            vara_token_id: d.token_id,
+            vara_token_id: d.token_id.expect("Refunded deposit has a mapping"),
             sender: d.sender,
             receiver: d.receiver,
             amount: d.amount,
@@ -453,6 +463,9 @@ fn resolved_transactions_mut() -> &'static mut BTreeSet<(u64, u64)> {
 /// Reconcile original native attempts even when a sibling remains ambiguous.
 /// This may retry original full-return credit, but never creates a native payout.
 pub async fn reconcile_receipt(key: (u64, u64), config: &Config) -> Result<ReceiptStatus, Error> {
+    let service = VftManager::new();
+    service.ensure_receipt_domain(key.0)?;
+    service.ensure_running()?;
     if receipt_status(key) != ReceiptStatus::Reserved {
         return Ok(receipt_status(key));
     }
@@ -608,7 +621,9 @@ async fn resolve_log(guard: &LogGuard<'_>, config: &Config) -> Result<DepositSta
     if !deposit.native {
         return Err(Error::InvalidReconciliation);
     }
-    if token_operations::native_mode(deposit.token_id)? == super::NativeWrapperMode::EscrowV1 {
+    if token_operations::native_mode(deposit.token_id.ok_or(Error::InvalidReconciliation)?)?
+        == super::NativeWrapperMode::EscrowV1
+    {
         return Err(Error::NativeHoldUnsupported);
     }
     let original =
@@ -672,7 +687,9 @@ fn receipt_status_in(
 }
 
 pub(super) fn is_quiescent() -> bool {
-    reserved_transactions().is_empty() && token_operations::is_quiescent()
+    reserved_transactions().is_empty()
+        && token_operations::is_quiescent()
+        && unsafe { UNMAPPED_LIABILITIES == 0 }
 }
 
 /// Complete only fully terminal receipts, keeping exceptions out of successful history.
@@ -722,6 +739,7 @@ pub fn seed() {
         RESERVED_TRANSACTIONS = Some(BTreeSet::new());
         RESOLVED_TRANSACTIONS = Some(BTreeSet::new());
         RECEIPT_PROGRESS = Some(BTreeMap::new());
+        UNMAPPED_LIABILITIES = 0;
     }
 }
 
@@ -749,10 +767,10 @@ pub(super) async fn benchmark_reply(
         log_index: 0,
         sender: H160::zero(),
         receiver: source,
-        token_id: source,
+        token_id: Some(source),
         eth_token_id: H160::zero(),
         amount: 100u32.into(),
-        supply,
+        supply: Some(supply),
         native: false,
         operation_id: identity,
     };
@@ -808,9 +826,8 @@ pub async fn submit_receipt(
     receipt_rlp: Vec<u8>,
 ) -> Result<(), Error> {
     service.ensure_receipt_domain(slot)?;
-    use alloy_rlp::Decodable;
     use alloy_sol_types::SolEvent;
-    use ethereum_common::utils::ReceiptEnvelope;
+    use ethereum_common::utils::decode_canonical_receipt;
 
     let Some(erc20_manager_address) = service.state().erc20_manager_address else {
         panic!("Address of the ERC20Manger is not set");
@@ -821,12 +838,12 @@ pub async fn submit_receipt(
 
     use ethereum_common::{hash_db::Hasher, keccak_hasher::KeccakHasher};
     let receipt_hash = KeccakHasher::hash(&receipt_rlp);
-    let mut input = &receipt_rlp[..];
-    let receipt = ReceiptEnvelope::decode(&mut input).map_err(|_| Error::UnsupportedEthEvent)?;
-    if !input.is_empty() {
-        return Err(Error::UnsupportedEthEvent);
-    }
-    if !receipt.is_success() {
+    let receipt = decode_canonical_receipt(&receipt_rlp).map_err(|_| Error::UnsupportedEthEvent)?;
+    if receipt
+        .as_receipt()
+        .and_then(|receipt| receipt.status.as_eip658())
+        != Some(true)
+    {
         return Err(Error::UnsupportedEthEvent);
     }
 
@@ -862,12 +879,9 @@ pub async fn submit_receipt(
                 .state()
                 .token_map
                 .get_vara_token_id(&eth_token_id)
-                .map_err(|_| Error::UnsupportedEthEvent)?;
-            let supply = service
-                .state()
-                .token_map
-                .get_supply_type(&token_id)
-                .map_err(|_| Error::UnsupportedEthEvent)?;
+                .ok();
+            let supply =
+                token_id.and_then(|token| service.state().token_map.get_supply_type(&token).ok());
             // SCALE of this fixed-width identity is exactly 161 bytes, with no tags
             // or vector prefix. Keep the same wire identity without a per-log allocation.
             let mut operation = [0u8; 161];
@@ -890,7 +904,7 @@ pub async fn submit_receipt(
                 native: service
                     .state()
                     .native_wrapper
-                    .is_some_and(|wrapper| wrapper.actor_id == token_id),
+                    .is_some_and(|wrapper| Some(wrapper.actor_id) == token_id),
                 operation_id: KeccakHasher::hash(&operation),
             });
         }
@@ -943,6 +957,20 @@ pub async fn submit_receipt(
                     child: None,
                 })
                 .collect();
+            let unmapped = progress_deposits
+                .iter()
+                .filter(|log| {
+                    matches!(
+                        log.status,
+                        DepositStatus::Rejected(ReceiptRejectionEvidence::UnmappedToken)
+                    )
+                })
+                .count() as u64;
+            unsafe {
+                UNMAPPED_LIABILITIES = UNMAPPED_LIABILITIES
+                    .checked_add(unmapped)
+                    .expect("Liability count overflow");
+            }
             let has_processing_work = progress_deposits
                 .iter()
                 .any(|log| !log.status.is_terminal());
@@ -966,6 +994,14 @@ pub async fn submit_receipt(
     let mut retryable_error = None;
     let mut ambiguous_error = None;
     for deposit in &deposits {
+        if let Err(error) = service
+            .ensure_running()
+            .and_then(|_| service.ensure_receipt_domain(slot))
+        {
+            complete_transaction(key);
+            release_receipt_lease(key, generation);
+            return Err(error);
+        }
         if !owns_generation(key, generation) {
             return Err(Error::ReceiptLeaseActive);
         }
@@ -1008,13 +1044,16 @@ pub async fn submit_receipt(
             set_deposit_status(key, deposit.log_index, DepositStatus::InFlight);
         }
         let result = match deposit.supply {
-            TokenSupply::Ethereum => {
+            Some(TokenSupply::Ethereum) => {
                 token_operations::mint_log(key, deposit, service.config()).await
             }
-            TokenSupply::Gear if deposit.native => {
+            Some(TokenSupply::Gear) if deposit.native => {
                 token_operations::redeem_native_log(key, deposit, service.config()).await
             }
-            TokenSupply::Gear => token_operations::unlock_log(key, deposit, service.config()).await,
+            Some(TokenSupply::Gear) => {
+                token_operations::unlock_log(key, deposit, service.config()).await
+            }
+            None => Err(Error::InvalidReconciliation),
         };
         if !owns_generation(key, generation) {
             return Err(Error::ReceiptLeaseActive);
@@ -1022,6 +1061,11 @@ pub async fn submit_receipt(
         if service.state().economic_revision != revision {
             release_receipt_lease(key, generation);
             return Err(Error::InvalidReconciliation);
+        }
+        if let Err(error) = service.ensure_running() {
+            complete_transaction(key);
+            release_receipt_lease(key, generation);
+            return Err(error);
         }
         if let Err(error) = result {
             match deposit_status(key, deposit.log_index) {
@@ -1156,10 +1200,10 @@ mod tests {
             log_index: 0,
             sender: H160::zero(),
             receiver: ActorId::from([1; 32]),
-            token_id: ActorId::from([2; 32]),
+            token_id: Some(ActorId::from([2; 32])),
             eth_token_id: H160::zero(),
             amount: 5u64.into(),
-            supply: TokenSupply::Gear,
+            supply: Some(TokenSupply::Gear),
             native: true,
             operation_id: H256([3; 32]),
         }

@@ -1,8 +1,17 @@
 use crate::{message_relayer::common::RelayedMerkleRoot, rpc};
 use gear_common::api_provider::ApiProviderConnection;
 use gear_rpc_client::dto::MerkleProof;
+use std::future::Future;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use uuid::Uuid;
+
+#[derive(serde::Deserialize)]
+struct RpcProof {
+    root: primitive_types::H256,
+    proof: Vec<primitive_types::H256>,
+    number_of_leaves: u64,
+    leaf_index: u64,
+}
 
 pub struct Request {
     pub tx_uuid: Uuid,
@@ -13,7 +22,8 @@ pub struct Request {
 }
 
 pub struct Response {
-    pub proof: MerkleProof,
+    /// None is unavailable membership evidence, never authenticated absence.
+    pub proof: Option<MerkleProof>,
     pub merkle_root: RelayedMerkleRoot,
     pub tx_uuid: Uuid,
 }
@@ -85,9 +95,23 @@ async fn task(
                     api_provider,
                     "message inclusion merkle proof",
                     move |gear_api| async move {
-                        gear_api
-                            .fetch_message_inclusion_merkle_proof(block_hash, message_hash.into())
-                            .await
+                        let proof: Option<RpcProof> = gear_api
+                            .api
+                            .rpc()
+                            .request(
+                                "gearEthBridge_merkleProof",
+                                subxt_rpcs::rpc_params![
+                                    primitive_types::H256(message_hash),
+                                    Some(block_hash)
+                                ],
+                            )
+                            .await?;
+                        Ok(proof.map(|proof| MerkleProof {
+                            root: proof.root.0,
+                            proof: proof.proof.into_iter().map(|hash| hash.0).collect(),
+                            num_leaves: proof.number_of_leaves,
+                            leaf_index: proof.leaf_index,
+                        }))
                     },
                 )
             },
@@ -123,7 +147,7 @@ async fn deliver_next<F, Fut>(
 ) -> anyhow::Result<bool>
 where
     F: FnOnce(primitive_types::H256, [u8; 32]) -> Fut,
-    Fut: std::future::Future<Output = anyhow::Result<MerkleProof>>,
+    Fut: Future<Output = anyhow::Result<Option<MerkleProof>>>,
 {
     if current.is_none() {
         *current = requests.recv().await;
@@ -136,7 +160,20 @@ where
         request.tx_uuid, request.message_block, hex::encode(request.message_nonce),
         request.merkle_root.merkle_root, request.merkle_root.block, request.merkle_root.block_hash,
     );
+    anyhow::ensure!(
+        request.merkle_root.queue_id.is_some()
+            && request.merkle_root.block.0 >= request.message_block,
+        "HOLD: unqualified or earlier proof candidate"
+    );
     let proof = fetch(request.merkle_root.block_hash, request.message_hash).await?;
+    if let Some(proof) = &proof {
+        anyhow::ensure!(
+            proof.root == request.merkle_root.merkle_root.0
+                && proof.num_leaves > 0
+                && proof.leaf_index < proof.num_leaves,
+            "HOLD: malformed or mismatched candidate membership proof"
+        );
+    }
     responses.send(Response {
         proof,
         merkle_root: request.merkle_root,
@@ -159,6 +196,7 @@ mod tests {
             message_hash: hash,
             message_nonce: [7; 32],
             merkle_root: RelayedMerkleRoot {
+                queue_id: Some(0),
                 block: GearBlockNumber(43),
                 block_hash: H256::repeat_byte(8),
                 timestamp: 123,
@@ -168,13 +206,16 @@ mod tests {
         }
     }
 
-    async fn single_leaf_proof(_: H256, message_hash: [u8; 32]) -> anyhow::Result<MerkleProof> {
-        Ok(MerkleProof {
+    async fn single_leaf_proof(
+        _: H256,
+        message_hash: [u8; 32],
+    ) -> anyhow::Result<Option<MerkleProof>> {
+        Ok(Some(MerkleProof {
             root: message_hash,
             proof: vec![],
             num_leaves: 1,
             leaf_index: 0,
-        })
+        }))
     }
 
     #[tokio::test]
@@ -203,7 +244,7 @@ mod tests {
         );
         let first = received.try_recv().unwrap();
         assert_eq!(first.tx_uuid, original);
-        assert_eq!(first.proof.root, [3; 32]);
+        assert_eq!(first.proof.unwrap().root, [3; 32]);
         assert!(
             deliver_next(&mut current, &mut requests, &responses, single_leaf_proof)
                 .await
@@ -211,7 +252,7 @@ mod tests {
         );
         let second = received.try_recv().unwrap();
         assert_eq!(second.tx_uuid, later);
-        assert_eq!(second.proof.root, [4; 32]);
+        assert_eq!(second.proof.unwrap().root, [4; 32]);
         assert!(
             !deliver_next(&mut current, &mut requests, &responses, single_leaf_proof)
                 .await
@@ -234,5 +275,34 @@ mod tests {
                 .is_err()
         );
         assert_eq!(current.as_ref().unwrap().tx_uuid, original);
+    }
+
+    /// Reconstructed from supplied HTML VB-15, audited 7fe1b032; not the missing original PoC.
+    #[tokio::test]
+    async fn unavailable_membership_does_not_fence_unrelated_messages() {
+        let (sender, mut requests) = mpsc::unbounded_channel();
+        let (responses, mut received) = mpsc::unbounded_channel();
+        let absent = Uuid::new_v4();
+        let valid = Uuid::new_v4();
+        sender.send(request(absent, [3; 32])).unwrap();
+        sender.send(request(valid, [4; 32])).unwrap();
+        let mut current = None;
+        assert!(
+            deliver_next(&mut current, &mut requests, &responses, |_, _| async {
+                Ok(None)
+            })
+            .await
+            .unwrap()
+        );
+        let rejected = received.recv().await.unwrap();
+        assert_eq!(rejected.tx_uuid, absent);
+        assert!(rejected.proof.is_none());
+        assert!(current.is_none());
+        assert!(
+            deliver_next(&mut current, &mut requests, &responses, single_leaf_proof)
+                .await
+                .unwrap()
+        );
+        assert_eq!(received.recv().await.unwrap().tx_uuid, valid);
     }
 }

@@ -28,9 +28,21 @@ impl<'a> ReplayBack<'a> {
         headers: Vec<BeaconBlockHeader>,
     ) -> Result<ReplayBackStatus, ReplayBackError> {
         let (network, slot, sync_committee_current, sync_committee_next, revision) = {
-            let state = self.state.borrow();
-            if state.replay_back.is_some() {
-                return Err(ReplayBackError::AlreadyStarted);
+            let mut state = self.state.borrow_mut();
+            if let Some(replay) = &state.replay_back {
+                if replay.finalized_header != sync_update.finalized_header {
+                    return Err(ReplayBackError::AlreadyStarted);
+                }
+                return process_headers(self, &mut state, headers).map(|finished| {
+                    if finished {
+                        ReplayBackStatus::Finished
+                    } else {
+                        ReplayBackStatus::InProcess
+                    }
+                });
+            }
+            if state.finalized_header == sync_update.finalized_header {
+                return Ok(ReplayBackStatus::Finished);
             }
 
             (
@@ -61,14 +73,31 @@ impl<'a> ReplayBack<'a> {
             .finalized_header
             .ok_or(ReplayBackError::NoFinalityUpdate)?;
         let mut state = self.state.borrow_mut();
-        if state.replay_back.is_some() {
-            return Err(ReplayBackError::AlreadyStarted);
+        if let Some(replay) = &state.replay_back {
+            if replay.finalized_header != finalized_header {
+                return Err(ReplayBackError::AlreadyStarted);
+            }
+            return process_headers(self, &mut state, headers).map(|finished| {
+                if finished {
+                    ReplayBackStatus::Finished
+                } else {
+                    ReplayBackStatus::InProcess
+                }
+            });
         }
         if state.revision != revision {
+            if state.finalized_header == finalized_header {
+                return Ok(ReplayBackStatus::Finished);
+            }
             return Err(Error::StateChanged.into());
         }
         let base_checkpoint = state.checkpoints.last().expect("Initial checkpoint");
-        validate_headers(&finalized_header, base_checkpoint, &headers)?;
+        validate_headers(
+            &finalized_header,
+            base_checkpoint,
+            &headers,
+            &finalized_header,
+        )?;
         let tree_hash_root = finalized_header.tree_hash_root();
         state.replay_back = Some(ReplayBackState {
             base_checkpoint,
@@ -77,11 +106,6 @@ impl<'a> ReplayBack<'a> {
             checkpoints: {
                 let mut checkpoints = Vec::with_capacity(EPOCHS_PER_SYNC_COMMITTEE as usize);
                 checkpoints.push((finalized_header.slot, tree_hash_root));
-                self.emit_event(Event::NewCheckpoint {
-                    slot: finalized_header.slot,
-                    tree_hash_root,
-                })
-                .expect("Failed to deposit event");
                 checkpoints
             },
             last_header: finalized_header,
@@ -133,7 +157,10 @@ fn process_headers(
         &replay_back.last_header,
         replay_back.base_checkpoint,
         &headers,
+        &replay_back.finalized_header,
     )?;
+    // Concurrent callers may include already-consumed ancestry. It has no new effect.
+    headers.truncate(headers.partition_point(|header| header.slot < replay_back.last_header.slot));
     let previous_slot = replay_back.last_header.slot;
 
     // check blocks hashes
@@ -156,12 +183,6 @@ fn process_headers(
             .expect("At least contains finalized header; qed");
         if slot % SLOTS_PER_EPOCH == 0 || slot + SLOTS_PER_EPOCH < *slot_next {
             replay_back.checkpoints.push((slot, hash));
-            service
-                .emit_event(Event::NewCheckpoint {
-                    slot,
-                    tree_hash_root: hash,
-                })
-                .expect("Failed to deposit event");
         }
     }
 
@@ -208,12 +229,30 @@ fn validate_headers(
     last: &BeaconBlockHeader,
     base: (u64, ethereum_common::Hash256),
     headers: &[BeaconBlockHeader],
+    target: &BeaconBlockHeader,
 ) -> Result<(), ReplayBackError> {
-    if headers.windows(2).any(|pair| pair[0].slot >= pair[1].slot) {
+    if headers.last().is_some_and(|header| {
+        header.slot > target.slot || (header.slot == target.slot && header != target)
+    }) {
+        return Err(Error::InvalidHeaders.into());
+    }
+    if headers
+        .windows(2)
+        .any(|pair| pair[0].slot >= pair[1].slot || pair[1].parent_root != pair[0].tree_hash_root())
+    {
         return Err(Error::InvalidHeaders.into());
     }
     let mut child = last;
     for header in headers.iter().rev() {
+        if header.slot > last.slot {
+            continue;
+        }
+        if header.slot == last.slot {
+            if header.tree_hash_root() != last.tree_hash_root() {
+                return Err(Error::InvalidHeaders.into());
+            }
+            continue;
+        }
         if header.slot < base.0
             || header.slot >= child.slot
             || header.tree_hash_root() != child.parent_root

@@ -64,6 +64,159 @@ async fn fund(remoting: &GTestRemoting, native: ActorId, manager: ActorId, raw: 
         .unwrap());
 }
 
+/// Reconstructed from supplied HTML G3-03/G3-05, audited 7fe1b032; real immutable-v1 replies.
+#[tokio::test]
+async fn reconstructed_html_pause_during_native_query_cannot_credit_backing() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id: manager,
+        gear_supply_vft: native,
+        eth_supply_vft: recipient,
+    } = fixture().await;
+    let raw = 2_000_000_000_000u128;
+    fund(&remoting, native, manager, raw).await;
+    let receipt = deposit_receipt(recipient, ERC20_TOKEN_GEAR_SUPPLY, U256::from(raw));
+    assert_eq!(
+        submit_receipt_events(&remoting, manager, 81, 0, receipt).0,
+        Err(Error::NativeSettlementPending)
+    );
+    let mut admin = VftManagerC::new(remoting.clone());
+    let row = receipt_deposits(&admin, manager, 81, 0).await.remove(0);
+    let escrow = vft_vara_v1_client::NativeEscrow::new(remoting.clone());
+    let returned = escrow
+        .redemption(row.operation_id)
+        .recv(native)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(returned.returned_value, raw);
+    let mut reconciliation =
+        VftManagerC::new(remoting.clone().with_block_run_mode(BlockRunMode::Manual));
+    let mut controller =
+        VftManagerC::new(remoting.clone().with_block_run_mode(BlockRunMode::Manual));
+    let pending = reconciliation
+        .reconcile_receipt(81, 0)
+        .send(manager)
+        .await
+        .unwrap();
+    let pause = controller.pause().send(manager).await.unwrap();
+    for _ in 0..8 {
+        remoting.run_next_block();
+    }
+    pause.recv().now_or_never().unwrap().unwrap();
+    assert_eq!(
+        pending.recv().now_or_never().unwrap().unwrap(),
+        Err(Error::Paused)
+    );
+    assert_eq!(
+        escrow
+            .redemption(row.operation_id)
+            .recv(native)
+            .await
+            .unwrap(),
+        Some(returned)
+    );
+    assert_eq!(balance_of(&remoting, native, recipient).await, U256::zero());
+    assert_eq!(receipt_deposits(&admin, manager, 81, 0).await, vec![row]);
+    assert_eq!(
+        escrow.outstanding_redemptions().recv(native).await.unwrap(),
+        1
+    );
+    admin.unpause().send_recv(manager).await.unwrap();
+    assert_eq!(
+        admin
+            .reconcile_receipt(81, 0)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Ok(ReceiptStatus::Processed)
+    );
+    assert_eq!(
+        balance_of(&remoting, native, recipient).await,
+        U256::from(raw)
+    );
+    assert_eq!(
+        escrow.outstanding_redemptions().recv(native).await.unwrap(),
+        0
+    );
+}
+
+/// Reconstructed from supplied HTML VB-07, audited 7fe1b032; candidate Wasm + immutable v1.
+#[tokio::test]
+async fn reconstructed_html_system_recipient_keeps_valid_sibling_and_v1_backing() {
+    let Fixture {
+        remoting,
+        vft_manager_program_id: manager,
+        gear_supply_vft: native,
+        eth_supply_vft: token,
+    } = fixture().await;
+    let raw = 2_000_000_000_000u128;
+    fund(&remoting, native, manager, raw).await;
+    let recipient: ActorId = 110_201.into();
+    remoting.system().mint_to(recipient, 1_000_000_000_000);
+    let system = ActorId::from(*b"geargeargeargeargeargeargeargear");
+    let receipt = crate::create_receipt_rlp_with_logs(
+        ERC20_MANAGER_ADDRESS,
+        vec![
+            (
+                H160([3; 20]),
+                system,
+                ERC20_TOKEN_GEAR_SUPPLY,
+                U256::from(raw),
+            ),
+            (
+                H160([4; 20]),
+                recipient,
+                ERC20_TOKEN_ETH_SUPPLY,
+                U256::from(17u64),
+            ),
+        ],
+    );
+    let admin = VftManagerC::new(remoting.clone());
+    assert_eq!(
+        submit_receipt_events(&remoting, manager, 80, 0, receipt.clone()).0,
+        Err(Error::ReceiptResolved)
+    );
+    let rows = receipt_deposits(&admin, manager, 80, 0).await;
+    assert_eq!(rows[0].receiver, system);
+    assert_eq!(rows[0].child, None);
+    assert_eq!(rows[0].outcome, ReceiptDepositOutcome::Rejected);
+    assert_eq!(
+        admin
+            .receipt_rejection(80, 0, 0)
+            .recv(manager)
+            .await
+            .unwrap(),
+        Some(vft_manager_client::ReceiptRejectionEvidence::InvalidRecipient)
+    );
+    assert_eq!(rows[1].outcome, ReceiptDepositOutcome::Settled);
+    assert_eq!(
+        balance_of(&remoting, token, recipient).await,
+        U256::from(17u64)
+    );
+    assert_eq!(
+        balance_of(&remoting, native, manager).await,
+        U256::from(raw)
+    );
+    let escrow = vft_vara_v1_client::NativeEscrow::new(remoting.clone());
+    assert_eq!(
+        escrow
+            .redemption(rows[0].operation_id)
+            .recv(native)
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        escrow.outstanding_redemptions().recv(native).await.unwrap(),
+        0
+    );
+    assert_eq!(
+        submit_receipt_events(&remoting, manager, 80, 0, receipt).0,
+        Err(Error::AlreadyProcessed)
+    );
+}
+
 #[tokio::test]
 async fn vft_manager_v1_paused_error_exact_retry_predicate_and_normal_delivery() {
     let Fixture {
@@ -178,6 +331,15 @@ async fn vft_manager_v1_paused_error_exact_retry_predicate_and_normal_delivery()
     let payout = Log::builder().source(native).dest(recipient);
     mailbox.claim_value(payout.clone()).unwrap();
     remoting.system().run_next_block();
+    assert_eq!(
+        admin
+            .reconcile_receipt(70, 0)
+            .send_recv(manager)
+            .await
+            .unwrap(),
+        Err(Error::Paused)
+    );
+    admin.unpause().send_recv(manager).await.unwrap();
     for _ in 0..2 {
         assert_eq!(
             admin
@@ -205,7 +367,6 @@ async fn vft_manager_v1_paused_error_exact_retry_predicate_and_normal_delivery()
     assert_eq!(balance_of(&remoting, native, recipient).await, U256::zero());
     assert_eq!(balance_of(&remoting, native, manager).await, U256::zero());
     assert!(mailbox.claim_value(payout).is_err());
-    admin.unpause().send_recv(manager).await.unwrap();
     assert_eq!(
         submit_receipt_events(&remoting, manager, 70, 0, receipt).0,
         Err(Error::AlreadyProcessed)
@@ -266,6 +427,15 @@ async fn vft_manager_v1_exact_full_original_refunds_once_and_zero_outstanding_ha
         resolve_receipt_events(&remoting, source, 71, 0, &row).0,
         Err(Error::NativeHoldUnsupported)
     );
+    assert_eq!(
+        admin
+            .reconcile_receipt(71, 0)
+            .send_recv(source)
+            .await
+            .unwrap(),
+        Err(Error::Paused)
+    );
+    admin.unpause().send_recv(source).await.unwrap();
     for _ in 0..2 {
         assert_eq!(
             admin
@@ -276,6 +446,7 @@ async fn vft_manager_v1_exact_full_original_refunds_once_and_zero_outstanding_ha
             Ok(ReceiptStatus::Processed)
         );
     }
+    admin.pause().send_recv(source).await.unwrap();
     let refunded = escrow
         .redemption(row.operation_id)
         .recv(native)
@@ -304,7 +475,7 @@ async fn vft_manager_v1_exact_full_original_refunds_once_and_zero_outstanding_ha
     assert!(wrapper_admin.is_paused().recv(native).await.unwrap());
     // Immutable v1 has no BlockingRedemptions/HeldRedemption/HoldRedemption.
     // Successful reconciliation and handoff therefore exercise only its real ABI.
-    let destination = upgrade_destination(&remoting, source).await;
+    let destination = upgrade_destination(&remoting, source, 72).await;
     configure_cutover_destination(&remoting, source, destination).await;
     let approved = binding(&remoting, native);
     assert_eq!(
@@ -321,8 +492,14 @@ async fn vft_manager_v1_exact_full_original_refunds_once_and_zero_outstanding_ha
         .await
         .unwrap();
     wrapper_admin.resume().send_recv(native).await.unwrap();
+    let begin_generation = admin
+        .cutover_status()
+        .recv(source)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 72)
+        .begin_cutover(destination, 72, begin_generation)
         .send_recv(source)
         .await
         .unwrap();
@@ -520,6 +697,15 @@ async fn vft_manager_v1_queued_partial_exact_success_excess_ambiguous_block_cuto
             resolve_receipt_events(&remoting, source, 73, 0, &row).0,
             Err(Error::NativeHoldUnsupported)
         );
+        assert_eq!(
+            admin
+                .reconcile_receipt(73, 0)
+                .send_recv(source)
+                .await
+                .unwrap(),
+            Err(Error::Paused)
+        );
+        admin.unpause().send_recv(source).await.unwrap();
         for _ in 0..2 {
             let _ = admin
                 .reconcile_receipt(73, 0)
@@ -539,10 +725,17 @@ async fn vft_manager_v1_queued_partial_exact_success_excess_ambiguous_block_cuto
                 Some(original.clone())
             );
         }
-        let destination = upgrade_destination(&remoting, source).await;
+        admin.pause().send_recv(source).await.unwrap();
+        let destination = upgrade_destination(&remoting, source, 74).await;
         configure_cutover_destination(&remoting, source, destination).await;
+        let begin_generation = admin
+            .cutover_status()
+            .recv(source)
+            .await
+            .unwrap()
+            .generation;
         admin
-            .begin_cutover(destination, 74)
+            .begin_cutover(destination, 74, begin_generation)
             .send_recv(source)
             .await
             .unwrap();
@@ -701,7 +894,7 @@ async fn vft_manager_v1_capability_freeze_and_original_fingerprint() {
             Some(approved.clone())
         );
     }
-    let destination = upgrade_destination(&remoting, source).await;
+    let destination = upgrade_destination(&remoting, source, 76).await;
     configure_cutover_destination(&remoting, source, destination).await;
     let mut mismatched = approved.clone();
     mismatched.mode = NativeWrapperMode::HeldEscrowV2;
@@ -728,8 +921,14 @@ async fn vft_manager_v1_capability_freeze_and_original_fingerprint() {
         b"vft-manager/cutover-config/v1"
     );
     let expected = KeccakHasher::hash(&old_bytes);
+    let begin_generation = admin
+        .cutover_status()
+        .recv(source)
+        .await
+        .unwrap()
+        .generation;
     admin
-        .begin_cutover(destination, 76)
+        .begin_cutover(destination, 76, begin_generation)
         .send_recv(source)
         .await
         .unwrap();

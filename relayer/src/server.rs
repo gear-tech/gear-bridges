@@ -3,7 +3,7 @@ use crate::message_relayer::common::web_request::{
 };
 use actix_web::{guard, middleware, web, App, HttpRequest, HttpResponse, HttpServer};
 use std::{collections::HashSet, net::TcpListener};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{error::TrySendError, Sender, UnboundedSender};
 
 const HEADER_TOKEN: &str = "X-Token";
 
@@ -67,7 +67,7 @@ async fn relay_transactions(
     transactions: web::Json<EthTransactions>,
     secret: web::Data<Secret>,
     log_context: web::Data<LogContext>,
-    channel: web::Data<UnboundedSender<EthTransaction>>,
+    channel: web::Data<Sender<EthTransaction>>,
 ) -> HttpResponse {
     if !request
         .headers()
@@ -80,35 +80,31 @@ async fn relay_transactions(
     }
 
     let transactions = transactions.into_inner().transactions;
-    let len = transactions.len();
-    let mut to_process = len;
-
-    let mut seen = HashSet::with_capacity(len);
-
-    for transaction in transactions {
-        if !seen.insert(transaction.tx_hash.clone()) {
-            to_process -= 1;
-            continue;
-        }
-        match channel.send(transaction.clone()) {
-            Ok(_) => to_process -= 1,
-
-            Err(e) => {
-                log::error!(
-                    r#"[{}] Unable to send transaction "{transaction:?}": {e:?}"#,
-                    log_context.0.as_str()
-                );
-            }
-        }
+    let mut seen = HashSet::with_capacity(transactions.len());
+    let transactions: Vec<_> = transactions
+        .into_iter()
+        .filter(|transaction| seen.insert(transaction.tx_hash.clone()))
+        .collect();
+    if transactions.is_empty() {
+        return HttpResponse::Ok().finish();
     }
-
-    if to_process == 0 {
-        HttpResponse::Ok().finish()
-    } else if to_process == len {
-        HttpResponse::InternalServerError().finish()
-    } else {
-        HttpResponse::Accepted().finish()
+    // Reserve the entire batch atomically: overload never partially accepts a request.
+    let permits = match channel.try_reserve_many(transactions.len()) {
+        Ok(permits) => permits,
+        Err(TrySendError::Full(_)) => {
+            return HttpResponse::TooManyRequests()
+                .insert_header(("Retry-After", "1"))
+                .finish();
+        }
+        Err(TrySendError::Closed(_)) => {
+            log::error!("[{}] Transaction receiver unavailable", log_context.0);
+            return HttpResponse::InternalServerError().finish();
+        }
+    };
+    for (permit, transaction) in permits.zip(transactions) {
+        permit.send(transaction);
     }
+    HttpResponse::Ok().finish()
 }
 
 pub fn create(
@@ -116,7 +112,7 @@ pub fn create(
     secret: String,
     log_context: String,
     messages_channel: Option<UnboundedSender<Message>>,
-    transactions_channel: Option<UnboundedSender<EthTransaction>>,
+    transactions_channel: Option<Sender<EthTransaction>>,
 ) -> std::io::Result<actix_web::dev::Server> {
     let messages_channel = messages_channel.map(web::Data::new);
     let transactions_channel = transactions_channel.map(web::Data::new);
@@ -319,7 +315,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
 
         const SECRET: &str = "SECRET123";
-        let (channel, mut receiver) = mpsc::unbounded_channel();
+        let (channel, mut receiver) = mpsc::channel(128);
         let server = super::create(
             listener,
             SECRET.to_string(),
@@ -449,7 +445,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
 
         const SECRET: &str = "SECRET123";
-        let (channel, receiver) = mpsc::unbounded_channel();
+        let (channel, receiver) = mpsc::channel(128);
         drop(receiver);
         let server = super::create(
             listener,
@@ -515,7 +511,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         const SECRET: &str = "SECRET123";
         let (messages, mut message_receiver) = mpsc::unbounded_channel();
-        let (transactions, mut transaction_receiver) = mpsc::unbounded_channel();
+        let (transactions, mut transaction_receiver) = mpsc::channel(128);
         let server = super::create(
             listener,
             SECRET.to_string(),
@@ -558,6 +554,64 @@ mod tests {
         }
         assert!(message_receiver.try_recv().is_err());
         assert!(transaction_receiver.try_recv().is_err());
+    }
+
+    // Reconstructed from supplied PR860 HTML, C4; not the unavailable original PoC.
+    #[actix_web::test]
+    async fn reconstructed_transaction_overload_is_atomic_and_recovers() {
+        let (channel, mut receiver) = mpsc::channel(128);
+        let transaction = EthTransaction {
+            tx_hash: format!("0x{}", "ab".repeat(32)),
+        };
+        for _ in 0..127 {
+            channel.try_send(transaction.clone()).unwrap();
+        }
+        let app = actix_web::test::init_service(
+            App::new()
+                .app_data(web::Data::new(Secret("secret".into())))
+                .app_data(web::Data::new(LogContext("overload".into())))
+                .app_data(web::Data::new(channel.clone()))
+                .route("/relay_transactions", web::post().to(relay_transactions)),
+        )
+        .await;
+        let batch = EthTransactions {
+            transactions: vec![
+                transaction.clone(),
+                EthTransaction {
+                    tx_hash: format!("0x{}", "cd".repeat(32)),
+                },
+            ],
+        };
+        let request = actix_web::test::TestRequest::post()
+            .uri("/relay_transactions")
+            .insert_header((HEADER_TOKEN, "secret"))
+            .set_json(&batch)
+            .to_request();
+        let response = actix_web::test::call_service(&app, request).await;
+        assert_eq!(
+            response.status(),
+            actix_web::http::StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(response.headers().get("Retry-After").unwrap(), "1");
+        assert_eq!(receiver.len(), 127, "overload must not partially enqueue");
+        receiver.recv().await.unwrap();
+        let request = actix_web::test::TestRequest::post()
+            .uri("/relay_transactions")
+            .insert_header((HEADER_TOKEN, "secret"))
+            .set_json(&batch)
+            .to_request();
+        let response = actix_web::test::call_service(&app, request).await;
+        assert_eq!(response.status(), actix_web::http::StatusCode::OK);
+        assert_eq!(receiver.len(), 128);
+        let request = actix_web::test::TestRequest::post()
+            .uri("/relay_transactions")
+            .insert_header((HEADER_TOKEN, "secret"))
+            .set_json(&batch)
+            .to_request();
+        assert_eq!(
+            actix_web::test::call_service(&app, request).await.status(),
+            actix_web::http::StatusCode::TOO_MANY_REQUESTS
+        );
     }
 
     fn spawn_message_server(

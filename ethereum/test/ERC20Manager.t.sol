@@ -51,6 +51,57 @@ contract ERC20ManagerTest is Test, Base {
         deployBridgeFromConstants();
     }
 
+    /// Reconstructed from HTML7fe1b032 VB-07/VB-22/VB-32; original PoC bundle unavailable.
+    function test_HTML7fe1b032_AdmissionPausePreservesClaims() public {
+        bytes32 governance = governanceAdmin.governance();
+        vm.prank(address(erc20Manager));
+        IERC20Mintable(address(wrappedVara)).mint(address(this), 10);
+        wrappedVara.approve(address(erc20Manager), 10);
+        uint256 supply = wrappedVara.totalSupply();
+        vm.expectRevert(IERC20Manager.InvalidRecipient.selector);
+        erc20Manager.requestBridging(
+            address(wrappedVara), 1, hex"6765617267656172676561726765617267656172676561726765617267656172"
+        );
+        assertEq(wrappedVara.totalSupply(), supply);
+        assertEq(wrappedVara.allowance(address(this), address(erc20Manager)), 10);
+        assertTrue(erc20Manager.tokenAdmissionEnabled(address(wrappedVara)));
+        vm.prank(address(messageQueue));
+        erc20Manager.handleMessage(governance, abi.encodePacked(uint8(3), address(wrappedVara), uint8(0)));
+        assertFalse(erc20Manager.tokenAdmissionEnabled(address(wrappedVara)));
+        vm.expectRevert(abi.encodeWithSelector(IERC20Manager.TokenAdmissionDisabled.selector, address(wrappedVara)));
+        erc20Manager.requestBridging(address(wrappedVara), 1, bytes32(uint256(1)));
+        vm.prank(address(governanceAdmin));
+        erc20Manager.pause();
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        erc20Manager.createBridgingPayment(0);
+        vm.prank(address(messageQueue));
+        erc20Manager.handleMessage(
+            deploymentArguments.vftManager,
+            TransferMessage(bytes32(uint256(1)), address(this), address(wrappedVara), 2).pack()
+        );
+        assertEq(wrappedVara.balanceOf(address(this)), 12);
+        assertEq(wrappedVara.totalSupply(), supply + 2);
+        vm.prank(address(messageQueue));
+        erc20Manager.handleMessage(governance, abi.encodePacked(uint8(3), address(wrappedVara), uint8(1)));
+        vm.prank(address(governanceAdmin));
+        erc20Manager.unpause();
+        erc20Manager.requestBridging(address(wrappedVara), 1, bytes32(uint256(1)));
+        assertEq(wrappedVara.balanceOf(address(this)), 11);
+    }
+
+    function test_HTML7fe1b032_AdmissionControlRejectsNoncanonicalAndForeignSource() public {
+        bytes32 governance = governanceAdmin.governance();
+        vm.startPrank(address(messageQueue));
+        vm.expectRevert(IERC20Manager.InvalidSource.selector);
+        erc20Manager.handleMessage(bytes32(uint256(99)), abi.encodePacked(uint8(3), address(wrappedVara), uint8(0)));
+        vm.expectRevert(IERC20Manager.InvalidPayload.selector);
+        erc20Manager.handleMessage(governance, abi.encodePacked(uint8(3), address(wrappedVara), uint8(2)));
+        vm.expectRevert(IERC20Manager.InvalidPayload.selector);
+        erc20Manager.handleMessage(governance, abi.encodePacked(uint8(3), address(wrappedVara), uint16(0)));
+        vm.stopPrank();
+        assertTrue(erc20Manager.tokenAdmissionEnabled(address(wrappedVara)));
+    }
+
     function test_RejectZeroRecipientAllEntryVariants() public {
         (address owner, uint256 key) = makeAddrAndKey("invalidRecipient");
         uint256 amount = 100;
@@ -255,7 +306,7 @@ contract ERC20ManagerTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack()
+            payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -312,7 +363,7 @@ contract ERC20ManagerTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack()
+            payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -378,7 +429,7 @@ contract ERC20ManagerTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack()
+            payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -425,7 +476,7 @@ contract ERC20ManagerTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: UnpauseProxyMessage({proxy: address(erc20Manager)}).pack()
+            payload: UnpauseProxyMessage({proxy: address(erc20Manager)}).pack(_unpauseControl(address(erc20Manager)))
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
@@ -456,7 +507,7 @@ contract ERC20ManagerTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack()
+            payload: PauseProxyMessage({proxy: address(erc20Manager)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -503,7 +554,7 @@ contract ERC20ManagerTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: UnpauseProxyMessage({proxy: address(erc20Manager)}).pack()
+            payload: UnpauseProxyMessage({proxy: address(erc20Manager)}).pack(_unpauseControl(address(erc20Manager)))
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
@@ -553,7 +604,7 @@ contract ERC20ManagerTest is Test, Base {
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
                 proxy: address(erc20Manager), newImplementation: address(replacement), data: ""
-            }).pack()
+            }).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 

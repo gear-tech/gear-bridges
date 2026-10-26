@@ -25,7 +25,7 @@ use std::{
     sync::Arc,
 };
 use subxt::utils::AccountId32;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{channel, Receiver};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn relay(
@@ -41,7 +41,10 @@ pub async fn relay(
     storage_path: &Path,
     cutover_seal: Option<&Path>,
     approved_manager_code: Option<H256>,
+    root_minimum_receipt_slot: Option<u64>,
     native_wrapper_approval: Option<Arc<gear_common::native_wrapper::ApprovedNativeWrapper>>,
+    approved_gear_gas_limit: Option<u64>,
+    historical_receipts: Vec<gear_common::receipt_framing::HistoricalReceiptApproval>,
 ) -> AnyResult<()> {
     super::cutover::reject_sealed(storage_path)?;
     let _journal_lock = lock_journal(storage_path)?;
@@ -56,18 +59,14 @@ pub async fn relay(
         .get_finalized_receipt(tx_hash)
         .await?
         .context("HOLD: manual Ethereum transaction has no canonical finalized receipt")?;
-    let block = eth_api.get_block(original.included_block_number).await?;
-    anyhow::ensure!(
-        block.header.hash == original.included_block_hash,
-        "HOLD: original manual Ethereum inclusion changed"
-    );
     let genesis_time = beacon_client
         .get_genesis()
         .await
         .context("Failed to fetch chain genesis")?
         .data
         .genesis_time;
-    let elapsed = block
+    let elapsed = original
+        .inclusion
         .header
         .timestamp
         .checked_sub(genesis_time)
@@ -131,6 +130,7 @@ pub async fn relay(
                 &seal.new_identity,
                 Some(path),
                 approved_manager_code,
+                root_minimum_receipt_slot,
                 &client,
                 &eth_api,
                 native_wrapper_approval.as_deref(),
@@ -141,6 +141,7 @@ pub async fn relay(
                 &runtime,
                 None,
                 approved_manager_code,
+                root_minimum_receipt_slot,
                 &client,
                 &eth_api,
                 native_wrapper_approval.as_deref(),
@@ -149,7 +150,9 @@ pub async fn relay(
         }
     } else {
         anyhow::ensure!(
-            cutover_seal.is_none() && approved_manager_code.is_none(),
+            cutover_seal.is_none()
+                && approved_manager_code.is_none()
+                && root_minimum_receipt_slot.is_none(),
             "HOLD: cutover seals bind only the approved SubmitReceipt consumer"
         );
         None
@@ -178,7 +181,13 @@ pub async fn relay(
         None,
     )
     .with_native_wrapper_approval(native_wrapper_approval)
+    .with_historical_receipt_approvals(historical_receipts)?
     .with_signer_ownership(_signer_lock);
+    let message_sender = if let Some(limit) = approved_gear_gas_limit {
+        message_sender.with_approved_gear_gas_limit(limit)?
+    } else {
+        message_sender
+    };
     let proof_composer = ProofComposer::new(
         provider_connection,
         beacon_client,
@@ -190,11 +199,13 @@ pub async fn relay(
     let checkpoints = checkpoints_extractor
         .run(gear_blocks, latest_checkpoint)
         .await;
-    let (events_sender, mut events_receiver) = unbounded_channel();
-    events_sender.send(TxHashWithSlot {
-        tx_hash,
-        slot_number,
-    })?;
+    let (events_sender, mut events_receiver) = channel(128);
+    events_sender
+        .send(TxHashWithSlot {
+            tx_hash,
+            slot_number,
+        })
+        .await?;
     let mut sender_io = message_sender.run();
     let mut composer_io = proof_composer.run(checkpoints);
     run_manual(
@@ -262,7 +273,10 @@ async fn restore_manager(
             "HOLD: manual inbound journal belongs to another original transaction/slot"
         );
         anyhow::ensure!(
-            !matches!(tx.status, TxStatus::Failed { .. }),
+            !matches!(
+                tx.status,
+                TxStatus::Failed { .. } | TxStatus::Unprocessable { .. }
+            ),
             "HOLD: manual inbound transaction failed; preserve the original journal"
         );
         if let Some(receipt) = &tx.receipt {
@@ -311,7 +325,7 @@ async fn restore_manager(
 
 async fn run_manual(
     manager: &TransactionManager,
-    events: &mut UnboundedReceiver<TxHashWithSlot>,
+    events: &mut Receiver<TxHashWithSlot>,
     composer: &mut ProofComposerIo,
     sender: &mut MessageSenderIo,
 ) -> AnyResult<()> {
@@ -323,6 +337,11 @@ async fn run_manual(
         let transactions = manager.transactions.read().await;
         let failed = manager.failed.read().await;
         for tx in transactions.values() {
+            if let TxStatus::Unprocessable { diagnostic, .. } = &tx.status {
+                anyhow::bail!(
+                    "HOLD: manual inbound relay is unprocessable: {diagnostic}; preserve its original journal"
+                );
+            }
             if matches!(
                 tx.status,
                 TxStatus::Failed { .. } | TxStatus::PreparingSubmission
@@ -430,6 +449,8 @@ mod tests {
         manager.add_transaction(tx).await;
         storage.save(&manager).await.unwrap();
         let committed = tokio::fs::read(path.join("state.json")).await.unwrap();
+        let mut legacy_inventory = super::super::storage::read_journal_inventory(&path).unwrap();
+        legacy_inventory["schema_version"] = serde_json::json!(5);
         drop(manager);
         drop(storage);
         for change in [
@@ -488,7 +509,7 @@ mod tests {
             "signed-unsigned-collision",
             "active-completed-collision",
         ] {
-            let mut malformed: serde_json::Value = serde_json::from_slice(&committed).unwrap();
+            let mut malformed = legacy_inventory.clone();
             let original = malformed["transactions"][uuid.to_string()].clone();
             let foreign_key = "ffffffff-ffff-ffff-ffff-ffffffffffff";
             match corruption {
@@ -530,7 +551,7 @@ mod tests {
         tokio::fs::write(path.join("state.json"), &committed)
             .await
             .unwrap();
-        let mut cached: serde_json::Value = serde_json::from_slice(&committed).unwrap();
+        let mut cached = legacy_inventory.clone();
         cached["transactions"][uuid.to_string()]["status"] = serde_json::json!("Completed");
         tokio::fs::write(
             path.join("state.json"),
@@ -558,7 +579,7 @@ mod tests {
         tokio::fs::write(path.join("state.json"), &committed)
             .await
             .unwrap();
-        let mut corrupted: serde_json::Value = serde_json::from_slice(&committed).unwrap();
+        let mut corrupted = legacy_inventory.clone();
         corrupted["transactions"][uuid.to_string()]["status"] = serde_json::json!("Completed");
         corrupted["transactions"][uuid.to_string()]["receipt"]["signed_submission"]
             ["raw_extrinsic"][0] = serde_json::json!(99);
@@ -589,14 +610,14 @@ mod tests {
         let manager = restore_manager(Arc::new(JSONStorage::new(&path)), &runtime, &target)
             .await
             .unwrap();
-        let (events, mut received_events) = unbounded_channel();
-        let (requests, mut sent) = unbounded_channel();
-        let (responses, received) = unbounded_channel();
+        let (events, mut received_events) = channel(128);
+        let (requests, mut sent) = channel(128);
+        let (responses, received) = channel(128);
         let mut sender = MessageSenderIo::new(requests, received);
-        let (proof_requests, mut proofs_sent) = unbounded_channel();
-        let (_proof_responses, received) = unbounded_channel();
+        let (proof_requests, mut proofs_sent) = channel(128);
+        let (_proof_responses, received) = channel(128);
         let mut composer = ProofComposerIo::new(proof_requests, received);
-        events.send(original.clone()).unwrap();
+        events.send(original.clone()).await.unwrap();
         assert!(manager
             .process(&mut received_events, &mut composer, &mut sender)
             .await
@@ -627,8 +648,9 @@ mod tests {
                 submission: None,
                 signed_submission: Some(signed.clone()),
             })
+            .await
             .unwrap();
-        events.send(original).unwrap();
+        events.send(original).await.unwrap();
         let error = run_manual(&manager, &mut received_events, &mut composer, &mut sender)
             .await
             .unwrap_err();
@@ -645,5 +667,42 @@ mod tests {
         ));
         drop(lock);
         tokio::fs::remove_dir_all(path).await.unwrap();
+    }
+
+    // Reconstructed from supplied PR860 HTML: capacity/policy rejection is not settlement.
+    #[tokio::test]
+    async fn unprocessable_manual_work_exits_without_failed_map_or_new_submission() {
+        let manager = TransactionManager::new(Arc::new(super::super::storage::NoStorage::new()));
+        let (original, _) = receipt_fixtures().next().unwrap();
+        manager
+            .add_transaction(Transaction::new(
+                original,
+                TxStatus::Unprocessable {
+                    encoded_envelope_bytes: 3_000_000,
+                    required_gas: None,
+                    approved_gas: Some(1),
+                    diagnostic: "approved envelope bound exceeded".into(),
+                },
+            ))
+            .await;
+        assert!(manager.failed.read().await.is_empty());
+        let (events, mut received_events) = channel(128);
+        drop(events);
+        let (requests, mut sent) = channel(128);
+        let (responses, received) = channel(128);
+        drop(responses);
+        let mut sender = MessageSenderIo::new(requests, received);
+        let (proof_requests, mut proofs) = channel(128);
+        let (proof_responses, received) = channel(128);
+        drop(proof_responses);
+        let mut composer = ProofComposerIo::new(proof_requests, received);
+        let error = run_manual(&manager, &mut received_events, &mut composer, &mut sender)
+            .await
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("approved envelope bound exceeded"));
+        assert!(sent.try_recv().is_err());
+        assert!(proofs.try_recv().is_err());
     }
 }

@@ -13,6 +13,7 @@ clap.workspace = true
 dotenv.workspace = true
 ethereum_beacon_client.workspace = true
 gclient.workspace = true
+gear-common.workspace = true
 hex = { workspace = true, features = ["std"] }
 parity-scale-codec = { workspace = true, features = ["std"] }
 sails-rs = { workspace = true, features = ["gclient"] }

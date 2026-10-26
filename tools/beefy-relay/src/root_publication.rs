@@ -6,6 +6,7 @@ use anyhow::{anyhow, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::{
     fs::{self, File},
+    future::Future,
     io::Write,
     path::{Path, PathBuf},
 };
@@ -42,6 +43,14 @@ fn persist_root_intent(path: &Path, intent: &Value) -> Result<()> {
     let parent = state_directory(path);
     fs::create_dir_all(parent)?;
     let temporary = path.with_extension("json.tmp");
+    if temporary.try_exists()? {
+        let committed = if path.try_exists()? {
+            Some(serde_json::from_slice::<Value>(&fs::read(path)?)?)
+        } else {
+            None
+        };
+        crate::follower::preserve_owned_scratch(&temporary, committed.as_ref())?;
+    }
     let file = fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -164,12 +173,7 @@ async fn root_account_nonces(
     ethereum: &crate::ethereum::Ethereum,
     address: alloy::primitives::Address,
 ) -> Result<(u64, u64)> {
-    use alloy::providers::Provider;
-
-    let provider = ethereum.api.raw_provider();
-    let latest = provider.get_transaction_count(address).await?;
-    let pending = provider.get_transaction_count(address).pending().await?;
-    Ok((latest, pending))
+    Ok(ethereum.api.qualified_account_nonces(address).await?)
 }
 
 async fn finalized_ethereum_head(ethereum: &crate::ethereum::Ethereum) -> Result<(u64, B256)> {
@@ -246,7 +250,10 @@ fn registered_publications(
             .as_str()
             .context("root status missing; HOLD")?;
         ensure!(
-            matches!(status, "pending" | "mined" | "accepted" | "observed"),
+            matches!(
+                status,
+                "pending" | "mined" | "accepted" | "observed" | "covered"
+            ),
             "invalid registered root status; HOLD"
         );
         let path = Path::new(
@@ -258,6 +265,10 @@ fn registered_publications(
             path.parent() == Some(directory.as_path()) && paths.insert(path),
             "root path lies outside inventory or is duplicated; HOLD"
         );
+        if status == "covered" {
+            crate::follower::validate_covered_root(&journal["roots"], root)?;
+            continue;
+        }
         let saved = match fs::read(path) {
             Ok(saved) => saved,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound && status == "pending" => {
@@ -303,13 +314,73 @@ fn ensure_no_competing_publication(publications: &[(PathBuf, Value)], output: &P
     Ok(())
 }
 
+pub(crate) struct RootPublicationSession {
+    ethereum: crate::ethereum::Ethereum,
+    source: crate::source::Source,
+    witness: crate::source::Source,
+    manifest: Value,
+    signer: Address,
+    qualified: std::collections::BTreeSet<(PathBuf, B256)>,
+    anchors: std::collections::BTreeMap<B256, (u64, B256)>,
+}
+
+async fn validate_cached_root(
+    ethereum: &crate::ethereum::Ethereum,
+    path: &Path,
+    intent: &Value,
+    qualified: &mut std::collections::BTreeSet<(PathBuf, B256)>,
+) -> Result<()> {
+    qualify_root_record(
+        path,
+        intent,
+        qualified,
+        validate_root_publication(ethereum, path, intent),
+    )
+    .await
+}
+
+async fn qualify_root_record(
+    path: &Path,
+    intent: &Value,
+    qualified: &mut std::collections::BTreeSet<(PathBuf, B256)>,
+    authenticate: impl Future<Output = Result<()>>,
+) -> Result<()> {
+    let immutable = intent["publicationReceipt"]["finalized"] == true
+        || (intent["txHash"].is_null() && intent["observedProgress"].is_object());
+    let identity = (
+        path.to_path_buf(),
+        B256::from(crate::keccak256(&serde_json::to_vec(intent)?)),
+    );
+    if immutable && qualified.contains(&identity) {
+        return Ok(());
+    }
+    authenticate.await?;
+    if immutable {
+        let directory = state_directory(path).join("finality-history/qualified-roots");
+        fs::create_dir_all(&directory)?;
+        gear_common::durable::immutable_json(
+            &directory.join(format!("{:x}.json", identity.1)),
+            &json!({"publication":path,"digest":identity.1}),
+        )?;
+        qualified.insert(identity);
+    }
+    Ok(())
+}
+
 async fn reconcile_publication_owners(
     ethereum: &crate::ethereum::Ethereum,
     publications: &mut [(PathBuf, Value)],
     output: &Path,
+    qualified: &mut std::collections::BTreeSet<(PathBuf, B256)>,
 ) -> Result<()> {
-    for (path, intent) in publications.iter_mut() {
-        validate_root_publication(ethereum, path, intent).await?;
+    for (index, (path, intent)) in publications.iter_mut().enumerate() {
+        validate_cached_root(ethereum, path, intent, qualified).await?;
+        if index % 32 == 31 {
+            tokio::task::yield_now().await;
+        }
+        if intent["publicationReceipt"]["finalized"] == true {
+            continue;
+        }
         if !intent["observedProgress"].is_null() && adopt_authenticated_progress(intent)? {
             persist_root_intent(path, intent)?;
         }
@@ -342,6 +413,7 @@ async fn reconcile_publication_owners(
                     == intent["rawTransaction"],
                 "finalized registered original differs from signed publication; HOLD"
             );
+            finalize_root_spend(ethereum, intent, proof, &receipt.checkpoint).await?;
             persist_root_inclusion(
                 path,
                 intent,
@@ -443,15 +515,108 @@ fn signed_publication_identity(
     Ok(identity)
 }
 
+fn root_spend_reservation(intent: &Value) -> Result<B256> {
+    let nonce = match intent["spendReservationNonce"].as_u64() {
+        Some(nonce) => nonce,
+        None => saved_publication_nonce(intent)?,
+    };
+    Ok(B256::from(crate::keccak256(&serde_json::to_vec(&json!(
+        [
+            "beefy-root-spend-v1",
+            intent["sourceIdentity"],
+            intent["sender"],
+            nonce,
+            intent["sourceBlock"],
+            intent["root"],
+            intent["kind"],
+            intent["queueProof"],
+            intent["acceptedAnchorClient"],
+            intent["acceptedAnchorTx"],
+            intent["acceptedCheckpoint"],
+            intent["proof"]
+        ]
+    ))?)))
+}
+
+async fn finalize_root_spend(
+    ethereum: &crate::ethereum::Ethereum,
+    intent: &Value,
+    proof: &ethereum_client::inclusion::RecordedReceiptProof,
+    checkpoint: &ethereum_client::FinalityCheckpoint,
+) -> Result<()> {
+    if intent["spendReservationId"].is_null() {
+        return Ok(()); // Retained originals predate spend admission; never rewrite them.
+    }
+    let owner: Address = intent["sender"]
+        .as_str()
+        .context("root sender missing")?
+        .parse()?;
+    if ethereum.api.sender_address().as_bytes() != owner.as_slice() {
+        return Ok(()); // Read-only audits and independent commitment signers do not own this ledger.
+    }
+    let reservation = B256::from(decode_hash(
+        &intent["spendReservationId"],
+        "root spend reservation",
+    )?);
+    ensure!(
+        reservation == root_spend_reservation(intent)?,
+        "root spend identity changed; HOLD"
+    );
+    ethereum
+        .finalize_spend(reservation, proof, checkpoint)
+        .await
+}
+
 async fn sign_and_persist_root(
-    api: &ethereum_client::EthApi,
+    ethereum: &crate::ethereum::Ethereum,
     queue: Address,
-    request: alloy::rpc::types::TransactionRequest,
+    mut request: alloy::rpc::types::TransactionRequest,
     output: &Path,
     intent: &mut Value,
     publisher: Address,
     nonce: u64,
 ) -> Result<ethereum_client::TransactionIdentity> {
+    ethereum.execution_signer_role("root")?;
+    ensure!(
+        intent["spendReservationNonce"].is_null() || intent["spendReservationNonce"] == nonce,
+        "root spending nonce changed; HOLD"
+    );
+    intent["spendReservationNonce"] = json!(nonce);
+    let reservation = root_spend_reservation(intent)?;
+    ensure!(
+        intent["spendReservationId"].is_null()
+            || intent["spendReservationId"] == json!(reservation),
+        "root spend reservation changed; HOLD"
+    );
+    intent["spendReservationId"] = json!(reservation);
+    persist_root_intent(output, intent)?;
+    ethereum
+        .admit_spend("root", &mut request, reservation)
+        .await?;
+    let (candidate, signed) =
+        signed_root_candidate(&ethereum.api, queue, request, intent, publisher, nonce).await?;
+    let raw = hex::decode(
+        candidate["rawTransaction"]
+            .as_str()
+            .context("signed root bytes missing")?
+            .trim_start_matches("0x"),
+    )?;
+    ethereum
+        .validate_admitted_spend("root", reservation, &raw)
+        .await?;
+    persist_root_intent(output, &candidate)?;
+    *intent = candidate;
+    Ok(signed)
+}
+
+async fn signed_root_candidate(
+    api: &ethereum_client::EthApi,
+    queue: Address,
+    request: alloy::rpc::types::TransactionRequest,
+    intent: &Value,
+    publisher: Address,
+    nonce: u64,
+) -> Result<(Value, ethereum_client::TransactionIdentity)> {
     use alloy::{eips::Encodable2718, network::TransactionBuilder};
 
     let chain_id = api.finality_identity()?.0;
@@ -477,9 +642,7 @@ async fn sign_and_persist_root(
             && signed.nonce == nonce,
         "signed root chain, publisher or reserved nonce differs from approved intent"
     );
-    persist_root_intent(output, &candidate)?;
-    *intent = candidate;
-    Ok(signed)
+    Ok((candidate, signed))
 }
 
 fn validate_root_intent(intent: &Value, queue: Address) -> Result<()> {
@@ -508,6 +671,19 @@ fn validate_root_intent(intent: &Value, queue: Address) -> Result<()> {
         .try_into()?;
     if !intent["nonce"].is_null() {
         saved_publication_nonce(intent)?;
+    }
+    if !intent["spendReservationId"].is_null() {
+        let nonce = intent["spendReservationNonce"]
+            .as_u64()
+            .context("spend nonce missing; HOLD")?;
+        ensure!(
+            intent["nonce"].is_null() || saved_publication_nonce(intent)? == nonce,
+            "spend reservation nonce differs from original; HOLD"
+        );
+        ensure!(
+            intent["spendReservationId"] == json!(root_spend_reservation(intent)?),
+            "spend reservation identity changed; HOLD"
+        );
     }
     if !intent["txHash"].is_null() {
         signed_publication_identity(intent, queue)?;
@@ -571,7 +747,7 @@ fn validate_root_intent(intent: &Value, queue: Address) -> Result<()> {
 }
 
 fn refresh_unsigned_intent(saved: &Value, expected: &Value) -> Result<Value> {
-    if !saved["txHash"].is_null() {
+    if !saved["txHash"].is_null() || !saved["spendReservationId"].is_null() {
         ensure_immutable_publication(saved, expected)?;
         return Ok(saved.clone());
     }
@@ -615,6 +791,31 @@ fn cached_receipt_proof(directory: &Path, hash: B256) -> Result<Option<Value>> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),
     }
+}
+
+async fn cached_root_anchor(
+    ethereum: &crate::ethereum::Ethereum,
+    publisher_state: &Path,
+    entry: &Value,
+    anchor: &crate::source::CapturedCommitment,
+    snapshot: &crate::QueueSnapshot,
+    cache: &mut std::collections::BTreeMap<B256, (u64, B256)>,
+) -> Result<(u64, B256)> {
+    let key = B256::from(crate::keccak256(
+        &[
+            crate::keccak256(&serde_json::to_vec(entry)?),
+            snapshot.hash(),
+            crate::keccak256(&anchor.raw),
+        ]
+        .concat(),
+    ));
+    if let Some(inclusion) = cache.get(&key) {
+        return Ok(*inclusion);
+    }
+    let inclusion =
+        authenticate_root_anchor(ethereum, publisher_state, entry, anchor, snapshot).await?;
+    cache.insert(key, inclusion);
+    Ok(inclusion)
 }
 
 async fn authenticate_root_anchor(
@@ -728,7 +929,10 @@ async fn authenticated_root_receipt(
     included: (u64, B256),
     finalized: (u64, B256),
     evidence: Option<&Value>,
-) -> Result<ethereum_client::inclusion::RecordedReceiptProof> {
+) -> Result<(
+    ethereum_client::inclusion::RecordedReceiptProof,
+    ethereum_client::FinalityCheckpoint,
+)> {
     ensure!(
         finalized.0 >= included.0,
         "root finalized pin precedes original inclusion; HOLD"
@@ -774,37 +978,21 @@ async fn authenticated_root_receipt(
         &json!({"checkpoint":view.checkpoint(),
             "receiptProofDigest":format!("0x{}", hex::encode(crate::keccak256(&serde_json::to_vec(&proof)?)))}),
     )?;
-    Ok(proof)
+    Ok((proof, view.checkpoint().clone()))
 }
 
 fn accepted_root_transaction(
     proof: &ethereum_client::inclusion::RecordedReceiptProof,
     chain: u64,
 ) -> Result<Value> {
-    use alloy::{
-        consensus::{Transaction as _, TxEnvelope},
-        eips::Decodable2718,
-    };
-    let mut encoded = proof.raw_transaction.as_slice();
-    let signed = TxEnvelope::decode_2718(&mut encoded)?;
-    ensure!(
-        encoded.is_empty() && signed.chain_id() == Some(chain),
-        "accepted root transaction has wrong chain identity; HOLD"
-    );
-    let destination = signed
-        .to()
-        .context("accepted root transaction has no destination; HOLD")?;
+    use alloy::consensus::Transaction as _;
     let hash = B256::from(crate::keccak256(&proof.raw_transaction));
-    let (_, identity) = crate::ethereum::signed_transaction(
-        &proof.raw_transaction,
-        hash,
-        signed.nonce(),
-        destination,
-    )?;
+    let (signed, identity) =
+        crate::ethereum::external_transaction(&proof.raw_transaction, hash, chain)?;
     Ok(json!({"txHash": format!("{hash:#x}"),
         "rawTransaction": format!("0x{}", hex::encode(&proof.raw_transaction)),
         "nonce": identity.nonce.to_string(), "sender": format!("{:#x}", identity.from),
-        "to": format!("{destination:#x}"), "chainId": chain}))
+        "to": identity.to.map(|to| format!("{to:#x}")), "chainId": signed.chain_id()}))
 }
 
 fn queue_progress_event(
@@ -923,7 +1111,7 @@ async fn validate_observed_progress(
         &observed["actualTransactionHash"],
         "external root transaction",
     )?);
-    let proof =
+    let (proof, _) =
         authenticated_root_receipt(ethereum, path, hash, included, finalized, Some(observed))
             .await?;
     ensure!(
@@ -1098,7 +1286,7 @@ async fn observe_finalized_progress(
     if intent["txHash"].as_str() == Some(format!("{hash:#x}").as_str()) {
         return Ok(false);
     }
-    let proof = authenticated_root_receipt(
+    let (proof, _) = authenticated_root_receipt(
         ethereum,
         output,
         hash,
@@ -1173,7 +1361,16 @@ fn archive_root_original(intent: &mut Value, disposition: &str, evidence: Value)
         .as_array_mut()
         .context("invalid terminal root history")?
         .push(terminal);
-    for field in ["txHash", "rawTransaction", "nonce", "publicationReceipt"] {
+    for field in [
+        "txHash",
+        "rawTransaction",
+        "nonce",
+        "publicationReceipt",
+        "firstInclusion",
+        "inclusionObservations",
+        "spendReservationId",
+        "spendReservationNonce",
+    ] {
         intent[field] = Value::Null;
     }
     intent["originalDisposition"] = json!(disposition);
@@ -1216,7 +1413,7 @@ async fn revalidate_terminal_roots(
                     "failure finalized hash",
                 )?),
             );
-            let proof = authenticated_root_receipt(
+            let (proof, checkpoint) = authenticated_root_receipt(
                 ethereum,
                 path,
                 signed.hash,
@@ -1231,6 +1428,7 @@ async fn revalidate_terminal_roots(
                         == original["rawTransaction"],
                 "archived failed original receipt changed; HOLD"
             );
+            finalize_root_spend(ethereum, original, &proof, &checkpoint).await?;
         } else {
             let evidence = &terminal["nonceDisposition"];
             let number = evidence["block"]
@@ -1307,6 +1505,7 @@ pub(crate) async fn reconcile_root_original(
                 && format!("0x{}", hex::encode(&proof.raw_transaction)) == intent["rawTransaction"],
             "failed root receipt is not the original signed transaction; HOLD"
         );
+        finalize_root_spend(ethereum, intent, proof, &receipt.checkpoint).await?;
         archive_root_original(
             intent,
             "reverted",
@@ -1389,7 +1588,7 @@ pub(crate) async fn validate_root_publication(
                 pin["block"].as_u64().context("root inclusion missing")?,
                 B256::from(decode_hash(&pin["blockHash"], "root inclusion hash")?),
             );
-            let proof = authenticated_root_receipt(
+            let (proof, checkpoint) = authenticated_root_receipt(
                 ethereum,
                 path,
                 B256::from(decode_hash(&intent["txHash"], "original root transaction")?),
@@ -1426,10 +1625,11 @@ pub(crate) async fn validate_root_publication(
                         || ethereum.queue_max_block_at(included.1).await? >= U256::from(target)),
                 "original finalized root state changed; HOLD"
             );
+            finalize_root_spend(ethereum, intent, &proof, &checkpoint).await?;
         } else {
-            canonical_root_inclusion(ethereum, intent, target, kind, root)
-                .await?
-                .context("original root inclusion disappeared; HOLD")?;
+            // A mined observation is not authority. Missing, moved or reverted
+            // observations retain ownership until original reconciliation proves disposition.
+            canonical_root_inclusion(ethereum, intent, target, kind, root).await?;
         }
     }
     Ok(())
@@ -1446,22 +1646,46 @@ fn persist_root_inclusion(
         intent["publicationReceipt"]["finalized"] != true || finalized.is_some(),
         "previously finalized root lost finality; hold original signed intent"
     );
-    if !intent["publicationReceipt"].is_null() {
+    let previous = intent["publicationReceipt"].clone();
+    if !previous.is_null() {
         ensure!(
-            intent["publicationReceipt"]["block"].as_u64() == Some(block)
-                && intent["publicationReceipt"]["blockHash"].as_str()
-                    == Some(format!("{hash:#x}").as_str())
-                && intent["publicationReceipt"]["kind"].as_str() == Some(kind),
-            "original root inclusion/kind changed; hold original signed intent"
+            previous["kind"].as_str() == Some(kind),
+            "original root kind changed; HOLD"
         );
-        if intent["publicationReceipt"]["finalized"] == true {
+        if previous["finalized"] == true {
+            ensure!(
+                previous["block"].as_u64() == Some(block)
+                    && previous["blockHash"] == format!("{hash:#x}"),
+                "finalized root inclusion moved; HOLD"
+            );
             return Ok(());
+        }
+        if intent["firstInclusion"].is_null() {
+            intent["firstInclusion"] = previous.clone();
+        }
+        if previous["block"] != block || previous["blockHash"] != format!("{hash:#x}") {
+            if intent["inclusionObservations"].is_null() {
+                intent["inclusionObservations"] = json!([]);
+            }
+            let observation = json!({"block":block,"blockHash":format!("{hash:#x}"),"kind":kind});
+            let observations = intent["inclusionObservations"]
+                .as_array_mut()
+                .context("root inclusion observations malformed; HOLD")?;
+            if observations.last() != Some(&observation) {
+                observations.push(observation);
+            }
+            if finalized.is_none() {
+                return persist_root_intent(path, intent);
+            }
         }
     }
     let mut receipt = json!({
         "block": block, "blockHash": format!("{hash:#x}"),
         "finalized": finalized.is_some(), "kind": kind,
     });
+    if intent["firstInclusion"].is_null() {
+        intent["firstInclusion"] = receipt.clone();
+    }
     if let Some((finalized_block, finalized_hash)) = finalized {
         receipt["finalizedBlock"] = json!(finalized_block);
         receipt["finalizedBlockHash"] = json!(format!("{finalized_hash:#x}"));
@@ -1480,18 +1704,6 @@ fn persist_root_inclusion(
     persist_root_intent(path, intent)
 }
 
-fn ensure_pinned_latest_anchor(
-    checkpoint: &crate::ethereum::DestinationCheckpoint,
-    anchor_block: u32,
-    anchor_root: [u8; 32],
-) -> Result<()> {
-    ensure!(
-        checkpoint.block == u64::from(anchor_block) && checkpoint.root == anchor_root,
-        "pinned BEEFY anchor is no longer latest; hold the original root intent"
-    );
-    Ok(())
-}
-
 async fn canonical_root_inclusion(
     ethereum: &crate::ethereum::Ethereum,
     intent: &Value,
@@ -1506,8 +1718,8 @@ async fn canonical_root_inclusion(
     let provider = ethereum.api.raw_provider();
     let Some(receipt) = provider.get_transaction_receipt(hash).await? else {
         ensure!(
-            intent["publicationReceipt"].is_null(),
-            "previously mined root receipt disappeared; hold original signed intent"
+            intent["publicationReceipt"]["finalized"] != true,
+            "finalized root receipt disappeared; HOLD"
         );
         return Ok(None);
     };
@@ -1517,6 +1729,9 @@ async fn canonical_root_inclusion(
     let block_hash = receipt
         .block_hash
         .context("root receipt has no block hash")?;
+    if !receipt.status() && intent["publicationReceipt"]["finalized"] != true {
+        return Ok(None);
+    }
     ensure!(
         receipt.transaction_hash == hash && receipt.from == signed.from && receipt.to == signed.to,
         "root receipt identity changed"
@@ -1525,23 +1740,16 @@ async fn canonical_root_inclusion(
         .get_block_by_number(BlockNumberOrTag::Number(block))
         .await?
         .context("mined root receipt block is unavailable")?;
-    let finality = classify_receipt_finality(
-        block,
-        block_hash,
-        receipt.status(),
-        0,
-        Some(canonical.header.hash),
-    )?;
-    if finality == ReceiptFinality::Reverted {
+    if canonical.header.hash != block_hash {
         ensure!(
-            intent["publicationReceipt"].is_null(),
-            "original root inclusion changed status; HOLD"
+            intent["publicationReceipt"]["finalized"] != true,
+            "finalized root inclusion is noncanonical; HOLD"
         );
         return Ok(None);
     }
     let recorded = &intent["publicationReceipt"];
     ensure!(
-        recorded.is_null()
+        recorded["finalized"] != true
             || (recorded["block"] == block
                 && recorded["blockHash"] == format!("{block_hash:#x}")
                 && recorded["kind"] == kind),
@@ -1580,11 +1788,12 @@ async fn canonical_root_inclusion(
     Ok(Some((block, block_hash)))
 }
 
-// Client maintenance authenticates retained roots but does not wait for their execution.
-// Advancing the client never changes an original's proof, anchor or publisher nonce.
+// Explicit full-history audit; routine client maintenance does not sweep roots.
+// All derived proof writes belong to the caller's independently owned audit directory.
 pub(crate) async fn validate_registered_root_publications(
     ethereum: &crate::ethereum::Ethereum,
     roots: &Value,
+    proof_directory: &Path,
 ) -> Result<()> {
     for root in roots
         .as_object()
@@ -1593,9 +1802,16 @@ pub(crate) async fn validate_registered_root_publications(
     {
         let status = root["status"].as_str().context("root status missing")?;
         ensure!(
-            matches!(status, "pending" | "mined" | "accepted" | "observed"),
+            matches!(
+                status,
+                "pending" | "mined" | "accepted" | "observed" | "covered"
+            ),
             "unknown root status"
         );
+        if status == "covered" {
+            crate::follower::validate_covered_root(roots, root)?;
+            continue;
+        }
         let path = Path::new(
             root["publication"]
                 .as_str()
@@ -1626,7 +1842,9 @@ pub(crate) async fn validate_registered_root_publications(
                 && saved_queue == ethereum.queue_address,
             "saved root publication differs from registration or active deployment"
         );
-        validate_root_publication(ethereum, path, &intent).await?;
+        let evidence_path =
+            proof_directory.join(path.file_name().context("root filename missing")?);
+        validate_root_publication(ethereum, &evidence_path, &intent).await?;
     }
     Ok(())
 }
@@ -1668,6 +1886,7 @@ pub(crate) async fn wait_for_root_receipt(
         &crate::source::CapturedCommitment,
         &crate::QueueSnapshot,
     ),
+    anchors: &mut std::collections::BTreeMap<B256, (u64, B256)>,
 ) -> Result<RootPublicationState> {
     use std::time::{Duration, Instant};
 
@@ -1701,7 +1920,15 @@ pub(crate) async fn wait_for_root_receipt(
         "root waiter arguments differ from retained original anchor; HOLD"
     );
     ensure!(
-        authenticate_root_anchor(ethereum, publisher_state, anchor_entry, anchor, snapshot).await?
+        cached_root_anchor(
+            ethereum,
+            publisher_state,
+            anchor_entry,
+            anchor,
+            snapshot,
+            anchors
+        )
+        .await?
             == anchor_inclusion,
         "retained BEEFY anchor differs from pinned inclusion; HOLD"
     );
@@ -1770,6 +1997,7 @@ pub(crate) async fn wait_for_root_receipt(
                             == intent["rawTransaction"],
                         "authenticated original root receipt changed signed bytes; HOLD"
                     );
+                    finalize_root_spend(ethereum, intent, proof, &receipt.checkpoint).await?;
                     persist_root_inclusion(
                         output,
                         intent,
@@ -1790,8 +2018,8 @@ pub(crate) async fn wait_for_root_receipt(
             if observed {
                 return hold_root_reconciliation(output, intent);
             }
-            // A later accepted checkpoint can stale the signed proof, but never
-            // releases its nonce or authorizes a replacement. Reconcile/rebroadcast it unchanged.
+            // Ring eviction can stale the signed proof, but never releases its nonce
+            // or authorizes a replacement. Reconcile/rebroadcast it unchanged.
             intent["finalityStatus"] = json!("pending");
             tokio::time::sleep(Duration::from_secs(3)).await;
         }
@@ -1836,9 +2064,10 @@ pub async fn publish_root(
         public_network,
     )?;
     let registration: Value = serde_json::from_slice(&fs::read(registration)?)?;
+    let mut session = None;
     loop {
         if matches!(
-            publish_root_locked(
+            publish_root_in_session(
                 source_rpc,
                 witness_rpc,
                 ethereum_rpc,
@@ -1850,6 +2079,7 @@ pub async fn publish_root(
                 output,
                 fixture.as_ref(),
                 public_network,
+                &mut session,
             )
             .await?,
             RootPublicationState::Accepted | RootPublicationState::Observed
@@ -1861,6 +2091,7 @@ pub async fn publish_root(
 }
 
 // Caller owns the deployment lock across anchor selection and publication.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn publish_root_locked(
     source_rpc: &str,
@@ -1874,6 +2105,38 @@ pub(crate) async fn publish_root_locked(
     output: &Path,
     fixture: Option<&crate::ethereum::OwnedFixtureNetwork>,
     public_network: crate::ethereum::PublicEthereumNetwork,
+) -> Result<RootPublicationState> {
+    publish_root_in_session(
+        source_rpc,
+        witness_rpc,
+        ethereum_rpc,
+        finality,
+        wallet,
+        deployment_manifest,
+        publisher_state,
+        registration,
+        output,
+        fixture,
+        public_network,
+        &mut None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn publish_root_in_session(
+    source_rpc: &str,
+    witness_rpc: &str,
+    ethereum_rpc: &str,
+    finality: &cli_utils::EthereumFinalityArgs,
+    wallet: &Path,
+    deployment_manifest: &Path,
+    publisher_state: &Path,
+    registration: &Value,
+    output: &Path,
+    fixture: Option<&crate::ethereum::OwnedFixtureNetwork>,
+    public_network: crate::ethereum::PublicEthereumNetwork,
+    session: &mut Option<RootPublicationSession>,
 ) -> Result<RootPublicationState> {
     use crate::{encode_queue_proof, ethereum::Ethereum, evidence::proof_evidence, source::Source};
     use alloy::{primitives::B256, providers::Provider};
@@ -2003,29 +2266,61 @@ pub(crate) async fn publish_root_locked(
             && active_ethereum["mmrStartBlock"] == manifest["ethereum"]["mmrStartBlock"],
         "actor active BEEFY identity differs from the immutable token deployment"
     );
-    let mut ethereum = Ethereum::connect(
-        ethereum_rpc,
-        finality,
-        wallet,
-        &active_ethereum,
-        fixture,
-        public_network,
-    )
-    .await?;
-    ethereum
-        .load_execution_approval(deployment_manifest, finality)
-        .await?;
-    ethereum
-        .api
-        .enable_finality_archive(
-            &state_directory(output).join("finality-history/headers"),
-            ethereum.api.finality_identity()?.1,
+    let publisher_signer = crate::ethereum::hoodi_wallet_address(wallet)?;
+    if session.is_none() {
+        let mut ethereum = Ethereum::connect(
+            ethereum_rpc,
+            finality,
+            wallet,
+            &active_ethereum,
+            fixture,
+            public_network,
         )
         .await?;
-    ethereum
-        .verify_token_bindings(decode_hash(&manifest["gearManager"], "gearManager")?)
+        ethereum
+            .load_execution_approval(deployment_manifest, finality)
+            .await?;
+        ethereum
+            .api
+            .enable_finality_archive(
+                &state_directory(output).join("finality-history/headers"),
+                ethereum.api.finality_identity()?.1,
+            )
+            .await?;
+        ethereum
+            .verify_token_bindings(decode_hash(&manifest["gearManager"], "gearManager")?)
+            .await?;
+        let (source, witness) = Source::connect_pair(
+            SourceApi::new(source_rpc, 3).await?,
+            SourceApi::new(witness_rpc, 3).await?,
+        )
         .await?;
-    let publisher_signer = crate::ethereum::hoodi_wallet_address(wallet)?;
+        ethereum.qualify_execution_source(&source).await?;
+        ethereum.qualify_execution_source(&witness).await?;
+        source.validate_attachment(&manifest["anchor"]).await?;
+        *session = Some(RootPublicationSession {
+            ethereum,
+            source,
+            witness,
+            manifest: manifest.clone(),
+            signer: publisher_signer,
+            qualified: Default::default(),
+            anchors: Default::default(),
+        });
+    }
+    let session = session.as_mut().context("publisher session missing")?;
+    ensure!(
+        session.manifest == manifest && session.signer == publisher_signer,
+        "publisher session identity changed; HOLD"
+    );
+    let RootPublicationSession {
+        ethereum,
+        source,
+        witness,
+        qualified,
+        anchors,
+        ..
+    } = session;
     let publisher_address = format!("{publisher_signer:#x}");
     let mut publications = registered_publications(
         &existing_journal,
@@ -2034,20 +2329,12 @@ pub(crate) async fn publish_root_locked(
         publisher_signer,
     )?;
     let archived_this_call = if let Some(intent) = prior.as_mut() {
-        validate_root_publication(&ethereum, output, intent).await?;
-        reconcile_root_original(&ethereum, output, intent).await?
+        validate_cached_root(ethereum, output, intent, qualified).await?;
+        reconcile_root_original(ethereum, output, intent).await?
     } else {
         false
     };
 
-    let (source, witness) = Source::connect_pair(
-        SourceApi::new(source_rpc, 3).await?,
-        SourceApi::new(witness_rpc, 3).await?,
-    )
-    .await?;
-    source.validate_attachment(&manifest["anchor"]).await?;
-    ethereum.qualify_execution_source(&source).await?;
-    ethereum.qualify_execution_source(&witness).await?;
     ensure_source_identity(
         &manifest["ethereum"],
         source.source_genesis,
@@ -2072,7 +2359,7 @@ pub(crate) async fn publish_root_locked(
         .context("active BEEFY client address missing")?;
     let prior_anchor = prior
         .as_ref()
-        .filter(|intent| !intent["txHash"].is_null())
+        .filter(|intent| !intent["txHash"].is_null() || !intent["spendReservationId"].is_null())
         .map(|intent| {
             ensure!(
                 intent["acceptedAnchorClient"] == active_client,
@@ -2099,8 +2386,8 @@ pub(crate) async fn publish_root_locked(
         journal["follower"]["status"] != "failed",
         "token actor is failed; reconcile it before maintenance publication"
     );
-    // Independent signers may reconcile their originals concurrently. Only the
-    // latest accepted checkpoint check immediately before a new signature gates preparation.
+    // Independent signers may reconcile their originals concurrently. Exact retained
+    // accepted-anchor membership and client liveness gate each new signature.
     let commitments = journal["commitments"]
         .as_array()
         .context("token follower journal has no accepted commitments")?;
@@ -2217,9 +2504,15 @@ pub(crate) async fn publish_root_locked(
         anchor_proof = first;
         &anchor_proof.snapshot
     };
-    let (destination_block, destination_hash) =
-        authenticate_root_anchor(&ethereum, publisher_state, last, &anchor, anchor_snapshot)
-            .await?;
+    let (destination_block, destination_hash) = cached_root_anchor(
+        ethereum,
+        publisher_state,
+        last,
+        &anchor,
+        anchor_snapshot,
+        anchors,
+    )
+    .await?;
     let destination_hash_text = format!("{destination_hash:#x}");
     ensure!(
         last["destinationBlock"].as_u64() == Some(destination_block)
@@ -2291,13 +2584,13 @@ pub(crate) async fn publish_root_locked(
         "saved root transaction hash is invalid"
     );
 
-    validate_root_publication(&ethereum, output, &intent).await?;
+    validate_root_publication(ethereum, output, &intent).await?;
     if intent["publicationReceipt"]["finalized"] == true {
         return Ok(RootPublicationState::Accepted);
     }
     persist_root_intent(output, &intent)?;
     let observed =
-        observe_finalized_progress(&ethereum, output, &mut intent, block, kind, root).await?;
+        observe_finalized_progress(ethereum, output, &mut intent, block, kind, root).await?;
     if intent["txHash"].is_null() && observed {
         return Ok(RootPublicationState::Observed);
     }
@@ -2308,13 +2601,13 @@ pub(crate) async fn publish_root_locked(
     let mined = if intent["txHash"].is_null() {
         None
     } else {
-        canonical_root_inclusion(&ethereum, &intent, block, kind, root).await?
+        canonical_root_inclusion(ethereum, &intent, block, kind, root).await?
     };
 
-    reconcile_publication_owners(&ethereum, &mut publications, output).await?;
+    reconcile_publication_owners(ethereum, &mut publications, output, qualified).await?;
 
     let saved_nonce = if intent["nonce"].is_null() {
-        let (latest, pending) = root_account_nonces(&ethereum, publisher_signer).await?;
+        let (latest, pending) = root_account_nonces(ethereum, publisher_signer).await?;
         if latest != pending {
             return Err(anyhow!(
                 "publisher account has an outstanding transaction; reconcile it before root publication"
@@ -2336,13 +2629,11 @@ pub(crate) async fn publish_root_locked(
         );
         intent["approvedManifestSha256"] = json!(approval);
         persist_root_intent(output, &intent)?;
-        ensure_pinned_latest_anchor(
-            &ethereum.checkpoint().await?,
-            anchor_block,
-            anchor.validated.mmr_root,
-        )
-        .context(RootPublicationHeld)?;
-        let (latest, pending) = root_account_nonces(&ethereum, publisher_signer).await?;
+        ethereum
+            .ensure_live_accepted_anchor(anchor_block, anchor.validated.mmr_root)
+            .await
+            .context(RootPublicationHeld)?;
+        let (latest, pending) = root_account_nonces(ethereum, publisher_signer).await?;
         ensure_saved_nonce_available(saved_nonce, latest, pending).context(RootPublicationHeld)?;
         let request = if kind == "emptyProgress" {
             ethereum_client::abi::IMessageQueue::new(ethereum.queue_address, provider.clone())
@@ -2360,7 +2651,7 @@ pub(crate) async fn publish_root_locked(
                 .into_transaction_request()
         };
         sign_and_persist_root(
-            &ethereum.api,
+            ethereum,
             ethereum.queue_address,
             request,
             output,
@@ -2389,7 +2680,7 @@ pub(crate) async fn publish_root_locked(
         {
             crate::ethereum::ensure_same_submission(observed, signed)?;
         } else {
-            let (latest, pending) = root_account_nonces(&ethereum, publisher_signer).await?;
+            let (latest, pending) = root_account_nonces(ethereum, publisher_signer).await?;
             ensure_saved_nonce_available(saved_nonce, latest, pending)
                 .context(RootPublicationHeld)?;
             // Recovery can only rebroadcast these identical signed bytes, never replace the transaction.
@@ -2411,7 +2702,7 @@ pub(crate) async fn publish_root_locked(
         persist_root_intent(output, &intent)?;
     }
     let finalized = wait_for_root_receipt(
-        &ethereum,
+        ethereum,
         output,
         &mut intent,
         block,
@@ -2424,6 +2715,7 @@ pub(crate) async fn publish_root_locked(
             (destination_block, destination_hash),
         ),
         (publisher_state, last, &anchor, anchor_snapshot),
+        anchors,
     )
     .await?;
     if finalized == RootPublicationState::Accepted {
@@ -2434,6 +2726,128 @@ pub(crate) async fn publish_root_locked(
 #[cfg(test)]
 mod root_publication_tests {
     use super::*;
+
+    // Reconstructed from HTML VB-05, audited 7fe1b032. Tests cache scheduling, not RPC proof validity.
+    async fn qualify_500_roots(delay: std::time::Duration) -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let mut qualified = Default::default();
+        let calls = std::cell::Cell::new(0usize);
+        for restart in 0..2 {
+            if restart != 0 {
+                qualified = Default::default();
+            }
+            for pass in 0..2 {
+                for block in 0..500 {
+                    let path = directory.path().join(format!("{block}.json"));
+                    let intent =
+                        json!({"sourceBlock":block,"publicationReceipt":{"finalized":true}});
+                    qualify_root_record(&path, &intent, &mut qualified, async {
+                        calls.set(calls.get() + 1);
+                        if !delay.is_zero() {
+                            tokio::time::sleep(delay).await;
+                        }
+                        Ok(())
+                    })
+                    .await?;
+                }
+                assert_eq!(
+                    calls.get(),
+                    (restart + 1) * 500,
+                    "warm immutable roots repeated authentication on pass {pass}"
+                );
+            }
+        }
+        let path = directory.path().join("0.json");
+        let changed =
+            json!({"sourceBlock":0,"publicationReceipt":{"finalized":true},"tampered":true});
+        assert!(qualify_root_record(&path, &changed, &mut qualified, async {
+            anyhow::bail!("changed immutable record")
+        })
+        .await
+        .is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reconstructed_500_roots_restart_reauthenticates_once_per_session() -> Result<()> {
+        qualify_500_roots(std::time::Duration::ZERO).await
+    }
+
+    #[tokio::test]
+    #[ignore = "explicit slow-history regression: simulated per-record latency exceeds 300s per cold session"]
+    async fn reconstructed_slow_history_progress_exceeds_300_seconds() -> Result<()> {
+        qualify_500_roots(std::time::Duration::from_millis(610)).await
+    }
+
+    // Reconstructed from HTML VB-04: observation persistence only; real reorg proof remains an owned-runtime gate.
+    #[test]
+    fn reconstructed_moved_and_reverted_root_preserves_first_inclusion_and_original() -> Result<()>
+    {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("root.json");
+        let mut intent = json!({"txHash":"original","rawTransaction":"signed","nonce":"7",
+            "proof":{"anchorBlock":23},"acceptedAnchorTx":"anchor","queueProof":"proof"});
+        let original = intent.clone();
+        persist_root_inclusion(
+            &path,
+            &mut intent,
+            (40, B256::repeat_byte(1)),
+            "merkleRoot",
+            None,
+        )?;
+        let first = intent["publicationReceipt"].clone();
+        persist_root_inclusion(
+            &path,
+            &mut intent,
+            (42, B256::repeat_byte(2)),
+            "merkleRoot",
+            None,
+        )?;
+        assert_eq!(intent["publicationReceipt"], first);
+        let mut restarted: Value = serde_json::from_slice(&fs::read(&path)?)?;
+        persist_root_inclusion(
+            &path,
+            &mut restarted,
+            (42, B256::repeat_byte(2)),
+            "merkleRoot",
+            Some((50, B256::repeat_byte(3))),
+        )?;
+        assert_eq!(restarted["firstInclusion"], first);
+        assert_eq!(restarted["publicationReceipt"]["block"], 42);
+        for field in [
+            "rawTransaction",
+            "txHash",
+            "nonce",
+            "proof",
+            "acceptedAnchorTx",
+            "queueProof",
+        ] {
+            assert_eq!(restarted[field], original[field]);
+        }
+        assert!(persist_root_inclusion(
+            &path,
+            &mut restarted,
+            (43, B256::repeat_byte(4)),
+            "merkleRoot",
+            Some((51, B256::repeat_byte(5)))
+        )
+        .is_err());
+        archive_root_original(
+            &mut intent,
+            "reverted",
+            json!({"authenticatedFailure":"fixture"}),
+        )?;
+        assert_eq!(
+            intent["terminalSubmissions"][0]["original"]["firstInclusion"],
+            first
+        );
+        assert_eq!(
+            intent["terminalSubmissions"][0]["original"]["rawTransaction"],
+            original["rawTransaction"]
+        );
+        assert_eq!(intent["terminalSubmissions"][0]["disposition"], "reverted");
+        Ok(())
+    }
 
     #[tokio::test]
     async fn root_signing_binds_configured_chain_before_persisting_either_kind() -> Result<()> {
@@ -2566,12 +2980,11 @@ mod root_publication_tests {
                 persist_root_intent(&path, &intent)?;
                 let before = intent.clone();
                 let bytes = fs::read(&path)?;
-                let result = sign_and_persist_root(
+                let result = signed_root_candidate(
                     &api,
                     queue,
                     request,
-                    &path,
-                    &mut intent,
+                    &intent,
                     approved_publisher,
                     approved_nonce,
                 )
@@ -2581,7 +2994,9 @@ mod root_publication_tests {
                     assert_eq!(intent, before, "{kind}: {failure}");
                     assert_eq!(fs::read(&path)?, bytes, "{kind}: {failure}");
                 } else {
-                    let signed = result?;
+                    let (candidate, signed) = result?;
+                    persist_root_intent(&path, &candidate)?;
+                    intent = candidate;
                     assert_eq!(serde_json::from_slice::<Value>(&fs::read(&path)?)?, intent);
                     let raw = hex::decode(
                         intent["rawTransaction"]
@@ -2779,7 +3194,8 @@ mod root_publication_tests {
         persist_root_intent(&a, &original)?;
         let mut publications = vec![(a, original)];
         assert!(ensure_no_competing_publication(&publications, &b).is_err());
-        reconcile_publication_owners(&ethereum, &mut publications, &b).await?;
+        reconcile_publication_owners(&ethereum, &mut publications, &b, &mut Default::default())
+            .await?;
         let finalized = &publications[0].1;
         assert_eq!(finalized["publicationReceipt"]["finalized"], true);
         assert!(finalized["publicationReceipt"]["receiptProof"].is_object());
@@ -2824,7 +3240,8 @@ mod root_publication_tests {
         let restarted = serde_json::from_slice(&fs::read(&path)?)?;
         let mut publications = vec![(path, restarted)];
         assert!(ensure_no_competing_publication(&publications, &b).is_err());
-        reconcile_publication_owners(&ethereum, &mut publications, &b).await?;
+        reconcile_publication_owners(&ethereum, &mut publications, &b, &mut Default::default())
+            .await?;
         assert!(publications[0].1["nonce"].is_null());
         ensure_no_competing_publication(&publications, &b)?;
         Ok(())
@@ -3079,6 +3496,18 @@ mod root_publication_tests {
         );
         assert_eq!(refreshed["proof"], next["proof"]);
         assert_eq!(refreshed["queueProof"], "new-proof");
+        let mut budget_reserved = saved.clone();
+        budget_reserved["spendReservationNonce"] = json!(4);
+        let reservation = root_spend_reservation(&budget_reserved)?;
+        budget_reserved["spendReservationId"] = json!(reservation);
+        assert!(refresh_unsigned_intent(&budget_reserved, &next).is_err());
+        let restarted: Value = serde_json::from_slice(&serde_json::to_vec(&budget_reserved)?)?;
+        assert_eq!(root_spend_reservation(&restarted)?, reservation);
+        budget_reserved["observedProgress"] = json!({"qualifiedFixture":true});
+        adopt_authenticated_progress(&mut budget_reserved)?;
+        assert!(budget_reserved["nonce"].is_null());
+        assert_eq!(root_spend_reservation(&budget_reserved)?, reservation);
+        assert_eq!(budget_reserved["spendReservationId"], json!(reservation));
         saved["txHash"] = json!("original-hash");
         saved["rawTransaction"] = json!("original-bytes");
         assert!(refresh_unsigned_intent(&saved, &next).is_err());

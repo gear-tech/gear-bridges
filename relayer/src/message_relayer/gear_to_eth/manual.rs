@@ -57,6 +57,7 @@ pub async fn relay(
         "HOLD: manual relay requires its own journal, not an automatic worker journal"
     );
     let tx_manager = TransactionManager::new(storage.clone())
+        .with_source_api(api_provider.client())
         .with_lane_approvals(eth_api.clone(), lane_approvals);
     tx_manager.load_from_storage().await?;
     eth_api
@@ -93,7 +94,11 @@ pub async fn relay(
             .expect("Unable to get authority set id"),
     );
     log::debug!("AuthoritySetId for the message is {authority_set_id}");
+    let queue_id =
+        crate::message_relayer::common::gear::queue_id_at(&gear_api, gear_block, gear_block_hash)
+            .await?;
     let message_in_block = MessageInBlock {
+        queue_id: Some(queue_id),
         message,
         block: GearBlockNumber(gear_block),
         block_hash: gear_block_hash,
@@ -207,10 +212,7 @@ pub async fn relay(
 
 fn ensure_manual_target(tx: &Transaction, target: &MessageInBlock) -> anyhow::Result<()> {
     anyhow::ensure!(
-        tx.message.block == target.block
-            && tx.message.block_hash == target.block_hash
-            && tx.message.authority_set_id == target.authority_set_id
-            && tx.message_hash == message_hash(&target.message),
+        tx.message.same_original(target) && tx.message_hash == message_hash(&target.message),
         "HOLD: manual journal belongs to another source message"
     );
     Ok(())
@@ -226,6 +228,7 @@ mod tests {
     #[test]
     fn manual_journal_cannot_switch_message_or_source_block() {
         let target = MessageInBlock {
+            queue_id: None,
             message: Message {
                 nonce_be: [0; 32],
                 source: [1; 32],

@@ -1,3 +1,6 @@
+mod heartbeat;
+mod spending;
+
 #[cfg(test)]
 use alloy::node_bindings::Anvil;
 use alloy::{
@@ -33,7 +36,7 @@ use tokio::time::{sleep, timeout, Instant};
 use std::os::unix::fs::PermissionsExt;
 
 use crate::{
-    authority_addresses, authority_proof, keccak256, source::CapturedCommitment, Hash32,
+    authority_leaves, authority_proof, keccak256, source::CapturedCommitment, Hash32,
     QueueSnapshot, RuntimeLeaf, SimplifiedMmrProof, SNAPSHOT_VERSION,
 };
 
@@ -69,6 +72,18 @@ pub(crate) fn signed_transaction(
         },
     )
 }
+
+pub(crate) fn external_transaction(
+    raw: &[u8],
+    hash: B256,
+    approved_chain: u64,
+) -> Result<(TxEnvelope, TransactionIdentity)> {
+    ethereum_client::signed_transaction::decode_external_signed_transaction(
+        raw,
+        hash,
+        approved_chain,
+    )
+}
 pub(crate) fn ensure_same_submission(
     observed: TransactionIdentity,
     signed: TransactionIdentity,
@@ -83,10 +98,11 @@ pub(crate) fn ensure_same_submission(
     Ok(())
 }
 async fn await_original_commitment(
-    provider: &impl Provider,
+    api: &EthApi,
     signed: TransactionIdentity,
     raw: &[u8],
 ) -> Result<alloy::rpc::types::TransactionReceipt> {
+    let provider = api.raw_provider();
     timeout(Duration::from_secs(120), async {
         let mut last_broadcast: Option<Instant> = None;
         loop {
@@ -105,8 +121,7 @@ async fn await_original_commitment(
             if let Some(observed) = transaction_identity(provider, signed.hash).await? {
                 ensure_same_submission(observed, signed)?;
             } else {
-                let latest = provider.get_transaction_count(signed.from).await?;
-                let pending = provider.get_transaction_count(signed.from).pending().await?;
+                let (latest, pending) = api.qualified_account_nonces(signed.from).await?;
                 ensure!(
                     latest == signed.nonce && pending == signed.nonce,
                     "HOLD: original commitment {} disappeared while nonce {} is uncertain (latest={latest}, pending={pending})",
@@ -151,8 +166,6 @@ pub(crate) fn recorded_commitment_transaction(raw: &[u8], source_raw: &[u8]) -> 
 
 pub(crate) struct AcceptedCommitmentCall {
     pub commitment: BeefyClient::Commitment,
-    pub snapshot: VaraBridgeMetadata::Snapshot,
-    pub leaf: BeefyClient::MMRLeaf,
 }
 
 pub(crate) fn validate_commitment_call(
@@ -173,8 +186,6 @@ pub(crate) fn validate_commitment_call(
         );
         AcceptedCommitmentCall {
             commitment: call.commitment,
-            snapshot: call.snapshot,
-            leaf: call.leaf,
         }
     } else if selector == BeefyClient::submitFinalCall::SELECTOR {
         let call = BeefyClient::submitFinalCall::abi_decode(input)
@@ -185,8 +196,6 @@ pub(crate) fn validate_commitment_call(
         );
         AcceptedCommitmentCall {
             commitment: call.commitment,
-            snapshot: call.snapshot,
-            leaf: call.leaf,
         }
     } else {
         anyhow::bail!("unknown original commitment selector; HOLD");
@@ -690,8 +699,11 @@ pub(crate) fn test_finality_args(witness: String) -> Result<cli_utils::EthereumF
     })
 }
 
+type SignerOwner = ((u64, B256, [u8; 20]), fs::File);
+
 pub struct Ethereum {
     _anvil: Option<AnvilInstance>,
+    signer_owner: std::sync::OnceLock<SignerOwner>,
     #[cfg(test)]
     _witness: Option<AnvilWitness>,
     #[cfg(test)]
@@ -756,7 +768,14 @@ impl Ethereum {
         );
 
         let anvil = Anvil::new()
-            .mnemonic("test test test test test test test test test test test junk")
+            // Test-only unique funded accounts keep retained spending evidence isolated.
+            .arg("--mnemonic-seed-unsafe")
+            .arg(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_nanos()
+                    .to_string(),
+            )
             .host("127.0.0.1")
             .port(0u16)
             .chain_id(31_337)
@@ -914,6 +933,7 @@ impl Ethereum {
 
         let mut ethereum = Self {
             _anvil: Some(anvil),
+            signer_owner: std::sync::OnceLock::new(),
             _witness: Some(witness),
             _beacon: Some(beacon),
             owned_fixture_network: None,
@@ -1037,6 +1057,14 @@ impl Ethereum {
             owned_network: network.clone(),
             beacon_approval_sha256: beacon.approval_sha256,
             beacon_approval_path: beacon.approval_path.clone(),
+            root_signer: PrivateKeySigner::from_bytes(&B256::from_slice(
+                &anvil.keys()[3].to_bytes(),
+            ))?
+            .address(),
+            heartbeat_signer: PrivateKeySigner::from_bytes(&B256::from_slice(
+                &anvil.keys()[4].to_bytes(),
+            ))?
+            .address(),
         };
         let (manifest, digest) = generate(self, source, initial, proof, output, &topology).await?;
         let authority = load(
@@ -1175,8 +1203,9 @@ impl Ethereum {
         .await?
         .with_data_witness(witness_endpoint, chain_id, genesis)
         .await?;
-        Ok(Self {
+        let ethereum = Self {
             _anvil: None,
+            signer_owner: std::sync::OnceLock::new(),
             #[cfg(test)]
             _witness: None,
             #[cfg(test)]
@@ -1190,7 +1219,11 @@ impl Ethereum {
             queue_address,
             receiver_address,
             transactions: Vec::new(),
-        })
+        };
+        if private_key.is_some() {
+            ethereum.ensure_signer_owner()?;
+        }
+        Ok(ethereum)
     }
 
     pub(crate) async fn connect_readonly(
@@ -1813,6 +1846,33 @@ impl Ethereum {
         })
     }
 
+    /// New publication admission only. Historical acceptance is authenticated by its
+    /// original receipt even after ring eviction, and never needs a replacement anchor.
+    pub(crate) async fn ensure_live_accepted_anchor(
+        &self,
+        anchor_block: u32,
+        anchor_root: [u8; 32],
+    ) -> Result<()> {
+        let latest = self
+            .api
+            .raw_provider()
+            .get_block_by_number(BlockNumberOrTag::Latest)
+            .await?
+            .context("latest Ethereum block is missing")?;
+        let pin = BlockId::hash(latest.header.hash);
+        let client = BeefyClient::new(self.client_address, self.api.raw_provider().clone());
+        ensure!(
+            client.isLive().block(pin).call().await?
+                && client
+                    .isAcceptedAnchor(u64::from(anchor_block), B256::from(anchor_root))
+                    .block(pin)
+                    .call()
+                    .await?,
+            "pinned BEEFY anchor is evicted, unknown, or client expired; hold the original root intent"
+        );
+        Ok(())
+    }
+
     pub async fn verify_accepted_commitment(
         &self,
         tx_hash: B256,
@@ -1828,9 +1888,7 @@ impl Ethereum {
             .await?
             .context("accepted commitment receipt is unavailable")?;
         ensure!(
-            receipt.transaction_hash == tx_hash
-                && receipt.status()
-                && receipt.to == Some(self.client_address),
+            receipt.transaction_hash == tx_hash && receipt.status(),
             "accepted commitment receipt identity or status is invalid"
         );
         let number = receipt
@@ -1839,33 +1897,55 @@ impl Ethereum {
         let hash = receipt
             .block_hash
             .context("accepted receipt has no block hash")?;
-        wait_canonical_receipt(self.api.raw_provider(), number, hash).await?;
-        let signed = self
-            .api
-            .raw_provider()
-            .get_transaction_by_hash(tx_hash)
-            .await?
-            .context("accepted signed transaction unavailable; HOLD")?
-            .into_inner();
-        let raw = signed.encoded_2718();
-        ensure!(
-            B256::from(keccak256(&raw)) == tx_hash,
-            "accepted signed transaction hash changed; HOLD"
-        );
+        let provider = self.api.raw_provider();
+        let witness = self.api.raw_witness_provider()?;
+        tokio::try_join!(
+            wait_canonical_receipt(provider, number, hash),
+            wait_canonical_receipt(witness, number, hash),
+        )?;
+        // A receipt locator is not effect authority. Authenticate both complete trie
+        // roots even for mined own originals; external adoption additionally pins finality.
+        let (_, transactions, receipts) = authenticated_receipt_block(
+            provider,
+            number,
+            hash,
+            ReceiptBlockErrors {
+                block: "accepted inclusion block unavailable; HOLD",
+                receipts: "accepted inclusion receipts unavailable; HOLD",
+                header: "accepted inclusion header changed; HOLD",
+                transactions: "accepted full transactions unavailable; HOLD",
+                transaction_root: Some("accepted transaction trie differs from header; HOLD"),
+                count: "accepted receipt set incomplete; HOLD",
+                coordinates: "accepted receipt coordinates changed; HOLD",
+                root: "accepted receipt trie differs from header; HOLD",
+            },
+        )
+        .await?;
+        let index = transactions
+            .iter()
+            .position(|signed| B256::from(keccak256(&signed.encoded_2718())) == tx_hash)
+            .context("accepted transaction absent from authenticated block; HOLD")?;
+        let signed = &transactions[index];
+        let authenticated = &receipts[index].1;
         let sender = self.validate_accepted_commitment(
-            &signed,
-            self.api.raw_provider().get_chain_id().await?,
-            receipt.status(),
-            receipt.as_ref().logs().iter().map(|log| &log.inner),
+            signed,
+            self.api.finality_identity()?.0,
+            authenticated.status(),
+            authenticated.logs().iter(),
             anchor,
-            snapshot,
         )?;
         ensure!(
-            sender == receipt.from,
+            sender == receipt.from && signed.to() == receipt.to,
             "accepted signed transaction changed sender or chain; HOLD"
         );
-        self.verify_accepted_checkpoint(number, hash, anchor, snapshot)
-            .await
+        let included = self
+            .verify_accepted_checkpoint(number, hash, anchor, snapshot)
+            .await?;
+        tokio::try_join!(
+            wait_canonical_receipt(provider, number, hash),
+            wait_canonical_receipt(witness, number, hash),
+        )?;
+        Ok(included)
     }
 
     /// Authenticate a retained original without discovering its receipt, body or
@@ -1900,19 +1980,13 @@ impl Ethereum {
         .await
         .context("authenticate retained commitment inclusion header")?;
         proof.verify_original_inclusion(view, raw, tx_hash)?;
-        let mut encoded = raw;
-        let signed = TxEnvelope::decode_2718(&mut encoded)?;
-        ensure!(
-            encoded.is_empty() && signed.encoded_2718() == raw,
-            "retained commitment signed bytes are noncanonical; HOLD"
-        );
+        let (signed, _) = external_transaction(raw, tx_hash, chain)?;
         self.validate_accepted_commitment(
             &signed,
             chain,
             proof.receipt.status(),
             proof.receipt.logs().iter(),
             anchor,
-            snapshot,
         )?;
         let included = self
             .verify_accepted_checkpoint(number, hash, anchor, snapshot)
@@ -1930,26 +2004,18 @@ impl Ethereum {
         status: bool,
         mut logs: impl Iterator<Item = &'a alloy::primitives::Log>,
         anchor: &CapturedCommitment,
-        snapshot: &QueueSnapshot,
     ) -> Result<Address> {
-        use alloy::sol_types::SolValue;
         ensure!(
-            status && signed.to() == Some(self.client_address) && signed.chain_id() == Some(chain),
-            "accepted signed transaction changed client, chain or status; HOLD"
+            status
+                && match signed.chain_id() {
+                    Some(id) => id == chain,
+                    None => matches!(signed, TxEnvelope::Legacy(_)),
+                },
+            "accepted external transaction changed chain or status; HOLD"
         );
         let sender = signed
             .recover_signer()
             .context("invalid accepted transaction signature")?;
-        let call = validate_commitment_call(signed, &anchor.raw)?;
-        ensure!(
-            call.snapshot.abi_encode() == to_sol_snapshot(snapshot).abi_encode()
-                && call.leaf.parentNumber.checked_add(1) == Some(anchor.block)
-                && call.leaf.nextAuthoritySetID == anchor.next.id
-                && call.leaf.nextAuthoritySetLen == anchor.next.keys.len() as u32
-                && call.leaf.nextAuthoritySetRoot == B256::from(anchor.next.root)
-                && call.leaf.parachainHeadsRoot == B256::from(snapshot.hash()),
-            "accepted signed freshness or authority transition changed; HOLD"
-        );
         let event = B256::from(keccak256(b"NewMMRRoot(bytes32,uint64)"));
         ensure!(
             logs.any(|log| {
@@ -1973,20 +2039,77 @@ impl Ethereum {
         anchor: &CapturedCommitment,
         snapshot: &QueueSnapshot,
     ) -> Result<(u64, B256)> {
-        let latest = self.checkpoint().await?;
-        // Public Hoodi RPC prunes historical state; the unchanged latest checkpoint is equivalent.
-        let checkpoint = if latest.block == u64::from(anchor.block) {
-            latest
-        } else {
-            self.checkpoint_at(BlockId::hash(hash)).await?
-        };
+        // Pruned historical state is unavailable evidence, not permission to use
+        // latest state. Both transports must answer at this exact accepted block.
+        let at = BlockId::hash_canonical(hash);
+        let checkpoint = self.checkpoint_at(at).await?;
+        let witness = BeefyClient::new(
+            self.client_address,
+            self.api.raw_witness_provider()?.clone(),
+        );
+        let current = witness.currentValidatorSet().block(at).call().await?;
+        let next = witness.nextValidatorSet().block(at).call().await?;
+        ensure!(
+            witness.latestBeefyBlock().block(at).call().await? == checkpoint.block
+                && witness.latestMMRRoot().block(at).call().await?.0 == checkpoint.root
+                && witness
+                    .lastAuthenticatedSourceTimestampMs()
+                    .block(at)
+                    .call()
+                    .await?
+                    == checkpoint.source_timestamp_ms
+                && u64::try_from(current.id)? == checkpoint.current_id
+                && u64::try_from(current.length)? == checkpoint.current_len
+                && current.root.0 == checkpoint.current_root
+                && u64::try_from(next.id)? == checkpoint.next_id
+                && u64::try_from(next.length)? == checkpoint.next_len
+                && next.root.0 == checkpoint.next_root,
+            "accepted checkpoint differs between primary and witness; HOLD"
+        );
+        let client = BeefyClient::new(self.client_address, self.api.raw_provider().clone());
+        let root = B256::from(anchor.validated.mmr_root);
+        ensure!(
+            client
+                .isAcceptedAnchor(u64::from(anchor.block), root)
+                .block(at)
+                .call()
+                .await?
+                && witness
+                    .isAcceptedAnchor(u64::from(anchor.block), root)
+                    .block(at)
+                    .call()
+                    .await?,
+            "accepted block does not retain the source anchor; bootstrap is not accepted progress"
+        );
         ensure!(
             checkpoint.block >= u64::from(anchor.block),
             "accepted checkpoint regressed behind original source block; HOLD"
         );
-        // Several permissionless updates may share one Ethereum block. Their exact
-        // signed calldata and original receipt effects, not end-of-block state, own each outcome.
+        // Several permissionless updates may share one Ethereum block. The exact
+        // accepted effect authenticates each source root, not its outer caller/calldata.
+        // Later eviction cannot invalidate history: membership is checked only at
+        // the original inclusion block, never at latest state.
         if checkpoint.block > u64::from(anchor.block) {
+            ensure!(
+                checkpoint.source_timestamp_ms >= snapshot.source_timestamp_ms
+                    && checkpoint.current_id >= anchor.current.id
+                    && checkpoint.next_id >= anchor.next.id,
+                "later same-block checkpoint contradicts authenticated source history; HOLD"
+            );
+            if checkpoint.current_id == anchor.current.id {
+                ensure!(
+                    checkpoint.current_len == anchor.current.keys.len() as u64
+                        && checkpoint.current_root == anchor.current.root,
+                    "same-set checkpoint changed current authorities; HOLD"
+                );
+            }
+            if checkpoint.next_id == anchor.next.id {
+                ensure!(
+                    checkpoint.next_len == anchor.next.keys.len() as u64
+                        && checkpoint.next_root == anchor.next.root,
+                    "same-set checkpoint changed next authorities; HOLD"
+                );
+            }
             return Ok((number, hash));
         }
         ensure!(
@@ -2039,7 +2162,7 @@ impl Ethereum {
             !wire_keys.is_empty() && wire_keys.len() <= 256,
             "invalid fixture authority count"
         );
-        let addresses = authority_addresses(&wire_keys)?;
+        let addresses = authority_leaves(&wire_keys)?;
         let mut bitfield = vec![U256::ZERO];
         for index in &validated.signed_indices {
             ensure!(
@@ -2259,7 +2382,7 @@ impl Ethereum {
             wire_keys.len() <= 256,
             "BEEFY authority set exceeds uint256 bitfield"
         );
-        let addresses = authority_addresses(&wire_keys)?;
+        let addresses = authority_leaves(&wire_keys)?;
         let mut bitfield = vec![U256::ZERO];
         let available: BTreeSet<usize> = validated
             .signed_indices
@@ -2326,7 +2449,6 @@ impl Ethereum {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let source_timestamp_ms = snapshot.source_timestamp_ms;
         let leaf = to_sol_leaf(freshness_leaf)?;
         let sol_snapshot = to_sol_snapshot(snapshot);
         let items: Vec<B256> = freshness.items.iter().copied().map(B256::from).collect();
@@ -2340,10 +2462,10 @@ impl Ethereum {
             items,
             order,
         );
+        self.ensure_signer_owner()?;
         let provider = self.api.raw_provider();
         let sender = provider.default_signer_address();
-        let latest = provider.get_transaction_count(sender).await?;
-        let pending = provider.get_transaction_count(sender).pending().await?;
+        let (latest, pending) = self.api.qualified_account_nonces(sender).await?;
         let mut transaction = prior
             .cloned()
             .unwrap_or_else(|| json!({"block": anchor.block, "rawScale": bytes(&anchor.raw)}));
@@ -2352,6 +2474,10 @@ impl Ethereum {
             "unsigned commitment belongs to a different approved manifest/fixture; HOLD"
         );
         transaction[approval.0] = json!(approval.1);
+        ensure!(
+            transaction["block"] == anchor.block && transaction["rawScale"] == bytes(&anchor.raw),
+            "HOLD: reserved commitment source evidence changed"
+        );
         let nonce = match transaction.get("nonce") {
             Some(nonce) => nonce.as_u64().context("invalid saved commitment nonce")?,
             None => {
@@ -2366,18 +2492,47 @@ impl Ethereum {
             "commitment nonce is uncertain; refusing a replacement nonce"
         );
         let chain_id = self.api.finality_identity()?.0;
+        let role = self
+            .execution
+            .as_ref()
+            .map(|approval| approval.signer_role(sender))
+            .transpose()?
+            .unwrap_or("commitment");
+        ensure!(
+            role == "commitment" || role == "heartbeat",
+            "HOLD: root signer cannot maintain the client"
+        );
+        let reservation = B256::from(keccak256(&serde_json::to_vec(&json!([
+            "beefy-commitment-spend-v1",
+            chain_id,
+            self.api.finality_identity()?.1,
+            sender,
+            nonce,
+            anchor.block,
+            transaction["rawScale"]
+        ]))?));
+        ensure!(
+            transaction["spendReservationId"].is_null()
+                || transaction["spendReservationId"] == json!(reservation),
+            "HOLD: commitment spending identity changed"
+        );
+        transaction["spendReservationId"] = json!(reservation);
+        journal(&transaction, None)?;
+        let mut request = call
+            .nonce(nonce)
+            .into_transaction_request()
+            .with_chain_id(chain_id);
+        self.admit_spend(role, &mut request, reservation).await?;
         let filled = provider
-            .fill(
-                call.nonce(nonce)
-                    .into_transaction_request()
-                    .with_chain_id(chain_id),
-            )
+            .fill(request)
             .await
             .context("sign original Fiat-Shamir commitment")?;
         let raw = filled
             .as_envelope()
             .context("commitment transaction was not signed")?
             .encoded_2718();
+        self.validate_admitted_spend(role, reservation, &raw)
+            .await?;
         let hash = B256::from(keccak256(&raw));
         let (signed, identity) = signed_transaction(&raw, hash, nonce, self.client_address)?;
         ensure!(
@@ -2400,46 +2555,17 @@ impl Ethereum {
         self.transactions
             .push(receipt_value("submitFiatShamir", &receipt, None));
 
-        let receipt_block = receipt
-            .block_hash
-            .context("accepted receipt has no block hash")?;
-        let latest = self.checkpoint().await?;
-        let after = if latest.block == u64::from(validated.signed.commitment.block_number) {
-            latest
-        } else {
-            self.checkpoint_at(BlockId::hash(receipt_block)).await?
-        };
-        ensure!(
-            after.block == u64::from(validated.signed.commitment.block_number)
-                && after.root == validated.mmr_root,
-            "accepted BEEFY checkpoint does not match commitment"
-        );
-        ensure!(
-            after.source_timestamp_ms == source_timestamp_ms,
-            "accepted source timestamp does not match authenticated freshness metadata"
-        );
-        if set_id == before.next_id {
-            ensure!(
-                after.current_id == before.next_id
-                    && after.next_id == freshness_leaf.beefy_next_authority_set.id
-                    && after.next_root == freshness_leaf.beefy_next_authority_set.keyset_commitment,
-                "accepted next-set transition does not match freshness leaf"
-            );
-        } else {
-            ensure!(
-                after.current_id == before.current_id
-                    && after.next_id == before.next_id
-                    && after.current_root == before.current_root
-                    && after.next_root == before.next_root,
-                "current-set commitment unexpectedly changed authority state"
-            );
-        }
+        // Reuse exact original receipt/event authentication. Another accepted update
+        // in the same destination block must not turn this successful original into a HOLD.
+        self.verify_accepted_commitment(hash, anchor, snapshot)
+            .await?;
         Ok(())
     }
     pub async fn resume_commitment(
         &self,
         transaction: &Value,
     ) -> Result<alloy::rpc::types::TransactionReceipt> {
+        self.ensure_signer_owner()?;
         let raw = hex::decode(
             transaction["rawTransaction"]
                 .as_str()
@@ -2464,7 +2590,7 @@ impl Ethereum {
             signed.from == provider.default_signer_address(),
             "saved commitment signer differs from follower wallet"
         );
-        await_original_commitment(provider, signed, &raw).await
+        await_original_commitment(&self.api, signed, &raw).await
     }
 }
 
@@ -2681,15 +2807,25 @@ where
 }
 
 async fn verify_manifest(ethereum: &Ethereum, manifest: &Value) -> Result<()> {
+    verify_manifest_mode(ethereum, manifest, true).await
+}
+
+async fn verify_manifest_mode(
+    ethereum: &Ethereum,
+    manifest: &Value,
+    require_queue: bool,
+) -> Result<()> {
     let provider = ethereum.api.raw_provider().clone();
     ensure!(
         provider.get_chain_id().await? == ethereum.expected_chain_id(),
         "connected Ethereum endpoint has unexpected approved chain id"
     );
-    ensure!(
-        manifest["recovery"] == ethereum.recovery_configuration().await?,
-        "BEEFY recovery timelock address, code or delay differs from the saved manifest"
-    );
+    if require_queue {
+        ensure!(
+            manifest["recovery"] == ethereum.recovery_configuration().await?,
+            "BEEFY recovery timelock address, code or delay differs from the saved manifest"
+        );
+    }
     let bridge_domain = manifest_b256(manifest, "bridgeDomain")?;
     let source_domain = manifest_b256(manifest, "sourceDomain")?;
     let mmr_start_block = manifest_u64(manifest, "mmrStartBlock")?;
@@ -2758,20 +2894,25 @@ async fn verify_manifest(ethereum: &Ethereum, manifest: &Value) -> Result<()> {
         .context("manifest is missing bytecode hashes")?;
     let identity_view = ethereum.api.verified_finalized_view().await?;
     let identity_header = identity_view.checkpoint().common_header().clone();
-    crate::execution::authenticate_code(
-        &provider,
-        &identity_view,
-        identity_header.clone(),
-        manifest_address(&manifest["recovery"], "address")?,
-        manifest_b256(&manifest["recovery"], "codeHash")?,
-    )
-    .await?;
+    if require_queue {
+        crate::execution::authenticate_code(
+            &provider,
+            &identity_view,
+            identity_header.clone(),
+            manifest_address(&manifest["recovery"], "address")?,
+            manifest_b256(&manifest["recovery"], "codeHash")?,
+        )
+        .await?;
+    }
     for (name, address) in [
         ("client", ethereum.client_address),
         ("verifier", ethereum.verifier_address),
         ("queue", ethereum.queue_address),
         ("receiver", ethereum.receiver_address),
     ] {
+        if !require_queue && name != "client" && name != "verifier" {
+            continue;
+        }
         crate::execution::authenticate_code(
             &provider,
             &identity_view,
@@ -2996,7 +3137,7 @@ mod tests {
         }
     }
 
-    async fn commitment_signing_fixture() -> Result<(
+    pub(super) async fn commitment_signing_fixture() -> Result<(
         Ethereum,
         CapturedCommitment,
         RuntimeLeaf,
@@ -3058,10 +3199,18 @@ mod tests {
         // Each independent fixture is a distinct chain, not a reorg sharing the
         // process-wide genesis-keyed authenticated ancestry.
         static FIXTURE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        // Distinct funded accounts also separate genesis across repeated test processes;
+        // retained spending evidence must never attach to a fresh fixture by accident.
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+            .to_string();
         let anvil = Anvil::new()
             .host("127.0.0.1")
             .port(0u16)
             .chain_id(31_337)
+            .arg("--mnemonic-seed-unsafe")
+            .arg(seed)
             .arg("--slots-in-an-epoch")
             .arg("1")
             .arg("--timestamp")
@@ -3114,6 +3263,12 @@ mod tests {
             .get_receipt()
             .await?;
         assert!(receipt.status());
+        // Admission estimates and account proofs use the finalized pin, not deployment's hot head.
+        deployer
+            .raw_provider()
+            .client()
+            .request::<_, Value>("anvil_mine", ("0x3",))
+            .await?;
         let genesis = ethereum_client::get_block(deployer.raw_provider(), 0)
             .await?
             .header
@@ -3140,6 +3295,7 @@ mod tests {
         .await?;
         let ethereum = Ethereum {
             _anvil: Some(anvil),
+            signer_owner: std::sync::OnceLock::new(),
             _witness: Some(witness),
             _beacon: Some(beacon),
             execution: None,
@@ -3199,8 +3355,6 @@ mod tests {
                 accepted.commitment.abi_encode(),
                 call.commitment.abi_encode()
             );
-            assert_eq!(accepted.snapshot.abi_encode(), call.snapshot.abi_encode());
-            assert_eq!(accepted.leaf.abi_encode(), call.leaf.abi_encode());
             assert!(validate_commitment_call(&signed, &other_raw).is_err());
             assert_eq!(
                 recorded_commitment_transaction(&signed.encoded_2718(), &source_raw)?
@@ -3239,6 +3393,83 @@ mod tests {
                 );
             }
         }
+        Ok(())
+    }
+
+    // VB-13 reconstructed from HTML, audited 7fe1b032. Synthetic signed authorities
+    // exercise the real client and relay admission, not mainnet/runtime qualification.
+    #[tokio::test]
+    async fn vb13_reconstructed_retained_anchor_admission_and_history() -> Result<()> {
+        let (mut ethereum, anchor, mut leaf, snapshot, proof) =
+            commitment_signing_fixture().await?;
+        assert!(ethereum
+            .ensure_live_accepted_anchor(anchor.block, anchor.validated.mmr_root)
+            .await
+            .is_err());
+        let original = ethereum
+            .submit_interactive_fixture(&anchor, &leaf, &snapshot, &proof)
+            .await?;
+        let original_hash = original["txHash"]
+            .as_str()
+            .context("original hash missing")?
+            .parse()?;
+        let original_inclusion = ethereum
+            .verify_accepted_commitment(original_hash, &anchor, &snapshot)
+            .await?;
+
+        let mut next = anchor.clone();
+        next.block += 1;
+        next.finalized_height = next.block;
+        leaf.parent_number_and_hash.0 = next.block - 1;
+        let root = keccak256(&crate::encode_outer_leaf(&leaf)?);
+        let mut signed = crate::decode_versioned_finality_proof(&next.raw)?;
+        signed.commitment.block_number = next.block;
+        signed.commitment.payload =
+            Decode::decode(&mut vec![(*b"mh", root.to_vec())].encode().as_slice())?;
+        let digest = keccak256(&signed.commitment.encode());
+        for (index, signature) in signed.signatures.iter_mut().enumerate() {
+            let (value, recovery) =
+                crate::fixtures::signing_key(index as u16 + 1).sign_prehash_recoverable(&digest)?;
+            let mut raw = [0; 65];
+            raw[..64].copy_from_slice(&value.to_bytes());
+            raw[64] = recovery.to_byte();
+            *signature = Some(sp_consensus_beefy::ecdsa_crypto::Signature::unchecked_from(
+                raw,
+            ));
+        }
+        next.raw = sp_consensus_beefy::VersionedFinalityProof::V1(signed).encode();
+        let keys = next
+            .current
+            .keys
+            .iter()
+            .map(|key| key.as_slice().try_into().expect("fixture key length"))
+            .collect::<Vec<[u8; 33]>>();
+        next.validated =
+            crate::validate_signed_commitment(&next.raw, &keys, Some(0), Some(next.block))?;
+        let next_proof = SimplifiedMmrProof {
+            items: Vec::new(),
+            proof_order: [0; 32],
+        };
+        ethereum
+            .submit_synthetic_commitment(&next, &leaf, &snapshot, &next_proof, None, |_, _| Ok(()))
+            .await?;
+        assert_eq!(ethereum.checkpoint().await?.block, u64::from(next.block));
+        ethereum
+            .ensure_live_accepted_anchor(anchor.block, anchor.validated.mmr_root)
+            .await?;
+        ethereum
+            .ensure_live_accepted_anchor(next.block, next.validated.mmr_root)
+            .await?;
+        assert!(ethereum
+            .ensure_live_accepted_anchor(next.block, anchor.validated.mmr_root)
+            .await
+            .is_err());
+        assert_eq!(
+            ethereum
+                .verify_accepted_commitment(original_hash, &anchor, &snapshot)
+                .await?,
+            original_inclusion
+        );
         Ok(())
     }
 
@@ -3307,6 +3538,13 @@ mod tests {
                 .verify_accepted_commitment(hash, &anchor, &snapshot)
                 .await?;
             assert_eq!(Some(included.0), transaction["blockNumber"].as_u64());
+            assert!(
+                ethereum
+                    .verify_accepted_checkpoint(included.0, B256::ZERO, &anchor, &snapshot)
+                    .await
+                    .is_err(),
+                "matching latest state must not replace unavailable inclusion state"
+            );
             assert_eq!(
                 ethereum
                     .api
@@ -3465,14 +3703,225 @@ mod tests {
                 (31_337, true, &[][..]),
             ] {
                 assert!(ethereum
-                    .validate_accepted_commitment(
-                        &original,
-                        chain,
-                        status,
-                        logs.iter(),
+                    .validate_accepted_commitment(&original, chain, status, logs.iter(), &anchor,)
+                    .is_err());
+            }
+        }
+        Ok(())
+    }
+
+    // VB-01 reconstructed from HTML, audited 7fe1b032. Real owned Anvil execution
+    // and trie/finality proofs, synthetic authorities (not production source approval).
+    #[tokio::test]
+    async fn vb01_external_forwarder_create_and_pre155_preserve_original() -> Result<()> {
+        use alloy::rpc::types::TransactionRequest;
+        for create in [false, true] {
+            for chain_id in [Some(31_337), None] {
+                let (mut ethereum, anchor, leaf, snapshot, proof) =
+                    commitment_signing_fixture().await?;
+                let client = ethereum.client_address;
+                let provider = ethereum.api.raw_provider().clone();
+                let deployment = provider
+                    .get_block_by_number(BlockNumberOrTag::Latest)
+                    .await?
+                    .context("deployment block missing")?;
+                let checkpoint = ethereum.checkpoint().await?;
+                let mut bootstrap = anchor.clone();
+                bootstrap.block = checkpoint.block.try_into()?;
+                bootstrap.validated.mmr_root = checkpoint.root;
+                assert!(
+                    ethereum
+                        .verify_accepted_checkpoint(
+                            deployment.header.number,
+                            deployment.header.hash,
+                            &bootstrap,
+                            &snapshot,
+                        )
+                        .await
+                        .is_err(),
+                    "constructor bootstrap must not count as accepted progress"
+                );
+
+                let destination = if create {
+                    TxKind::Create
+                } else {
+                    // Runtime copies the full calldata and CALLs the approved client;
+                    // no delegatecall and no replacement/emulation of client code.
+                    let mut runtime = hex::decode("365f5f375f5f365f5f73")?;
+                    runtime.extend_from_slice(client.as_slice());
+                    runtime.extend_from_slice(&[0x5a, 0xf1, 0x50, 0x00]);
+                    let mut init = vec![
+                        0x60,
+                        runtime.len() as u8,
+                        0x60,
+                        12,
+                        0x60,
+                        0,
+                        0x39,
+                        0x60,
+                        runtime.len() as u8,
+                        0x60,
+                        0,
+                        0xf3,
+                    ];
+                    init.extend(runtime);
+                    let receipt = provider
+                        .send_transaction(
+                            TransactionRequest::default()
+                                .with_deploy_code(init)
+                                .with_gas_limit(200_000),
+                        )
+                        .await?
+                        .get_receipt()
+                        .await?;
+                    assert!(receipt.status());
+                    TxKind::Call(receipt.contract_address.context("forwarder missing")?)
+                };
+                // Leave a real signed own original reserved, without broadcasting it.
+                let mut original = Value::Null;
+                let _interrupted = ethereum
+                    .submit_synthetic_commitment(
+                        &anchor,
+                        &leaf,
+                        &snapshot,
+                        &proof,
+                        None,
+                        |record, _| {
+                            original = record.clone();
+                            ensure!(
+                                record["rawTransaction"].is_null(),
+                                "fixture signed-original stop"
+                            );
+                            Ok(())
+                        },
+                    )
+                    .await
+                    .unwrap_err();
+                let retained = serde_json::to_vec(&original)?;
+                let own_raw = hex::decode(
+                    original["rawTransaction"]
+                        .as_str()
+                        .unwrap()
+                        .trim_start_matches("0x"),
+                )?;
+                let own = recorded_commitment_transaction(&own_raw, &anchor.raw)?;
+                let own_sender = own.recover_signer()?;
+                let own_nonce = provider.get_transaction_count(own_sender).await?;
+                let calldata = own.input().to_vec();
+                let input = if create {
+                    // Constructor CODECOPYs its embedded calldata, then CALLs the
+                    // already-approved deployed client; it creates no trusted client.
+                    let length = u16::try_from(calldata.len())?.to_be_bytes();
+                    let mut init = vec![
+                        0x61, length[0], length[1], 0x61, 0, 0, 0x5f, 0x39, 0x5f, 0x5f, 0x61,
+                        length[0], length[1], 0x5f, 0x5f, 0x73,
+                    ];
+                    init.extend_from_slice(client.as_slice());
+                    init.extend_from_slice(&[0x5a, 0xf1, 0x50, 0x5f, 0x5f, 0xf3]);
+                    let offset = u16::try_from(init.len())?.to_be_bytes();
+                    init[4..6].copy_from_slice(&offset);
+                    init.extend_from_slice(&calldata);
+                    init
+                } else {
+                    calldata
+                };
+                let signer = PrivateKeySigner::from_bytes(&B256::from_slice(
+                    &ethereum._anvil.as_ref().unwrap().keys()[1].to_bytes(),
+                ))?;
+                let mut transaction = TxLegacy {
+                    chain_id,
+                    nonce: provider.get_transaction_count(signer.address()).await?,
+                    gas_price: 2_000_000_000,
+                    gas_limit: 6_000_000,
+                    to: destination,
+                    input: input.into(),
+                    ..Default::default()
+                };
+                // A valid signature with an explicit foreign chain is not accepted,
+                // even if its call would produce the exact desired client effect.
+                let mut foreign = transaction.clone();
+                foreign.chain_id = Some(31_338);
+                let signature = signer.sign_transaction(&mut foreign).await?;
+                let foreign = TxEnvelope::Legacy(foreign.into_signed(signature)).encoded_2718();
+                assert!(
+                    external_transaction(&foreign, B256::from(keccak256(&foreign)), 31_337)
+                        .is_err()
+                );
+                let signature = signer.sign_transaction(&mut transaction).await?;
+                let raw = TxEnvelope::Legacy(transaction.into_signed(signature)).encoded_2718();
+                let hash = B256::from(keccak256(&raw));
+                let (external, identity) = external_transaction(&raw, hash, 31_337)?;
+                assert_eq!(external.chain_id(), chain_id);
+                assert_eq!(
+                    identity.to,
+                    match destination {
+                        TxKind::Create => None,
+                        TxKind::Call(address) => Some(address),
+                    }
+                );
+                assert!(
+                    signed_transaction(&raw, hash, identity.nonce, client).is_err(),
+                    "external adoption must not loosen own-original destination policy"
+                );
+                let receipt = provider
+                    .send_raw_transaction(&raw)
+                    .await?
+                    .get_receipt()
+                    .await?;
+                assert!(receipt.status());
+                provider
+                    .client()
+                    .request::<_, Value>("anvil_mine", ("0x3",))
+                    .await?;
+                let included = ethereum
+                    .verify_accepted_commitment(hash, &anchor, &snapshot)
+                    .await?;
+                let finalized = ethereum
+                    .api
+                    .get_finalized_receipt(hash)
+                    .await?
+                    .context("external effect did not finalize")?;
+                let mut view = ethereum.api.verified_finalized_view().await?;
+                assert_eq!(
+                    ethereum
+                        .verify_accepted_commitment_evidence(
+                            hash,
+                            &raw,
+                            (&finalized.inclusion, &finalized.checkpoint),
+                            &mut view,
+                            &anchor,
+                            &snapshot,
+                        )
+                        .await?,
+                    included
+                );
+                // A real successful receipt with the right event bytes but a
+                // different approved emitter is not effect authority.
+                ethereum.client_address = Address::repeat_byte(0x42);
+                assert!(ethereum
+                    .verify_accepted_commitment_evidence(
+                        hash,
+                        &raw,
+                        (&finalized.inclusion, &finalized.checkpoint),
+                        &mut view,
                         &anchor,
                         &snapshot,
                     )
+                    .await
+                    .is_err());
+                ethereum.client_address = client;
+                assert_eq!(serde_json::to_vec(&original)?, retained);
+                assert_eq!(provider.get_transaction_count(own_sender).await?, own_nonce);
+                assert!(provider
+                    .get_transaction_receipt(B256::from(keccak256(&own_raw)))
+                    .await?
+                    .is_none());
+                // Losing the corroborating transport cannot be replaced by primary
+                // latest state, even when the accepted checkpoint is unchanged.
+                drop(ethereum._witness.take());
+                assert!(ethereum
+                    .verify_accepted_checkpoint(included.0, included.1, &anchor, &snapshot,)
+                    .await
                     .is_err());
             }
         }
@@ -3480,7 +3929,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn commitment_signing_uses_configured_chain_despite_rpc_drift() -> Result<()> {
+    async fn commitment_signing_rejects_rpc_drift_before_reservation() -> Result<()> {
         let (mut ethereum, anchor, leaf, snapshot, proof) = commitment_signing_fixture().await?;
         use std::sync::{
             atomic::{AtomicU64, Ordering},
@@ -3578,10 +4027,12 @@ mod tests {
         reported_chain.store(31_338, Ordering::SeqCst);
         let provider = ethereum.api.raw_provider().clone();
         assert_eq!(provider.get_chain_id().await?, 31_338);
+        let sender = provider.default_signer_address();
+        let nonce = provider.get_transaction_count(sender).await?;
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("commitment.json");
         let mut writes = Vec::new();
-        let error = ethereum
+        let _error = ethereum
             .submit_synthetic_commitment(
                 &anchor,
                 &leaf,
@@ -3601,38 +4052,13 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(
-            error.to_string().contains("stop after signed persistence"),
-            "{error:#}"
-        );
-        assert_eq!(writes.len(), 2);
-        assert!(writes[0]["rawTransaction"].is_null());
-        assert!(writes[0]["txHash"].is_null());
-        let saved: Value = serde_json::from_slice(&fs::read(&path)?)?;
-        assert_eq!(saved, writes[1]);
-        assert_eq!(saved["chainId"], 31_337);
-        let nonce = saved["nonce"].as_u64().unwrap();
-        assert_eq!(writes[0]["nonce"], nonce);
-        let raw = hex::decode(
-            saved["rawTransaction"]
-                .as_str()
-                .unwrap()
-                .trim_start_matches("0x"),
-        )?;
-        let hash = saved["txHash"].as_str().unwrap().parse::<B256>()?;
-        let (signed, identity) = signed_transaction(&raw, hash, nonce, ethereum.client_address)?;
-        assert_eq!(signed.chain_id(), Some(31_337));
-        assert_eq!(identity.from, provider.default_signer_address());
-        validate_commitment_call(&signed, &anchor.raw)?;
-        assert_eq!(provider.get_transaction_count(identity.from).await?, nonce);
+        assert!(writes.is_empty());
+        assert!(!path.exists());
+        assert_eq!(provider.get_transaction_count(sender).await?, nonce);
         assert_eq!(
-            provider
-                .get_transaction_count(identity.from)
-                .pending()
-                .await?,
+            provider.get_transaction_count(sender).pending().await?,
             nonce
         );
-        assert!(provider.get_transaction_by_hash(hash).await?.is_none());
         Ok(())
     }
 
@@ -3645,8 +4071,7 @@ mod tests {
         anchor.raw = hex::decode(other.signed_commitment.trim_start_matches("0x"))?;
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("commitment.json");
-        let mut writes = 0;
-        let error = ethereum
+        let _error = ethereum
             .submit_synthetic_commitment(
                 &anchor,
                 &leaf,
@@ -3655,20 +4080,12 @@ mod tests {
                 None,
                 |transaction, receipt| {
                     assert!(receipt.is_none());
-                    writes += 1;
                     fs::write(&path, serde_json::to_vec(transaction)?)?;
                     Ok(())
                 },
             )
             .await
             .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("changed source commitment semantics"),
-            "{error:#}"
-        );
-        assert_eq!(writes, 1);
         let saved: Value = serde_json::from_slice(&fs::read(path)?)?;
         assert!(saved["rawTransaction"].is_null());
         assert!(saved["txHash"].is_null());
@@ -3691,7 +4108,7 @@ mod tests {
         let provider = ethereum.api.raw_provider().clone();
         let directory = tempfile::tempdir()?;
         let path = directory.path().join("commitment.json");
-        let error = ethereum
+        let _error = ethereum
             .submit_synthetic_commitment(
                 &anchor,
                 &leaf,
@@ -3710,10 +4127,6 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(
-            error.to_string().contains("stop after signed persistence"),
-            "{error:#}"
-        );
         let mut saved: Value = serde_json::from_slice(&fs::read(&path)?)?;
         let raw = hex::decode(
             saved["rawTransaction"]
@@ -3854,6 +4267,7 @@ mod tests {
             .await?;
         let ethereum = Ethereum {
             _anvil: Some(anvil),
+            signer_owner: std::sync::OnceLock::new(),
             _witness: Some(witness),
             _beacon: Some(beacon),
             execution: None,
@@ -4886,81 +5300,103 @@ mod tests {
 
     #[tokio::test]
     async fn disappeared_original_rebroadcasts_same_hash_or_holds_consumed_nonce() -> Result<()> {
-        use alloy::{providers::ProviderBuilder, transports::mock::Asserter};
-        let signer = PrivateKeySigner::from_bytes(&B256::from([9; 32]))?;
-        let destination = Address::from([8; 20]);
-        let raw = signed_test_transaction(&signer, 36, destination, 21_000, vec![])
-            .await?
+        let (ethereum, _, _, _, _) = commitment_signing_fixture().await?;
+        ethereum.ensure_signer_owner()?;
+        let provider = ethereum.api.raw_provider();
+        provider
+            .client()
+            .request::<_, Value>("anvil_mine", ("0x3",))
+            .await?;
+        provider
+            .client()
+            .request::<_, Value>("evm_setAutomine", (false,))
+            .await?;
+        let sender = provider.default_signer_address();
+        let (nonce, pending) = ethereum.api.qualified_account_nonces(sender).await?;
+        assert_eq!(nonce, pending);
+        let destination = Address::repeat_byte(8);
+        let request = |nonce, destination| {
+            alloy::rpc::types::TransactionRequest::default()
+                .with_to(destination)
+                .with_nonce(nonce)
+                .with_chain_id(31_337)
+                .with_gas_limit(21_000)
+                .with_max_fee_per_gas(20_000_000_000)
+                .with_max_priority_fee_per_gas(1_000_000_000)
+        };
+        let filled = provider.fill(request(nonce, destination)).await?;
+        let raw = filled
+            .as_envelope()
+            .context("fixture transaction unsigned")?
             .encoded_2718();
         let hash = B256::from(keccak256(&raw));
-        let (_, signed) = signed_transaction(&raw, hash, 36, destination)?;
-        // This is the existing explicit failed-original retry lane, not fee replacement.
-        let previous = signed_test_transaction(&signer, 35, destination, 21_000, vec![])
-            .await?
-            .encoded_2718();
+        let (_, signed) = signed_transaction(&raw, hash, nonce, destination)?;
+        let pending = provider.send_raw_transaction(&raw).await?;
+        assert_eq!(*pending.tx_hash(), hash);
+        provider
+            .client()
+            .request::<_, Value>("anvil_dropTransaction", (hash,))
+            .await?;
+        assert!(provider.get_transaction_by_hash(hash).await?.is_none());
         let directory = tempfile::tempdir()?;
-        let journal = directory.path().join("retry.json");
-        let attempts = json!({"terminalSubmissions":[{
-            "disposition":"reverted","original":{"nonce":35,"rawTransaction":bytes(&previous),
-                "txHash":bytes(keccak256(&previous))}}],
-            "nonce":36,"rawTransaction":bytes(&raw),"txHash":bytes(hash)});
-        fs::write(&journal, serde_json::to_vec(&attempts)?)?;
-        let retained_bytes = fs::read(&journal)?;
-        let asserter = Asserter::new();
-        let provider = ProviderBuilder::new().connect_mocked_client(asserter.clone());
-        let seen = json!({"hash": format!("{hash:#x}"), "from": format!("{:#x}", signed.from),
-            "nonce": "0x24", "to": format!("{destination:#x}"), "blockNumber": null});
-        asserter.push_success(&Option::<Value>::None); // receipt absent
-        asserter.push_success(&seen); // original still pending
-        asserter.push_success(&Option::<Value>::None); // then dropped
-        asserter.push_success(&Option::<Value>::None);
-        asserter.push_success(&"0x24"); // latest
-        asserter.push_success(&"0x24"); // pending
-        asserter.push_success(&hash); // exact original raw broadcast
-        assert!(
-            timeout(
-                Duration::from_secs(3),
-                await_original_commitment(&provider, signed, &raw)
-            )
-            .await
-            .is_err(),
-            "mined receipt must not be invented after rebroadcast"
-        );
-        assert!(
-            asserter.read_q().is_empty(),
-            "original broadcast did not consume its response"
-        );
-        assert_eq!(fs::read(&journal)?, retained_bytes);
-        let restarted: Value = serde_json::from_slice(&fs::read(&journal)?)?;
+        let journal = directory.path().join("original.json");
+        let original = json!({"nonce":nonce,"rawTransaction":bytes(&raw),"txHash":bytes(hash)});
+        fs::write(&journal, serde_json::to_vec(&original)?)?;
+        let retained = fs::read(&journal)?;
+        provider
+            .client()
+            .request::<_, Value>("anvil_setIntervalMining", (1u64,))
+            .await?;
+        let receipt = await_original_commitment(&ethereum.api, signed, &raw).await?;
+        assert_eq!(receipt.transaction_hash, hash);
         assert_eq!(
-            restarted["terminalSubmissions"],
-            attempts["terminalSubmissions"]
-        );
-        let restart_raw = hex::decode(
-            restarted["rawTransaction"]
-                .as_str()
+            provider
+                .get_raw_transaction_by_hash(hash)
+                .await?
                 .unwrap()
-                .trim_start_matches("0x"),
-        )?;
-        let (_, restarted_identity) = signed_transaction(&restart_raw, hash, 36, destination)?;
-        assert_eq!(restarted_identity, signed);
+                .as_ref(),
+            raw.as_slice()
+        );
+        assert_eq!(fs::read(&journal)?, retained);
 
-        asserter.push_success(&Option::<Value>::None);
-        asserter.push_success(&Option::<Value>::None);
-        asserter.push_success(&"0x25"); // another transaction consumed the reserved nonce
-        asserter.push_success(&"0x25");
-        let hold = await_original_commitment(&provider, restarted_identity, &restart_raw)
+        let nonce = nonce.checked_add(1).context("fixture nonce overflow")?;
+        let original = provider.fill(request(nonce, destination)).await?;
+        let raw = original
+            .as_envelope()
+            .context("fixture original unsigned")?
+            .encoded_2718();
+        let hash = B256::from(keccak256(&raw));
+        let (_, signed) = signed_transaction(&raw, hash, nonce, destination)?;
+        let competing = provider
+            .fill(request(nonce, Address::repeat_byte(7)))
+            .await?;
+        let competing = competing
+            .as_envelope()
+            .context("fixture competitor unsigned")?
+            .encoded_2718();
+        provider
+            .send_raw_transaction(&competing)
+            .await?
+            .get_receipt()
+            .await?;
+        assert_eq!(
+            ethereum.api.qualified_account_nonces(sender).await?,
+            (nonce + 1, nonce + 1)
+        );
+        let journal = directory.path().join("consumed.json");
+        fs::write(
+            &journal,
+            serde_json::to_vec(&json!({
+                "completedOriginal":bytes(&retained), "nonce":nonce,
+                "rawTransaction":bytes(&raw),"txHash":bytes(hash)
+            }))?,
+        )?;
+        let retained = fs::read(&journal)?;
+        assert!(await_original_commitment(&ethereum.api, signed, &raw)
             .await
-            .unwrap_err();
-        assert!(
-            hold.to_string().contains("HOLD: original commitment"),
-            "{hold:#}"
-        );
-        assert!(
-            asserter.read_q().is_empty(),
-            "no replacement submission may be attempted"
-        );
-        assert_eq!(fs::read(&journal)?, retained_bytes);
+            .is_err());
+        assert!(provider.get_transaction_by_hash(hash).await?.is_none());
+        assert_eq!(fs::read(&journal)?, retained);
         Ok(())
     }
     #[tokio::test]

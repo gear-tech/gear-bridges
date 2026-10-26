@@ -298,9 +298,12 @@ async fn run() -> AnyResult<()> {
             storage_path,
             ethereum_blocks,
             ethereum_start_block,
+            root_minimum_receipt_slot,
             cutover_seal,
             successor_manager_code_id,
             native_wrapper,
+            approved_gear_gas_limit,
+            historical_receipts,
         }) => {
             let eth_api = create_polling_eth_client(&ethereum_rpc, &finality, &identity).await?;
             let approved_manager_code = successor_manager_code_id
@@ -308,6 +311,7 @@ async fn run() -> AnyResult<()> {
                 .map(hex_utils::decode_h256)
                 .transpose()?;
             let native_wrapper_approval = native_wrapper.load()?;
+            let historical_receipts = historical_receipts.load(&eth_api)?;
             let beacon_client = create_beacon_client(&beacon_rpc).await;
 
             let gsdk_args = message_relayer::common::GSdkArgs {
@@ -365,7 +369,10 @@ async fn run() -> AnyResult<()> {
                         ethereum_blocks.clone(),
                         cutover_seal.clone(),
                         approved_manager_code,
+                        root_minimum_receipt_slot,
                         native_wrapper_approval.clone(),
+                        approved_gear_gas_limit,
+                        historical_receipts,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -388,7 +395,7 @@ async fn run() -> AnyResult<()> {
                             .expect("Failed to parse address");
 
                     let tcp_listener = TcpListener::bind(web_server_address)?;
-                    let (sender, receiver) = mpsc::unbounded_channel();
+                    let (sender, receiver) = mpsc::channel(128);
                     let web_server = server::create(
                         tcp_listener,
                         web_server_token,
@@ -416,7 +423,10 @@ async fn run() -> AnyResult<()> {
                         Some(receiver),
                         cutover_seal.clone(),
                         approved_manager_code,
+                        root_minimum_receipt_slot,
                         native_wrapper_approval.clone(),
+                        approved_gear_gas_limit,
+                        historical_receipts,
                     )
                     .await
                     .expect("Failed to create relayer");
@@ -479,7 +489,10 @@ async fn run() -> AnyResult<()> {
             storage,
             cutover_seal,
             successor_manager_code_id,
+            root_minimum_receipt_slot,
             native_wrapper,
+            approved_gear_gas_limit,
+            historical_receipts,
             checkpoint_light_client,
             historical_proxy,
             receiver_program,
@@ -557,6 +570,7 @@ async fn run() -> AnyResult<()> {
                 })
                 .unwrap_or(vft_manager_client::vft_manager::io::SubmitReceipt::ROUTE.to_vec());
 
+            let historical_receipts = historical_receipts.load(&eth_api)?;
             eth_to_gear::manual::relay(
                 provider_connection,
                 gear_args.suri,
@@ -573,7 +587,10 @@ async fn run() -> AnyResult<()> {
                     .as_deref()
                     .map(hex_utils::decode_h256)
                     .transpose()?,
+                root_minimum_receipt_slot,
                 native_wrapper.load()?,
+                approved_gear_gas_limit,
+                historical_receipts,
             )
             .await?;
         }
@@ -596,6 +613,8 @@ async fn stop_web_server(handle: ServerHandle) {
 
 async fn create_gclient_client(args: &GearSignerArgs) -> gclient::GearApi {
     let endpoint = args.connection.get_endpoint().expect("Invalid gear args");
+    gear_common::signer_ownership::validate_suri(&args.suri, Some(&endpoint))
+        .expect("Gear signer admission failed");
     gclient::GearApi::builder()
         .suri(&args.suri)
         .uri(endpoint)
@@ -663,6 +682,7 @@ async fn create_eth_signer_client(args: &EthereumSignerArgs) -> AnyResult<EthApi
         tx.max_priority_fee_per_gas,
     )
     .await?
+    .with_max_gas_per_message(tx.max_gas_per_message)
     .with_beacon_finality(config, &finality.ethereum_finality_store)
     .await?
     .with_queue_deployment_transaction(*queue_deployment_transaction);
@@ -711,6 +731,7 @@ async fn create_eth_client(args: &EthereumArgs) -> AnyResult<EthApi> {
         args.tx.max_priority_fee_per_gas,
     )
     .await?
+    .with_max_gas_per_message(args.tx.max_gas_per_message)
     .with_beacon_finality(config, &args.finality.ethereum_finality_store)
     .await?
     .with_queue_deployment_transaction(args.queue_deployment_transaction);

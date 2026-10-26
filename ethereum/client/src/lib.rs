@@ -1,5 +1,4 @@
 use alloy::{
-    contract::Event,
     network::{Ethereum, EthereumWallet, TransactionBuilder},
     primitives::{Address, Bytes, B256, U256},
     providers::{
@@ -188,6 +187,7 @@ pub use error::{is_transient_rpc_error, Error};
 /// Holds exclusive ownership of Ethereum account submissions across retries.
 pub struct SubmissionGuard {
     _guard: OwnedMutexGuard<()>,
+    _host: std::fs::File,
     sender: Address,
 }
 
@@ -284,6 +284,7 @@ pub struct Contracts {
     message_queue_instance: IMessageQueueInstance<ProviderType, Ethereum>,
     max_fee_per_gas: u128,
     max_priority_fee_per_gas: u128,
+    max_gas_per_message: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -407,6 +408,7 @@ pub struct FinalizedTransactionReceipt {
 #[derive(Clone, Debug)]
 struct DataWitness {
     provider: RootProvider,
+    url: Url,
     chain_id: u64,
     genesis: B256,
 }
@@ -455,13 +457,64 @@ impl DataWitness {
             finality_endpoint_identity(primary)? != finality_endpoint_identity(&witness)?,
             "HOLD: primary and witness endpoints must be independent",
         );
+        let provider =
+            RootProvider::builder().connect_client(connect_rpc(&witness, retries, interval).await?);
+        qualify_transport(&provider, chain_id, genesis).await?;
         Ok(Self {
-            provider: RootProvider::builder()
-                .connect_client(connect_rpc(&witness, retries, interval).await?),
+            provider,
+            url: witness,
             chain_id,
             genesis,
         })
     }
+}
+
+async fn qualify_transport(
+    provider: &impl Provider,
+    chain_id: u64,
+    genesis: B256,
+) -> AnyResult<()> {
+    ensure!(
+        provider.get_chain_id().await? == chain_id
+            && qualified_header(provider, BlockNumberOrTag::Number(0))
+                .await?
+                .hash
+                == genesis,
+        "HOLD: reconnected Ethereum transport changed chain/genesis"
+    );
+    Ok(())
+}
+
+fn agree_logs(mut primary: Vec<RpcLog>, mut witness: Vec<RpcLog>) -> Result<Vec<RpcLog>, Error> {
+    let key = |log: &RpcLog| (log.block_number, log.transaction_index, log.log_index);
+    primary.sort_unstable_by_key(key);
+    witness.sort_unstable_by_key(key);
+    let same = |a: &RpcLog, b: &RpcLog| {
+        a.inner == b.inner
+            && a.block_hash == b.block_hash
+            && a.block_number == b.block_number
+            && a.transaction_hash == b.transaction_hash
+            && a.transaction_index == b.transaction_index
+            && a.log_index == b.log_index
+            && a.removed == b.removed
+    };
+    if primary.len() != witness.len() || !primary.iter().zip(&witness).all(|(a, b)| same(a, b)) {
+        return Err(Error::InvalidFinalityEvidence(
+            "primary/witness complete event sets disagree; HOLD".into(),
+        ));
+    }
+    Ok(primary)
+}
+
+async fn paired_logs(
+    provider: &impl Provider,
+    witness: &Option<DataWitness>,
+    filter: &Filter,
+) -> Result<Vec<RpcLog>, Error> {
+    let witness = require_data_witness(witness)?;
+    let (primary, second) =
+        tokio::try_join!(provider.get_logs(filter), witness.provider.get_logs(filter))?;
+    agree_logs(primary, second)
 }
 
 fn require_authority(
@@ -545,7 +598,23 @@ impl PollingEthApi {
             Self::new_with_retries(self.url.as_str(), self.ws_max_retry, self.ws_retry_interval)
                 .await?;
         connected.finality = self.finality.clone();
-        connected.witness = self.witness.clone();
+        if let Some(witness) = &self.witness {
+            qualify_transport(&connected.provider, witness.chain_id, witness.genesis).await?;
+            connected.witness = Some(
+                DataWitness::connect(
+                    &self.url,
+                    witness.url.as_str(),
+                    witness.chain_id,
+                    witness.genesis,
+                    self.ws_max_retry,
+                    self.ws_retry_interval,
+                )
+                .await?,
+            );
+            if connected.finality.is_some() {
+                connected.verified_finalized_view().await?;
+            }
+        }
         Ok(connected)
     }
 
@@ -680,14 +749,12 @@ impl PollingEthApi {
             .address(Address::from_slice(contract_address.as_bytes()))
             .event_signature(BridgingPayment::FeePaid::SIGNATURE_HASH)
             .at_block_hash(B256::from(hash.0));
-        let event: Event<_, BridgingPayment::FeePaid, Ethereum> =
-            Event::new(self.provider.clone(), filter);
-        event
-            .query()
-            .await
-            .map_err(Error::ErrorQueryingEvent)?
+        paired_logs(&self.provider, &self.witness, &filter)
+            .await?
             .into_iter()
-            .map(|(_, log)| {
+            .map(|log| {
+                BridgingPayment::FeePaid::decode_log_validate(&log.inner)
+                    .context("malformed authenticated fee event")?;
                 ensure!(
                     log.block_number == Some(block)
                         && log.block_hash == Some(B256::from(hash.0))
@@ -710,14 +777,13 @@ impl PollingEthApi {
             .address(Address::from_slice(contract_address.as_bytes()))
             .event_signature(IERC20Manager::BridgingRequested::SIGNATURE_HASH)
             .at_block_hash(B256::from(hash.0));
-        let event: Event<_, IERC20Manager::BridgingRequested, Ethereum> =
-            Event::new(self.provider.clone(), filter);
-        event
-            .query()
-            .await
-            .map_err(Error::ErrorQueryingEvent)?
+        paired_logs(&self.provider, &self.witness, &filter)
+            .await?
             .into_iter()
-            .map(|(deposit, log)| {
+            .map(|log| {
+                let deposit = IERC20Manager::BridgingRequested::decode_log_validate(&log.inner)
+                    .context("malformed authenticated deposit event")?
+                    .data;
                 ensure!(
                     log.block_number == Some(block)
                         && log.block_hash == Some(B256::from(hash.0))
@@ -1249,8 +1315,8 @@ async fn verified_finalized_view(
     let mut retained = Vec::new();
     let archives = authority.archives();
     for archive in &archives {
-        if let Some(checkpoint) = archive
-            .retained_checkpoint()
+        for checkpoint in archive
+            .retained_checkpoints()
             .map_err(Error::BeaconFinality)?
         {
             if let Some(beacon) = checkpoint.beacon() {
@@ -1678,6 +1744,24 @@ fn validate_receipt_locator(
     Ok(())
 }
 
+fn configured_wallet(private_key: Option<&str>) -> Result<(Address, EthereumWallet), Error> {
+    let Some(private_key) = private_key else {
+        return Ok((Address::ZERO, EthereumWallet::default()));
+    };
+    let pk = B256::from(U256::from_str(private_key).map_err(|_| Error::WrongPrivateKey)?);
+    let signer = PrivateKeySigner::from_bytes(&pk).map_err(|_| Error::WrongPrivateKey)?;
+    Ok((signer.address(), EthereumWallet::from(signer)))
+}
+
+fn qualify_pending_nonce(primary: u64, witness: u64, floor: u64) -> Result<(), Error> {
+    if primary != witness || primary < floor {
+        return Err(Error::InvalidPreparedTransaction(
+            "HOLD: paired account nonce disagreement or below authenticated/ordered floor".into(),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct EthApi {
     contracts: Contracts,
@@ -1722,18 +1806,7 @@ impl EthApi {
         max_fee_per_gas: Option<u128>,
         max_priority_fee_per_gas: Option<u128>,
     ) -> Result<EthApi, Error> {
-        let signer = match private_key {
-            Some(private_key) => {
-                let pk: B256 =
-                    B256::from(U256::from_str(private_key).map_err(|_| Error::WrongPrivateKey)?);
-                PrivateKeySigner::from_bytes(&pk).map_err(|_| Error::WrongPrivateKey)?
-            }
-            None => PrivateKeySigner::random(),
-        };
-
-        let public_key = signer.address();
-
-        let wallet = EthereumWallet::from(signer);
+        let (public_key, wallet) = configured_wallet(private_key)?;
 
         let message_queue_address: Address = message_queue_address
             .parse()
@@ -1790,7 +1863,28 @@ impl EthApi {
             Some(self.contracts.max_priority_fee_per_gas),
         )?;
         contracts.finality = self.contracts.finality.clone();
-        contracts.witness = self.contracts.witness.clone();
+        contracts.max_gas_per_message = self.contracts.max_gas_per_message;
+        if let Some(witness) = &self.contracts.witness {
+            qualify_transport(&contracts.provider, witness.chain_id, witness.genesis)
+                .await
+                .map_err(Error::BeaconFinality)?;
+            contracts.witness = Some(
+                DataWitness::connect(
+                    &self.url,
+                    witness.url.as_str(),
+                    witness.chain_id,
+                    witness.genesis,
+                    self.ws_max_retry,
+                    self.ws_retry_interval,
+                )
+                .await
+                .map_err(Error::BeaconFinality)?,
+            );
+            if let Some(authority) = &contracts.finality {
+                verified_finalized_view(&contracts.provider, authority, contracts.witness.as_ref())
+                    .await?;
+            }
+        }
 
         Ok(EthApi {
             contracts,
@@ -1859,6 +1953,16 @@ impl EthApi {
         Ok(require_authority(&self.contracts.finality)?.identity())
     }
 
+    /// An explicit operator ceiling, matched to the independently approved lane before signing.
+    pub fn with_max_gas_per_message(mut self, limit: Option<u64>) -> Self {
+        self.contracts.max_gas_per_message = limit;
+        self
+    }
+
+    pub fn max_gas_per_message(&self) -> Option<u64> {
+        self.contracts.max_gas_per_message
+    }
+
     /// Raw read-only transport. Pair historical answers at a qualified hash.
     pub fn raw_witness_provider(&self) -> AnyResult<&RootProvider> {
         Ok(&require_data_witness(&self.contracts.witness)?.provider)
@@ -1879,11 +1983,26 @@ impl EthApi {
         H160::from_slice(self.contracts.message_queue_instance.address().as_slice())
     }
 
-    pub async fn reserve_submission(&self) -> SubmissionGuard {
-        SubmissionGuard {
-            _guard: self.submission_lock.clone().lock_owned().await,
-            sender: self.public_key,
+    pub async fn reserve_submission(&self) -> Result<SubmissionGuard, Error> {
+        if self.public_key == Address::ZERO {
+            return Err(Error::SignerNotConfigured);
         }
+        let _guard = self.submission_lock.clone().lock_owned().await;
+        let (chain_id, genesis) = self.finality_identity().map_err(Error::BeaconFinality)?;
+        if chain_id != self.chain_id {
+            return Err(Error::FinalizedAncestryConflict);
+        }
+        let _host = gear_common::signer_ownership::lock_ethereum_signer(
+            chain_id,
+            H256(genesis.0),
+            self.public_key.into_array(),
+        )
+        .map_err(Error::BeaconFinality)?;
+        Ok(SubmissionGuard {
+            _guard,
+            _host,
+            sender: self.public_key,
+        })
     }
 
     /// Uses bounded individual requests without a total historical traversal deadline.
@@ -1923,6 +2042,42 @@ impl EthApi {
         )
     }
 
+    /// Paired account observations, never a replacement/no-effect verdict on their own.
+    /// Fresh signing callers must already own the chain/account submission lock.
+    pub async fn qualified_account_nonces(&self, address: Address) -> Result<(u64, u64), Error> {
+        let view = self.verified_finalized_view().await?;
+        let witness = require_data_witness(&self.contracts.witness)?;
+        let (latest, second_latest, pending, second_pending) = tokio::try_join!(
+            self.raw_provider().get_transaction_count(address).latest(),
+            witness.provider.get_transaction_count(address).latest(),
+            self.raw_provider().get_transaction_count(address).pending(),
+            witness.provider.get_transaction_count(address).pending()
+        )?;
+        let proof = inclusion::prove_account(
+            self.raw_provider(),
+            &view,
+            view.header.inner.clone(),
+            address,
+        )
+        .await
+        .map_err(Error::BeaconFinality)?;
+        let floor = proof
+            .verify(&view, address)
+            .map_err(Error::BeaconFinality)?
+            .map_or(0, |account| account.nonce);
+        qualify_pending_nonce(latest, second_latest, floor)?;
+        qualify_pending_nonce(pending, second_pending, latest)?;
+        view.recheck(self.raw_provider()).await?;
+        Ok((latest, pending))
+    }
+
+    async fn qualified_signing_nonce(&self) -> Result<u64, Error> {
+        if self.public_key == Address::ZERO {
+            return Err(Error::SignerNotConfigured);
+        }
+        Ok(self.qualified_account_nonces(self.public_key).await?.1)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn prepare_content_message(
         &self,
@@ -1944,11 +2099,13 @@ impl EthApi {
                 "submission guard belongs to another account".into(),
             ));
         }
-        let account_nonce = self
-            .raw_provider()
-            .get_transaction_count(self.public_key)
-            .pending()
-            .await?;
+        let cap = self
+            .max_gas_per_message()
+            .filter(|limit| *limit > 0)
+            .ok_or_else(|| {
+                Error::SigningPolicy("missing positive approved message gas ceiling".into())
+            })?;
+        let view = self.verified_finalized_view().await?;
         let chain_id = self.raw_provider().get_chain_id().await?;
         if chain_id != self.chain_id {
             return Err(Error::InvalidPreparedTransaction(
@@ -1966,16 +2123,41 @@ impl EthApi {
                 Address::from(receiver),
                 Bytes::from(payload),
                 proof.into_iter().map(B256::from).collect(),
-                account_nonce,
+                &view,
+                cap,
                 self.public_key,
             )
             .await?
             .with_chain_id(chain_id);
-        let filled = self.raw_provider().fill(request).await?;
-        let raw_transaction = filled
-            .as_envelope()
-            .ok_or_else(|| Error::InvalidPreparedTransaction("transaction was not signed".into()))?
-            .encoded_2718();
+        let (Some(gas), Some(fee), Some(tip)) = (
+            request.gas,
+            request.max_fee_per_gas,
+            request.max_priority_fee_per_gas,
+        ) else {
+            return Err(Error::SigningPolicy(
+                "admitted request lacks explicit gas/fees".into(),
+            ));
+        };
+        let account_nonce = self.qualified_signing_nonce().await?;
+        view.recheck(self.raw_provider()).await?;
+        let filled = self
+            .raw_provider()
+            .fill(request.with_nonce(account_nonce))
+            .await?;
+        use alloy::consensus::Transaction;
+        let envelope = filled.as_envelope().ok_or_else(|| {
+            Error::InvalidPreparedTransaction("transaction was not signed".into())
+        })?;
+        if envelope.gas_limit() != gas
+            || envelope.gas_limit() > cap
+            || envelope.max_fee_per_gas() != fee
+            || envelope.max_priority_fee_per_gas() != Some(tip)
+        {
+            return Err(Error::SigningPolicy(
+                "signed envelope differs from admitted gas/fees".into(),
+            ));
+        }
+        let raw_transaction = envelope.encoded_2718();
         let prepared = PreparedContentMessage {
             chain_id,
             contract: Address::from(self.message_queue_address().0),
@@ -2101,12 +2283,15 @@ impl EthApi {
         merkle_root: [u8; 32],
         proof: Vec<u8>,
     ) -> Result<PendingTransactionBuilder<Ethereum>, Error> {
-        let _submission_guard = self.submission_lock.lock().await;
+        let _submission_guard = self.reserve_submission().await?;
+        let account_nonce = self.qualified_signing_nonce().await?;
         self.contracts
             .provide_merkle_root(
                 U256::from(block_number),
                 B256::from(merkle_root),
                 Bytes::from(proof),
+                self.public_key,
+                account_nonce,
             )
             .await
     }
@@ -2114,8 +2299,11 @@ impl EthApi {
     /// Submit a challenge once. Only a transient `ChallengeRootPreBroadcast`
     /// error permits a fresh scan and retry; all other errors require a hold.
     pub async fn send_challenge_root(&self) -> Result<TxHash, Error> {
-        let _submission_guard = self.submission_lock.lock().await;
-        self.contracts.challenge_root().await
+        let _submission_guard = self.reserve_submission().await?;
+        let account_nonce = self.qualified_signing_nonce().await?;
+        self.contracts
+            .challenge_root(self.public_key, account_nonce)
+            .await
     }
 
     pub async fn get_tx_status(&self, tx_hash: TxHash) -> Result<TxStatus, Error> {
@@ -2247,7 +2435,7 @@ impl EthApi {
         Ok(self::safe_block(self.raw_provider()).await?.header.number)
     }
 
-    fn original_nonce(&self, raw: &[u8]) -> AnyResult<u64> {
+    fn original_account(&self, raw: &[u8]) -> AnyResult<(Address, u64)> {
         use alloy::{
             consensus::{transaction::SignerRecoverable, Transaction, TxEnvelope},
             eips::{Decodable2718, Encodable2718},
@@ -2258,12 +2446,13 @@ impl EthApi {
             remaining.is_empty() && transaction.encoded_2718() == raw,
             "HOLD: noncanonical signed original"
         );
+        let sender = transaction.recover_signer()?;
         ensure!(
             transaction.chain_id() == Some(self.chain_id)
-                && transaction.recover_signer()? == self.public_key,
+                && (self.public_key == Address::ZERO || sender == self.public_key),
             "HOLD: signed original signer/network mismatch"
         );
-        Ok(transaction.nonce())
+        Ok((sender, transaction.nonce()))
     }
 
     /// Prove the immutable original signer's nonce against the Beacon-anchored state root.
@@ -2272,20 +2461,20 @@ impl EthApi {
         &self,
         original_raw: &[u8],
     ) -> Result<Option<FinalizedSubmissionSnapshot>, Error> {
-        let nonce = self
-            .original_nonce(original_raw)
+        let (sender, nonce) = self
+            .original_account(original_raw)
             .map_err(Error::BeaconFinality)?;
         let view = self.verified_finalized_view().await?;
         let proof = inclusion::prove_account(
             self.raw_provider(),
             &view,
             view.header.inner.clone(),
-            self.public_key,
+            sender,
         )
         .await
         .map_err(Error::BeaconFinality)?;
         let account_nonce = proof
-            .verify(&view, self.public_key)
+            .verify(&view, sender)
             .map_err(Error::BeaconFinality)?
             .map_or(0, |account| account.nonce);
         view.recheck(self.raw_provider()).await?;
@@ -2309,7 +2498,7 @@ impl EthApi {
         original_raw: &[u8],
         saved: &FinalizedSubmissionSnapshot,
     ) -> AnyResult<FinalizedSubmissionSnapshot> {
-        let nonce = self.original_nonce(original_raw)?;
+        let (sender, nonce) = self.original_account(original_raw)?;
         ensure!(
             saved.block_hash() != B256::ZERO,
             "HOLD: saved nonce disposition has no block hash"
@@ -2344,11 +2533,10 @@ impl EthApi {
                 header.hash == saved.block_hash(),
                 "HOLD: original disposition header changed"
             );
-            inclusion::prove_account(self.raw_provider(), &view, header.inner, self.public_key)
-                .await?
+            inclusion::prove_account(self.raw_provider(), &view, header.inner, sender).await?
         };
         let account_nonce = proof
-            .verify(&view, self.public_key)?
+            .verify(&view, sender)?
             .map_or(0, |account| account.nonce);
         ensure!(
             saved.pinned_nonce_consumed() == (account_nonce > nonce)
@@ -2414,6 +2602,7 @@ impl Contracts {
             message_queue_instance,
             max_fee_per_gas: max_fee_per_gas.unwrap_or(MAX_FEE_PER_GAS),
             max_priority_fee_per_gas: max_priority_fee_per_gas.unwrap_or(MAX_PRIORITY_FEE_PER_GAS),
+            max_gas_per_message: None,
         })
     }
 
@@ -2485,15 +2674,18 @@ impl Contracts {
         Ok(balance / 1_000_000_000_000_000_000.0)
     }
 
-    pub async fn provide_merkle_root(
+    async fn provide_merkle_root(
         &self,
         block_number: U256,
         merkle_root: B256,
         proof: Bytes,
+        sender: Address,
+        account_nonce: u64,
     ) -> Result<PendingTransactionBuilder<Ethereum>, Error> {
         match self
             .message_queue_instance
             .submitMerkleRoot(block_number, merkle_root, proof.clone())
+            .from(sender)
             .estimate_gas()
             .await
         {
@@ -2502,6 +2694,9 @@ impl Contracts {
                 match self
                     .message_queue_instance
                     .submitMerkleRoot(block_number, merkle_root, proof.clone())
+                    .from(sender)
+                    .nonce(account_nonce)
+                    .gas(gas_used)
                     .send()
                     .await
                 {
@@ -2533,16 +2728,25 @@ impl Contracts {
 
     /// Estimation failures are typed as `ChallengeRootPreBroadcast` (or a decoded
     /// permanent `MessageQueue` error); send failures never authorize a retry.
-    pub async fn challenge_root(&self) -> Result<TxHash, Error> {
+    async fn challenge_root(&self, sender: Address, account_nonce: u64) -> Result<TxHash, Error> {
         match self
             .message_queue_instance
             .challengeRoot()
+            .from(sender)
             .estimate_gas()
             .await
         {
             Ok(gas_used) => {
                 log::info!("Gas used: {gas_used}");
-                match self.message_queue_instance.challengeRoot().send().await {
+                match self
+                    .message_queue_instance
+                    .challengeRoot()
+                    .from(sender)
+                    .nonce(account_nonce)
+                    .gas(gas_used)
+                    .send()
+                    .await
+                {
                     Ok(pending_tx) => Ok(*pending_tx.tx_hash()),
                     Err(e) => {
                         log::error!("Sending error: {e:?}");
@@ -2601,10 +2805,15 @@ impl Contracts {
                 .event_signature(IMessageQueue::MerkleRoot::SIGNATURE_HASH)
                 .from_block(page_from)
                 .to_block(page_to);
-            let event: Event<ProviderType, MerkleRoot, Ethereum> =
-                Event::new(self.provider.clone(), filter);
-            for (event, log) in event.query().await.map_err(Error::ErrorQueryingEvent)? {
-                observations.push(merkle_root_observation(&event, &log, page_from, page_to)?);
+            for log in paired_logs(&self.provider, &self.witness, &filter).await? {
+                let event = MerkleRoot::decode_log_validate(&log.inner)
+                    .map_err(|error| Error::InvalidMerkleRootObservation(error.to_string()))?;
+                observations.push(merkle_root_observation(
+                    &event.data,
+                    &log,
+                    page_from,
+                    page_to,
+                )?);
             }
             if page_to == to {
                 break;
@@ -2634,7 +2843,8 @@ impl Contracts {
         destination: Address,
         payload: Bytes,
         proof: Vec<B256>,
-        account_nonce: u64,
+        view: &FinalizedView,
+        max_gas: u64,
         sender: Address,
     ) -> Result<alloy::rpc::types::TransactionRequest, Error> {
         log::trace!(
@@ -2655,7 +2865,8 @@ impl Contracts {
                 },
                 proof,
             )
-            .from(sender);
+            .from(sender)
+            .block(view.block_id());
 
         let gas_estimated = match call.estimate_gas().await {
             Ok(gas_estimated) => gas_estimated,
@@ -2670,11 +2881,37 @@ impl Contracts {
             }
         };
 
-        // The existing GasFiller estimates market fees before the original is signed.
-        Ok(call
-            .gas(gas_estimated)
-            .nonce(account_nonce)
-            .into_transaction_request())
+        let request = call.into_transaction_request();
+        let second: alloy::primitives::U64 = require_data_witness(&self.witness)?
+            .provider
+            .raw_request("eth_estimateGas".into(), (&request, view.block_id()))
+            .await?;
+        if gas_estimated != second.to::<u64>() || gas_estimated == 0 || gas_estimated > max_gas {
+            return Err(Error::SigningPolicy(
+                "paired gas quote disagrees or exceeds approved message ceiling".into(),
+            ));
+        }
+        let (fees, second) = tokio::try_join!(
+            self.provider.estimate_eip1559_fees(),
+            require_data_witness(&self.witness)?
+                .provider
+                .estimate_eip1559_fees()
+        )?;
+        if fees.max_fee_per_gas != second.max_fee_per_gas
+            || fees.max_priority_fee_per_gas != second.max_priority_fee_per_gas
+            || fees.max_fee_per_gas > self.max_fee_per_gas
+            || fees.max_priority_fee_per_gas > self.max_priority_fee_per_gas
+            || fees.max_priority_fee_per_gas > fees.max_fee_per_gas
+        {
+            return Err(Error::SigningPolicy(
+                "paired market fees disagree or exceed configured ceilings".into(),
+            ));
+        }
+        view.recheck(&self.provider).await?;
+        Ok(request
+            .with_gas_limit(gas_estimated)
+            .with_max_fee_per_gas(fees.max_fee_per_gas)
+            .with_max_priority_fee_per_gas(fees.max_priority_fee_per_gas))
     }
 
     pub async fn read_merkle_root(
@@ -2787,7 +3024,14 @@ mod tests {
     async fn root_scan_retains_both_sides_of_page_boundary() -> AnyResult<()> {
         use alloy::transports::mock::Asserter;
         let asserter = Asserter::new();
-        let contracts = mocked_ancestry_api(asserter.clone())?.contracts;
+        let mut contracts = mocked_ancestry_api(asserter.clone())?.contracts;
+        let second = Asserter::new();
+        contracts.witness = Some(DataWitness {
+            provider: RootProvider::builder().connect_mocked_client(second.clone()),
+            url: Url::parse("http://127.0.0.1:2")?,
+            chain_id: 560048,
+            genesis: B256::repeat_byte(1),
+        });
         for (height, source, hash) in [(100_006u64, 12u64, 1u8), (100_007, 13, 2)] {
             let event = MerkleRoot {
                 blockNumber: U256::from(source),
@@ -2801,7 +3045,8 @@ mod tests {
                 "transactionHash": B256::from([hash + 10; 32]), "transactionIndex": "0x0",
                 "logIndex": "0x0", "removed": false
             }))?;
-            asserter.push_success(&vec![log]);
+            asserter.push_success(&vec![log.clone()]);
+            second.push_success(&vec![log]);
         }
         let roots = contracts.fetch_merkle_roots_in_range(7, 100_007).await?;
         assert_eq!(
@@ -2814,6 +3059,7 @@ mod tests {
         assert!(asserter.read_q().is_empty());
         // An inclusive page ending at the integer limit must terminate without overflow.
         asserter.push_success(&Vec::<RpcLog>::new());
+        second.push_success(&Vec::<RpcLog>::new());
         assert!(contracts
             .fetch_merkle_roots_in_range(u64::MAX - 99_999, u64::MAX)
             .await?
@@ -3017,7 +3263,7 @@ mod tests {
         asserter.push_failure_msg("estimate rejected");
         asserter.push_success(&"0x5208");
         assert!(matches!(
-            api.send_challenge_root().await,
+            api.contracts.challenge_root(api.public_key, 7).await,
             Err(Error::ChallengeRootPreBroadcast(_))
         ));
         assert_eq!(asserter.read_q().len(), 1, "estimation must not send");
@@ -3025,7 +3271,7 @@ mod tests {
         // The remaining successful estimate gets as far as send. Its missing
         // RPC replies must not be mistaken for a retryable estimation error.
         assert!(matches!(
-            api.send_challenge_root().await,
+            api.contracts.challenge_root(api.public_key, 7).await,
             Err(Error::ErrorSendingTransaction(_))
         ));
         assert!(asserter.read_q().is_empty());
@@ -3407,12 +3653,35 @@ mod tests {
             None,
         )
         .await?;
+        // One owned Anvil node supplies two fixture transports; this fee smoke
+        // does not qualify production provider independence.
+        api.raw_provider()
+            .raw_request::<_, Value>("evm_mine".into(), ())
+            .await?;
+        let genesis = qualified_header(api.raw_provider(), BlockNumberOrTag::Number(0)).await?;
+        let head = qualified_header(api.raw_provider(), BlockNumberOrTag::Latest).await?;
+        let beacon = beacon_finality::test_fixtures::LocalBeaconFixture::new(
+            api.chain_id,
+            genesis.hash,
+            Arc::new(move || head.clone()),
+        )
+        .await?;
+        let api = api
+            .with_beacon_finality(beacon.config.clone(), &beacon.directory)
+            .await?
+            .with_data_witness(
+                &format!("{}/?fixture=witness", anvil.endpoint()),
+                anvil.chain_id(),
+                genesis.hash,
+            )
+            .await?;
         let quote = api.raw_provider().estimate_eip1559_fees().await?;
         ensure!(
             quote.max_priority_fee_per_gas < 500_000_000,
             "fixture must quote below the old tip floor"
         );
-        let guard = api.reserve_submission().await;
+        let api = api.with_max_gas_per_message(Some(1_000_000));
+        let guard = api.reserve_submission().await?;
         let prepared = api
             .prepare_content_message(&guard, 1, 1, 0, [0; 32], [1; 32], [2; 20], vec![], vec![])
             .await?;

@@ -29,6 +29,7 @@ contract BeefyClientMock is BeefyClient {
     {}
 
     function setCheckpoint(uint64 blockNumber, bytes32 mmrRoot, uint64 sourceTimestampMs) external {
+        _recordAcceptedAnchor(blockNumber, mmrRoot);
         latestBeefyBlock = blockNumber;
         latestMMRRoot = mmrRoot;
         lastAuthenticatedSourceTimestampMs = sourceTimestampMs;

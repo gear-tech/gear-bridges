@@ -4,13 +4,13 @@ use sails_rs::prelude::*;
 
 static mut MSG_TRACKER: Option<MessageTracker> = None;
 
-// TODO: Remove completed messages from tracker.
 /// State machine which tracks state of each message that was submitted into
 /// `request_bridging` method.
 #[derive(Default, Debug)]
 pub struct MessageTracker {
     /// Message states.
     pub message_info: HashMap<MessageId, MessageInfo>,
+    pub active_count: u64,
 }
 
 /// Entry for a single message in [MessageTracker].
@@ -57,6 +57,17 @@ pub enum MessageStatus {
     TokensReturnComplete(bool),
 }
 
+impl MessageStatus {
+    pub(super) fn terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::TokenDepositCompleted(false)
+                | Self::BridgeResponseReceived(Some(_))
+                | Self::TokensReturnComplete(true)
+        )
+    }
+}
+
 /// Initialize global state of the message tracker.
 pub fn init() {
     unsafe { MSG_TRACKER = Some(MessageTracker::default()) }
@@ -80,6 +91,16 @@ impl MessageTracker {
         status: MessageStatus,
         details: TxDetails,
     ) {
+        assert!(
+            !self.message_info.contains_key(&msg_id),
+            "Request already tracked"
+        );
+        if !status.terminal() {
+            self.active_count = self
+                .active_count
+                .checked_add(1)
+                .expect("Tracker count overflow");
+        }
         self.message_info
             .insert(msg_id, MessageInfo { status, details });
     }
@@ -87,6 +108,21 @@ impl MessageTracker {
     /// Drive state machine further for a given `msg_id`.
     pub fn update_message_status(&mut self, msg_id: MessageId, status: MessageStatus) {
         if let Some(info) = self.message_info.get_mut(&msg_id) {
+            match (info.status.terminal(), status.terminal()) {
+                (false, true) => {
+                    self.active_count = self
+                        .active_count
+                        .checked_sub(1)
+                        .expect("Tracker count underflow")
+                }
+                (true, false) => {
+                    self.active_count = self
+                        .active_count
+                        .checked_add(1)
+                        .expect("Tracker count overflow")
+                }
+                _ => {}
+            }
             info.status = status;
         }
     }
@@ -98,6 +134,51 @@ impl MessageTracker {
 
     /// Stop tracking message state. It will return current state of the target message.
     pub fn remove_message_info(&mut self, msg_id: &MessageId) -> Option<MessageInfo> {
-        self.message_info.remove(msg_id)
+        let removed = self.message_info.remove(msg_id)?;
+        if !removed.status.terminal() {
+            self.active_count = self
+                .active_count
+                .checked_sub(1)
+                .expect("Tracker count underflow");
+        }
+        Some(removed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Reconstructed from supplied HTML state-bounds finding, audited 7fe1b032.
+    #[test]
+    fn active_count_tracks_transitions_not_lifetime_history() {
+        let mut tracker = MessageTracker::default();
+        let details = TxDetails {
+            vara_token_id: ActorId::from([1; 32]),
+            sender: ActorId::from([2; 32]),
+            amount: U256::one(),
+            receiver: H160([3; 20]),
+            token_supply: TokenSupply::Ethereum,
+        };
+        for byte in 1..=128u8 {
+            let id = MessageId::from([byte; 32]);
+            tracker.insert_message_info(
+                id,
+                MessageStatus::SendingMessageToDepositTokens,
+                details.clone(),
+            );
+            assert_eq!(tracker.active_count, 1);
+            tracker.update_message_status(id, MessageStatus::TokenDepositCompleted(true));
+            assert_eq!(tracker.active_count, 1);
+            tracker.update_message_status(id, MessageStatus::SendingMessageToReturnTokens);
+            tracker.update_message_status(id, MessageStatus::TokensReturnComplete(true));
+            tracker.update_message_status(id, MessageStatus::TokensReturnComplete(true));
+            assert_eq!(tracker.active_count, 0);
+        }
+        assert_eq!(tracker.message_info.len(), 128);
+        for byte in 1..=128u8 {
+            tracker.remove_message_info(&MessageId::from([byte; 32]));
+            assert_eq!(tracker.active_count, 0);
+        }
     }
 }

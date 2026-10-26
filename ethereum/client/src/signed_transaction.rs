@@ -2,7 +2,7 @@
 use crate::TransactionIdentity;
 use alloy::{
     consensus::{transaction::SignerRecoverable, Transaction, TxEnvelope},
-    eips::Decodable2718,
+    eips::{Decodable2718, Encodable2718},
     primitives::{keccak256, Address, B256},
 };
 use anyhow::{ensure, Context, Result};
@@ -55,6 +55,41 @@ pub fn decode_signed_transaction(
         from,
         nonce: expected.nonce,
         to: Some(expected.destination),
+        block_number: None,
+    };
+    Ok((transaction, identity))
+}
+
+/// Decode an externally executed effect without inventing a recipient or chain ID.
+/// Callers must authenticate transaction/receipt inclusion and the exact approved
+/// emitter/effect on `approved_chain`; this is never own-signing authorization.
+pub fn decode_external_signed_transaction(
+    raw: &[u8],
+    hash: B256,
+    approved_chain: u64,
+) -> Result<(TxEnvelope, TransactionIdentity)> {
+    ensure!(
+        keccak256(raw) == hash,
+        "external transaction hash differs from original bytes"
+    );
+    let mut input = raw;
+    let transaction = TxEnvelope::decode_2718(&mut input)?;
+    ensure!(
+        input.is_empty() && transaction.encoded_2718() == raw,
+        "external transaction has trailing or noncanonical bytes"
+    );
+    ensure!(
+        match transaction.chain_id() {
+            Some(chain) => chain == approved_chain,
+            None => matches!(transaction, TxEnvelope::Legacy(_)),
+        },
+        "external transaction belongs to another chain"
+    );
+    let identity = TransactionIdentity {
+        hash,
+        from: transaction.recover_signer()?,
+        nonce: transaction.nonce(),
+        to: transaction.to(),
         block_number: None,
     };
     Ok((transaction, identity))

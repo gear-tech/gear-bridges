@@ -49,8 +49,7 @@ impl BlockListener {
     }
 
     pub fn spawn(self) -> Receiver<EthereumBlockNumber> {
-        // One extracting, one queued, one durably recorded before a blocked send.
-        let (sender, receiver) = channel(1);
+        let (sender, receiver) = channel(128);
         tokio::spawn(task(self, sender));
         receiver
     }
@@ -107,7 +106,8 @@ impl BlockListener {
             .header
             .number;
             if latest >= next_block {
-                for number in next_block..=latest {
+                let end = scan_pass_end(next_block, latest);
+                for number in next_block..=end {
                     let block = crate::rpc::retry_polling_eth(
                         &mut self.eth_api,
                         "Ethereum discovery finalized block",
@@ -139,15 +139,20 @@ impl BlockListener {
                     )
                     .await?;
                 }
-                next_block = latest
+                next_block = end
                     .checked_add(1)
                     .ok_or_else(|| anyhow::anyhow!("Ethereum block number overflow"))?;
-                self.metrics.latest_block.set(latest as i64);
+                self.metrics.latest_block.set(end as i64);
+                tokio::task::yield_now().await;
             } else {
                 tokio::time::sleep(ETHEREUM_BLOCK_TIME_APPROX / 2).await;
             }
         }
     }
+}
+
+fn scan_pass_end(next: u64, latest: u64) -> u64 {
+    latest.min(next.saturating_add(127))
 }
 
 async fn persist_and_send_block(
@@ -180,6 +185,14 @@ mod tests {
     use primitive_types::H256;
     use serde_json::{json, Value};
     use std::{net::TcpListener, sync::Mutex};
+
+    // Reconstructed from supplied PR860 HTML, C4; not the unavailable original PoC.
+    #[test]
+    fn reconstructed_scan_pass_is_bounded_at_head_and_integer_limit() {
+        assert_eq!(scan_pass_end(70, 10_000), 197);
+        assert_eq!(scan_pass_end(70, 71), 71);
+        assert_eq!(scan_pass_end(u64::MAX - 2, u64::MAX), u64::MAX);
+    }
 
     #[tokio::test]
     async fn discovery_is_not_published_until_it_is_durable() {

@@ -2,14 +2,12 @@ use bridging_payment_client::traits::BridgingPayment;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use cli_utils::GearConnectionArgs;
 use gclient::GearApi;
-use gear_common::api_provider::{ApiProvider, ApiProviderConnection};
+use gear_common::api_provider::ApiProvider;
 use gear_core::ids::prelude::*;
 use sails_rs::{calls::*, gclient::calls::GClientRemoting, prelude::*};
 use vft_client::{traits::*, vft_admin::io};
 use vft_manager_client::{traits::*, TokenSupply};
 use vft_vara_client::{traits::*, Mainnet};
-
-const SIZE_MIGRATE_BATCH: u32 = 200;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -18,11 +16,8 @@ struct Cli {
     #[clap(flatten)]
     gear_connection: GearConnectionArgs,
 
-    /// Substrate URI that identifies a user by a mnemonic phrase or
-    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
-    /// etc.). The password for URI should be specified in the same `suri`,
-    /// separated by the ':' char
-    #[arg(long, default_value = "//Alice", env = "GEAR_SURI")]
+    /// Explicit signer URI; omitted only for read-only encoding commands.
+    #[arg(long, env = "GEAR_SURI", default_value = "")]
     gear_suri: String,
 
     #[arg(long)]
@@ -51,7 +46,6 @@ enum CliCommands {
         /// Program ID of the VFT contract
         program_id: String,
     },
-    MigrateBalances(MigrateBalances),
     HexEncodedMessage(HexEncodedMessageArgs),
     Manager {
         program_id: String,
@@ -184,19 +178,6 @@ struct RolesArgs {
     /// ActorId that will be allowed to burn tokens
     #[arg(long)]
     burner: Option<String>,
-}
-
-#[derive(Args)]
-struct MigrateBalances {
-    #[arg(long, help = format!("Size of migration batch. Default: {SIZE_MIGRATE_BATCH}"))]
-    size_batch: Option<u32>,
-    /// ActorId of the source VFT contract (old)
-    #[arg(long)]
-    vft: String,
-    /// ActorId of the destination VFT contract (new). Provided `remoting` should have account
-    /// with mint-permission
-    #[arg(long)]
-    vft_new: String,
 }
 
 fn str_to_actorid(s: String) -> ActorId {
@@ -344,9 +325,6 @@ async fn main() {
             uploader.allocate_shards(program_id).await;
         }
 
-        CliCommands::MigrateBalances(args) => {
-            migrate_balances(connection, cli.gear_suri, args).await
-        }
         CliCommands::Manager { program_id, action } => {
             let program_id = str_to_actorid(program_id);
             let gas_limit = gear_api
@@ -853,25 +831,5 @@ impl Uploader {
             .expect("Failed to upload program");
 
         self.upload_common(program_id).await
-    }
-}
-
-async fn migrate_balances(
-    connection: ApiProviderConnection,
-    gear_suri: String,
-    args: MigrateBalances,
-) {
-    let size_batch = args.size_batch.unwrap_or(SIZE_MIGRATE_BATCH);
-
-    if let Err(e) = gear_common::migrate_balances(
-        connection,
-        gear_suri,
-        size_batch,
-        str_to_actorid(args.vft),
-        str_to_actorid(args.vft_new),
-    )
-    .await
-    {
-        println!("Failed to migrate balances: {e:?}");
     }
 }

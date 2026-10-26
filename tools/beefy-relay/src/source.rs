@@ -3,15 +3,14 @@ use anyhow::{anyhow, ensure, Context, Result};
 use gear_rpc_client::dto;
 use gear_rpc_client::GearApi;
 use gsdk::{ext::subxt::utils::H256, Value};
-#[cfg(any(test, feature = "deployment"))]
-use parity_scale_codec::Compact;
-use parity_scale_codec::{Decode, Encode};
+use parity_scale_codec::{Compact, Decode, Encode};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use sp_consensus_beefy::{ecdsa_crypto::AuthorityId, mmr::BeefyAuthoritySet};
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::{LazyLock, Mutex},
 };
 use subxt_rpcs::{client::RpcSubscription, rpc_params};
 #[cfg(any(test, feature = "deployment"))]
@@ -19,7 +18,7 @@ use tokio::time::Instant;
 use tokio::time::{timeout, Duration};
 
 use crate::{
-    authority_addresses, authority_root, decode_authority_list, decode_beefy_digest,
+    authority_leaves, authority_root, decode_authority_list, decode_beefy_digest,
     decode_mmr_leaves, decode_mmr_proof, decode_outer_leaf, decode_validator_set,
     decode_versioned_finality_proof, keccak256, outer_leaf_hash, validate_mmr_coordinates,
     validate_signed_commitment, verify_native_mmr_proof, Hash32, QueueSnapshot, RuntimeLeaf,
@@ -53,6 +52,8 @@ struct ScanJournal {
     delivered: Option<(u32, Vec<u8>)>,
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     retained_deliveries: std::collections::BTreeMap<u32, Vec<u8>>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    signature_alternatives: std::collections::BTreeMap<u32, Vec<u8>>,
 }
 
 impl ScanJournal {
@@ -108,6 +109,21 @@ struct MmrLeavesProof {
     proof: String,
 }
 
+/// Exact finalized qualification evidence, independently approved with the execution
+/// manifest. This never replaces the original bootstrap identity.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RuntimeTransitionApproval {
+    pub identity: SourceIdentity,
+}
+
+#[derive(Default)]
+struct RuntimeAdmission {
+    bootstrap: Option<JsonValue>,
+    transitions: Vec<RuntimeTransitionApproval>,
+    qualified: std::collections::BTreeSet<Hash32>,
+}
+
 pub struct Source {
     pub api: GearApi,
     pub source_genesis: Hash32,
@@ -126,6 +142,10 @@ pub struct Source {
     // Separate from the subscription cap: grows only with unacknowledged
     // deliveries and is pruned against the authenticated resume checkpoint.
     retained_deliveries: std::collections::BTreeMap<u32, Vec<u8>>,
+    // Alternative signatures are separate evidence, never a replacement original.
+    signature_alternatives: std::collections::BTreeMap<u32, Vec<u8>>,
+    witness_api: Option<GearApi>,
+    runtime_admission: Mutex<RuntimeAdmission>,
     #[cfg(test)]
     capture_gate: Option<(
         std::sync::Arc<tokio::sync::Notify>,
@@ -180,18 +200,36 @@ impl Source {
             discover_source_identity(&witness, witness_at)
         )?;
         ensure_paired_identity(&identity, &witness_identity)?;
+        let witness_api = witness.clone();
+        let mut primary = Self::from_identity(api, subscription, identity);
+        primary.witness_api = Some(witness_api);
         Ok((
-            Self::from_identity(api, subscription, identity),
+            primary,
             Self::from_identity(witness, witness_subscription, witness_identity),
         ))
     }
 
     pub async fn validate_attachment(&self, anchor: &JsonValue) -> Result<()> {
+        let transitions = self
+            .runtime_admission
+            .lock()
+            .expect("runtime admission lock")
+            .transitions
+            .clone();
+        self.validate_approved_attachment(anchor, &transitions)
+            .await
+    }
+
+    pub(crate) async fn validate_approved_attachment(
+        &self,
+        anchor: &JsonValue,
+        transitions: &[RuntimeTransitionApproval],
+    ) -> Result<()> {
         if anchor["sourceIdentity"].is_null() {
             // Retained lanes have immutable old anchors. They are the explicit
             // genesis/fast profile, never an implicit normal-runtime attachment.
             let legacy = validate_legacy_runtime(&self.api).await?;
-            ensure_runtime_binding(&legacy, &self.identity.runtime)?;
+            self.configure_runtime_admission(&legacy, transitions)?;
         } else {
             let pinned = &anchor["sourceIdentity"];
             let height: u32 = pinned["finalizedHeight"]
@@ -203,8 +241,8 @@ impl Source {
                 "source identity is not finalized; HOLD"
             );
             let at = self.api.block_number_to_hash(height).await?;
-            let mut historical =
-                serde_json::to_value(discover_source_identity(&self.api, at).await?)?;
+            let original = discover_source_identity(&self.api, at).await?;
+            let mut historical = serde_json::to_value(&original)?;
             // Old immutable reports predate this explicit timestamp field.
             if pinned.get("sourceTimestampMs").is_none() {
                 historical
@@ -216,13 +254,127 @@ impl Source {
                 *pinned == historical,
                 "native source identity report differs at its original finalized pin; HOLD"
             );
-            ensure_runtime_binding(&pinned["runtime"], &self.identity.runtime)?;
+            ensure_source_invariants(&original, &self.identity)?;
+            self.configure_runtime_admission(&pinned["runtime"], transitions)?;
             ensure!(pinned["beefyActivationBlock"] == self.beefy_activation_block
                 && pinned["mmrStartBlock"] == self.mmr_start_block
                 && pinned["domainBindingBlock"] == self.identity.domain_binding_block,
                 "source activation, MMR start or domain binding changed from immutable anchor; HOLD");
         }
+        self.qualify_runtime_at(H256(self.identity.finalized_hash))
+            .await?;
         Ok(())
+    }
+
+    fn configure_runtime_admission(
+        &self,
+        bootstrap: &JsonValue,
+        transitions: &[RuntimeTransitionApproval],
+    ) -> Result<()> {
+        ensure_runtime_binding(bootstrap, bootstrap)?;
+        let mut digests = std::collections::BTreeSet::new();
+        for transition in transitions {
+            let identity = &transition.identity;
+            ensure_runtime_binding(&identity.runtime, &identity.runtime)?;
+            validate_bridge_apis(&identity.runtime)?;
+            ensure!(
+                digests.insert(runtime_digest(&identity.runtime)?),
+                "duplicate approved runtime transition; HOLD"
+            );
+            ensure_source_invariants(&self.identity, identity)?;
+        }
+        let mut admission = self
+            .runtime_admission
+            .lock()
+            .expect("runtime admission lock");
+        if let Some(existing) = &admission.bootstrap {
+            ensure_runtime_binding(existing, bootstrap)?;
+            ensure!(
+                admission.transitions == transitions,
+                "runtime approvals changed in-session; HOLD"
+            );
+        } else {
+            admission.bootstrap = Some(bootstrap.clone());
+            admission.transitions = transitions.to_vec();
+            admission.qualified.clear();
+        }
+        Ok(())
+    }
+
+    /// Every capture, proof and production queue scan rechecks the code hash.
+    /// Only expensive invariant/encoding qualification is cached by code digest.
+    async fn qualify_runtime_at(&self, at: H256) -> Result<()> {
+        let digest = runtime_code_hash_at(&self.api, at).await?;
+        let (bootstrap, transition) = {
+            let admission = self
+                .runtime_admission
+                .lock()
+                .expect("runtime admission lock");
+            if admission.qualified.contains(&digest) {
+                return Ok(());
+            }
+            let bootstrap = admission
+                .bootstrap
+                .as_ref()
+                .unwrap_or(&self.identity.runtime)
+                .clone();
+            let transition = admission
+                .transitions
+                .iter()
+                .find(|approval| runtime_digest(&approval.identity.runtime).ok() == Some(digest))
+                .cloned();
+            (bootstrap, transition)
+        };
+        let runtime = runtime_identity_at(&self.api, at).await?;
+        ensure!(
+            runtime_digest(&runtime)? == digest,
+            "runtime code changed at pinned hash; HOLD"
+        );
+        if ensure_approved_runtime(&bootstrap, &runtime, transition.as_ref())? {
+            let approval =
+                transition.context("source runtime lacks independent transition approval; HOLD")?;
+            let pin = H256(approval.identity.finalized_hash);
+            let height = approval.identity.finalized_height;
+            let finalized = self
+                .api
+                .block_hash_to_number(self.api.latest_finalized_block().await?)
+                .await?;
+            ensure!(
+                height <= finalized && self.api.block_number_to_hash(height).await? == pin,
+                "runtime qualification pin is not canonical finalized history; HOLD"
+            );
+            let observed = discover_source_identity(&self.api, pin).await?;
+            ensure_paired_identity(&approval.identity, &observed)?;
+            ensure_source_invariants(&self.identity, &observed)?;
+            qualify_runtime_leaf(&self.api, &observed).await?;
+            if let Some(witness) = &self.witness_api {
+                let finalized = witness
+                    .block_hash_to_number(witness.latest_finalized_block().await?)
+                    .await?;
+                ensure!(
+                    height <= finalized && witness.block_number_to_hash(height).await? == pin,
+                    "witness runtime qualification pin is not finalized; HOLD"
+                );
+                let witnessed = discover_source_identity(witness, pin).await?;
+                ensure_paired_identity(&observed, &witnessed)?;
+                qualify_runtime_leaf(witness, &witnessed).await?;
+                ensure!(
+                    runtime_code_hash_at(witness, at).await? == digest,
+                    "witness runtime code differs at source pin; HOLD"
+                );
+            }
+        }
+        self.runtime_admission
+            .lock()
+            .expect("runtime admission lock")
+            .qualified
+            .insert(digest);
+        Ok(())
+    }
+
+    pub async fn queue_snapshot_at(&self, at: H256) -> Result<Option<(u64, H256)>> {
+        self.qualify_runtime_at(at).await?;
+        queue_snapshot_at(&self.api, at).await
     }
 
     async fn subscribe(api: &GearApi) -> Result<RpcSubscription<String>> {
@@ -258,6 +410,9 @@ impl Source {
             scanned_hash: [0; 32],
             scan_path: None,
             retained_deliveries: Default::default(),
+            signature_alternatives: Default::default(),
+            runtime_admission: Mutex::new(RuntimeAdmission::default()),
+            witness_api: None,
             #[cfg(test)]
             capture_gate: None,
         }
@@ -379,6 +534,22 @@ impl Source {
                     self.retained_deliveries.entry(block).or_insert(raw);
                 }
             }
+            for (block, raw) in saved.signature_alternatives {
+                if block <= resume_from {
+                    continue;
+                }
+                let original = self
+                    .retained_deliveries
+                    .get(&block)
+                    .context("alternative signatures lack their retained original; HOLD")?;
+                ensure!(
+                    commitment_identity(original)? == commitment_identity(&raw)?,
+                    "alternative signature commitment changed; HOLD"
+                );
+                self.recapture(block, raw.clone()).await?;
+                witness.recapture(block, raw.clone()).await?;
+                self.signature_alternatives.insert(block, raw);
+            }
             let (current, _) = self.checkpoint_at(resume_from).await?;
             self.last_block = Some(resume_from);
             self.last_set_id = Some(current.id);
@@ -403,6 +574,7 @@ impl Source {
             pending: &'a std::collections::BTreeMap<u32, Vec<u8>>,
             delivered: Option<(u32, &'a [u8])>,
             retained_deliveries: &'a std::collections::BTreeMap<u32, Vec<u8>>,
+            signature_alternatives: &'a std::collections::BTreeMap<u32, Vec<u8>>,
         }
         ethereum_client::finality_archive::atomic_json(
             path,
@@ -415,6 +587,7 @@ impl Source {
                 // Read legacy delivered originals, but write each original once.
                 delivered: None,
                 retained_deliveries: &self.retained_deliveries,
+                signature_alternatives: &self.signature_alternatives,
             },
         )
     }
@@ -428,6 +601,8 @@ impl Source {
             .is_some_and(|(&first, _)| first <= block)
         {
             self.retained_deliveries.retain(|&height, _| height > block);
+            self.signature_alternatives
+                .retain(|&height, _| height > block);
             self.persist_scan_journal()?;
         }
         Ok(())
@@ -436,9 +611,16 @@ impl Source {
     /// Replay archived history before draining later durable originals, so late
     /// justifications cannot hide an authority transition behind the scan cursor.
     pub async fn next_commitment(&mut self) -> Result<CapturedCommitment> {
-        timeout(MAX_WAIT, self.next_commitment_inner())
+        let result = timeout(MAX_WAIT, self.next_commitment_inner())
             .await
-            .map_err(|_| anyhow!(CommitmentPending))?
+            .map_err(|_| anyhow!(CommitmentPending))?;
+        result.map_err(|error| {
+            if error.is::<crate::InsufficientSignatures>() {
+                anyhow!(CommitmentPending).context(error.to_string())
+            } else {
+                error
+            }
+        })
     }
 
     async fn next_commitment_inner(&mut self) -> Result<CapturedCommitment> {
@@ -479,7 +661,30 @@ impl Source {
                 // Retain the exact original before the first cancellable capture
                 // await. A timeout retries it; a restart rescans before replaying it.
                 self.persist_scan_journal()?;
-                let captured = self.capture(block, raw, finalized, true).await?;
+                let selected = self
+                    .signature_alternatives
+                    .get(&block)
+                    .unwrap_or(&raw)
+                    .clone();
+                let captured = match self.capture(block, selected, finalized, true).await {
+                    Ok(captured) => captured,
+                    Err(error) if error.is::<crate::InsufficientSignatures>() => {
+                        match self.witness_signatures(block, &raw, finalized).await? {
+                            Some(captured) => {
+                                self.signature_alternatives
+                                    .entry(block)
+                                    .or_insert_with(|| captured.raw.clone());
+                                self.persist_scan_journal()?;
+                                captured
+                            }
+                            None => {
+                                tokio::time::sleep(Duration::from_secs(3)).await;
+                                return Err(error);
+                            }
+                        }
+                    }
+                    Err(error) => return Err(error),
+                };
                 // Capture cannot advance the delivery cursor until authentication
                 // succeeds; retained originals remain until accepted on restart.
                 self.accepted
@@ -510,6 +715,51 @@ impl Source {
         }
     }
 
+    async fn witness_signatures(
+        &self,
+        block: u32,
+        original: &[u8],
+        finalized: u32,
+    ) -> Result<Option<CapturedCommitment>> {
+        let Some(witness) = &self.witness_api else {
+            return Ok(None);
+        };
+        let witness_finalized = witness
+            .block_hash_to_number(witness.latest_finalized_block().await?)
+            .await?;
+        if block > witness_finalized {
+            return Ok(None);
+        }
+        let (primary_hash, witness_hash) = tokio::try_join!(
+            self.api.block_number_to_hash(block),
+            witness.block_number_to_hash(block)
+        )?;
+        ensure!(
+            primary_hash == witness_hash,
+            "BEEFY signature witness changed canonical block; HOLD"
+        );
+        let body: JsonValue = witness
+            .api
+            .rpc()
+            .request("chain_getBlock", rpc_params![witness_hash])
+            .await?;
+        let Some(raw) = justification_bytes(&body)? else {
+            return Ok(None);
+        };
+        ensure!(
+            commitment_identity(original)? == commitment_identity(&raw)?,
+            "BEEFY signature witness changed commitment semantics; HOLD"
+        );
+        match self
+            .capture(block, raw, finalized.min(witness_finalized), true)
+            .await
+        {
+            Ok(captured) => Ok(Some(captured)),
+            Err(error) if error.is::<crate::InsufficientSignatures>() => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     async fn scan_range(&mut self, finalized: u32) -> Result<Option<(u32, Vec<u8>)>> {
         let Some(start) = self.scanned_through.checked_add(1) else {
             return Ok(None);
@@ -520,6 +770,7 @@ impl Source {
         let end = finalized.min(start.saturating_add(63));
         for block in start..=end {
             let hash = self.api.block_number_to_hash(block).await?;
+            self.qualify_runtime_at(hash).await?;
             let raw = self
                 .api
                 .api
@@ -579,7 +830,11 @@ impl Source {
                 *existing == identity,
                 "conflicting BEEFY commitment for accepted block {block}"
             );
-            self.recapture(block, bytes).await?;
+            if let Err(error) = self.recapture(block, bytes).await {
+                if !error.is::<crate::InsufficientSignatures>() {
+                    return Err(error);
+                }
+            }
             return Ok(());
         }
         if let Some(previous) = self.last_block {
@@ -599,7 +854,11 @@ impl Source {
                     commitment_identity(&original)? == identity,
                     "conflicting historical BEEFY commitment at block {block}"
                 );
-                self.recapture(block, bytes).await?;
+                if let Err(error) = self.recapture(block, bytes).await {
+                    if !error.is::<crate::InsufficientSignatures>() {
+                        return Err(error);
+                    }
+                }
                 return Ok(());
             }
         }
@@ -613,7 +872,11 @@ impl Source {
                 "conflicting BEEFY commitment for block {block}"
             );
             if existing != &bytes {
-                self.recapture(block, bytes).await?;
+                if let Err(error) = self.recapture(block, bytes).await {
+                    if !error.is::<crate::InsufficientSignatures>() {
+                        return Err(error);
+                    }
+                }
             }
         } else {
             ensure!(
@@ -719,21 +982,19 @@ impl Source {
             .api
             .api
             .rpc()
-            .request::<JsonValue>("chain_getBlock", rpc_params![hash])
+            .request::<JsonValue>("chain_getHeader", rpc_params![hash])
             .await?;
         let logs = block_json
-            .get("block")
-            .and_then(|v| v.get("header"))
-            .and_then(|v| v.get("digest"))
+            .get("digest")
             .and_then(|v| v.get("logs"))
             .and_then(JsonValue::as_array)
             .map(Vec::as_slice)
-            .unwrap_or_default();
+            .context("source header digest logs missing; HOLD")?;
         for log in logs {
-            let Some(hex_log) = log.as_str() else {
-                continue;
-            };
-            let bytes = decode_hex_bounded(hex_log, MAX_VALIDATORS * 33 + 32)?;
+            let hex_log = log
+                .as_str()
+                .context("source header digest is not hex; HOLD")?;
+            let bytes = decode_hex_bounded(hex_log, crate::protocol::MAX_HEADER_DIGEST_BYTES)?;
             if let Some(root) = decode_beefy_digest(&bytes)? {
                 return Ok(Some(root));
             }
@@ -742,13 +1003,16 @@ impl Source {
     }
 
     pub async fn checkpoint_at(&self, block: u32) -> Result<(AuthoritySet, AuthoritySet)> {
-        checkpoint_at(&self.api, block).await
+        let hash = self.api.block_number_to_hash(block).await?;
+        self.qualify_runtime_at(hash).await?;
+        checkpoint_at_hash(&self.api, hash, block).await
     }
 
     pub async fn checkpoint_at_hash(
         &self,
         block_hash: H256,
     ) -> Result<(AuthoritySet, AuthoritySet)> {
+        self.qualify_runtime_at(block_hash).await?;
         let block = self.api.block_hash_to_number(block_hash).await?;
         checkpoint_at_hash(&self.api, block_hash, block).await
     }
@@ -765,43 +1029,17 @@ impl Source {
         let insertion_block = source.checked_add(1).context("source insertion overflow")?;
         let source_hash = self.api.block_number_to_hash(source).await?.0;
         let anchor_hash = H256(anchor.block_hash);
-        let source_timestamp_ms = self.api.fetch_timestamp(H256(source_hash)).await?;
-        let snapshot = if bridge_initialized(&self.api, H256(source_hash)).await? {
-            let (queue_id, queue_root) =
-                self.api.fetch_queue_merkle_root(H256(source_hash)).await?;
-            QueueSnapshot::new(
-                self.bridge_domain,
-                source_timestamp_ms,
-                true,
-                queue_id,
-                queue_root.0,
-            )?
-        } else {
-            let insertion_hash = self.api.block_number_to_hash(insertion_block).await?;
-            if has_event(
-                &self.api,
-                insertion_hash,
-                "GearEthBridge",
-                "BridgeInitialized",
-            )
-            .await?
-            {
-                ensure!(
-                    bridge_initialized(&self.api, insertion_hash).await?,
-                    "BridgeInitialized event did not leave initialized state at insertion block"
-                );
-                let (queue_id, _) = self.api.fetch_queue_merkle_root(insertion_hash).await?;
-                QueueSnapshot::new(
-                    self.bridge_domain,
-                    source_timestamp_ms,
-                    true,
-                    queue_id,
-                    [0; 32],
-                )?
-            } else {
-                QueueSnapshot::new(self.bridge_domain, source_timestamp_ms, false, 0, [0; 32])?
-            }
-        };
+        self.qualify_runtime_at(H256(source_hash)).await?;
+        self.qualify_runtime_at(anchor_hash).await?;
+        let insertion_hash = self.api.block_number_to_hash(insertion_block).await?;
+        self.qualify_runtime_at(insertion_hash).await?;
+        let snapshot = leaf_snapshot_at(
+            &self.api,
+            self.bridge_domain,
+            H256(source_hash),
+            insertion_hash,
+        )
+        .await?;
         let params = rpc_params![vec![insertion_block], Some(anchor.block), Some(anchor_hash)];
         let response: MmrLeavesProof = self
             .api
@@ -887,7 +1125,7 @@ impl Source {
     }
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceIdentity {
     pub source_genesis: Hash32,
@@ -1275,13 +1513,130 @@ pub async fn bridge_status(api: &GearApi, at_block: Option<u32>) -> Result<()> {
         None => api.latest_finalized_block().await?,
     };
     let number = api.block_hash_to_number(block).await?;
-    let (queue_id, root) = api.fetch_queue_merkle_root(block).await?;
+    let (queue_id, root) = queue_snapshot_at(api, block)
+        .await?
+        .context("bridge queue is not initialized")?;
     println!(
         "block={number} hash={block:?} initialized={} paused={} queue_id={queue_id} root=0x{}",
         bridge_initialized(api, block).await?,
         bridge_paused(api, block).await?,
         hex::encode(root.0)
     );
+    Ok(())
+}
+
+fn ensure_approved_runtime(
+    bootstrap: &JsonValue,
+    observed: &JsonValue,
+    transition: Option<&RuntimeTransitionApproval>,
+) -> Result<bool> {
+    validate_bridge_apis(observed)?;
+    if ensure_runtime_binding(bootstrap, observed).is_ok() {
+        return Ok(false);
+    }
+    let approval =
+        transition.context("source runtime lacks independent transition approval; HOLD")?;
+    ensure_runtime_binding(&approval.identity.runtime, observed)?;
+    Ok(true)
+}
+
+fn runtime_digest(runtime: &JsonValue) -> Result<Hash32> {
+    parse_h256(
+        runtime["runtimeCodeBlake2b256"]
+            .as_str()
+            .context("runtime Blake2b-256 identity missing; HOLD")?,
+    )
+}
+
+async fn runtime_code_hash_at(api: &GearApi, at: H256) -> Result<Hash32> {
+    let hash: Option<H256> = api
+        .api
+        .rpc()
+        .request("state_getStorageHash", rpc_params!["0x3a636f6465", at])
+        .await?;
+    Ok(hash.context("runtime :code hash missing; HOLD")?.0)
+}
+
+fn ensure_source_invariants(expected: &SourceIdentity, observed: &SourceIdentity) -> Result<()> {
+    ensure!(
+        expected.source_genesis == observed.source_genesis
+            && expected.bridge_domain == observed.bridge_domain
+            && expected.domain_binding_block == observed.domain_binding_block
+            && expected.beefy_activation_block == observed.beefy_activation_block
+            && expected.mmr_start_block == observed.mmr_start_block
+            && expected.first_insertion_hash == observed.first_insertion_hash
+            && expected.first_leaf_hash == observed.first_leaf_hash,
+        "approved runtime changed immutable source/MMR/domain invariants; HOLD"
+    );
+    Ok(())
+}
+
+async fn leaf_snapshot_at(
+    api: &GearApi,
+    domain: Hash32,
+    parent: H256,
+    insertion: H256,
+) -> Result<QueueSnapshot> {
+    let timestamp = api.fetch_timestamp(parent).await?;
+    let parent_snapshot = queue_snapshot_at(api, parent).await?;
+    if let Some((id, root)) = parent_snapshot {
+        return QueueSnapshot::new(domain, timestamp, true, id, root.0);
+    }
+    // Initialization in this block commits an initialized empty parent snapshot;
+    // storage proves the boundary without downloading the complete event block.
+    match queue_snapshot_at(api, insertion).await? {
+        Some((id, _)) => QueueSnapshot::new(domain, timestamp, true, id, [0; 32]),
+        None => QueueSnapshot::new(domain, timestamp, false, 0, [0; 32]),
+    }
+}
+
+async fn qualify_runtime_leaf(api: &GearApi, identity: &SourceIdentity) -> Result<()> {
+    let block = identity.finalized_height;
+    let at = H256(identity.finalized_hash);
+    let parent_number = block
+        .checked_sub(1)
+        .context("runtime qualification cannot use genesis; HOLD")?;
+    let parent = api.block_number_to_hash(parent_number).await?;
+    ensure!(
+        runtime_code_hash_at(api, parent).await? == runtime_digest(&identity.runtime)?,
+        "qualification leaf must execute the approved runtime, not its predecessor; HOLD"
+    );
+    let response: MmrLeavesProof = api
+        .api
+        .rpc()
+        .request(
+            "mmr_generateProof",
+            rpc_params![vec![block], Some(block), Some(at)],
+        )
+        .await?;
+    ensure!(
+        parse_h256(&response.block_hash)? == at.0,
+        "runtime leaf proof pin differs; HOLD"
+    );
+    let leaf = decode_outer_leaf(&decode_mmr_leaves(&decode_hex_bounded(
+        &response.leaves,
+        MAX_MMR_LEAVES_BYTES,
+    )?)?)?;
+    let proof = decode_mmr_proof(&decode_hex_bounded(&response.proof, MAX_MMR_PROOF_BYTES)?)?;
+    validate_mmr_coordinates(
+        &proof,
+        identity.mmr_start_block,
+        parent_number,
+        u64::from(block),
+    )?;
+    ensure!(
+        proof.leaf_count == identity.mmr_leaf_count
+            && leaf.parent_number_and_hash == (parent_number, parent.0)
+            && leaf.beefy_next_authority_set.id == identity.next.id
+            && leaf.beefy_next_authority_set.len as usize == identity.next.keys.len()
+            && leaf.beefy_next_authority_set.keyset_commitment == identity.next.root
+            && leaf.leaf_extra
+                == leaf_snapshot_at(api, identity.bridge_domain, parent, at)
+                    .await?
+                    .hash(),
+        "approved runtime changed snapshot, leaf or ordered authority encoding; HOLD"
+    );
+    verify_native_mmr_proof(identity.mmr_root, &proof, outer_leaf_hash(&leaf)?)?;
     Ok(())
 }
 
@@ -1310,17 +1665,42 @@ pub async fn runtime_identity_at(api: &GearApi, at: H256) -> Result<JsonValue> {
     );
     let slot_duration = u64::from_le_bytes(babe[0..8].try_into()?);
     let epoch_length = u64::from_le_bytes(babe[8..16].try_into()?);
-    let code: Option<String> = api
-        .api
-        .rpc()
-        .request("state_getStorage", rpc_params!["0x3a636f6465", at])
-        .await?;
-    let code = decode_hex(&code.context("runtime :code is missing at requested pin")?)?;
-    ensure!(!code.is_empty(), "runtime :code is empty at requested pin");
+    // Code bytes are immutable by Blake2b-256 identity. Keep only their computed
+    // digests, shared across source/witness reconnects, never an RPC approval.
+    static CODE_HASHES: LazyLock<Mutex<std::collections::BTreeMap<Hash32, (Hash32, Hash32)>>> =
+        LazyLock::new(Default::default);
+    let digest = runtime_code_hash_at(api, at).await?;
+    let cache = &*CODE_HASHES;
+    let cached = cache
+        .lock()
+        .expect("runtime digest cache")
+        .get(&digest)
+        .copied();
+    let (sha256, keccak) = match cached {
+        Some(hashes) => hashes,
+        None => {
+            let code: Option<String> = api
+                .api
+                .rpc()
+                .request("state_getStorage", rpc_params!["0x3a636f6465", at])
+                .await?;
+            let code = decode_hex(&code.context("runtime :code is missing at requested pin")?)?;
+            ensure!(
+                !code.is_empty() && sp_core::blake2_256(&code) == digest,
+                "runtime :code differs from pinned storage hash; HOLD"
+            );
+            let hashes = (sp_core::hashing::sha2_256(&code), keccak256(&code));
+            cache
+                .lock()
+                .expect("runtime digest cache")
+                .insert(digest, hashes);
+            hashes
+        }
+    };
     Ok(json!({"version": version,
-        "runtimeCodeSha256": format!("0x{}", hex::encode(sp_core::hashing::sha2_256(&code))),
-        "runtimeCodeKeccak256": format!("0x{}", hex::encode(keccak256(&code))),
-        "runtimeCodeBlake2b256": format!("0x{}", hex::encode(sp_core::blake2_256(&code))),
+        "runtimeCodeSha256": format!("0x{}", hex::encode(sha256)),
+        "runtimeCodeKeccak256": format!("0x{}", hex::encode(keccak)),
+        "runtimeCodeBlake2b256": format!("0x{}", hex::encode(digest)),
         "babe": {"slotDuration": slot_duration, "epochLength": epoch_length}}))
 }
 
@@ -1405,9 +1785,59 @@ pub async fn queue_snapshot_at(api: &GearApi, at: H256) -> Result<Option<(u64, H
     {
         return Ok(None);
     }
-    Ok(Some(api.fetch_queue_merkle_root(at).await.with_context(
-        || format!("read initialized bridge queue at {at:?}; HOLD"),
-    )?))
+    let root = storage_decode::<H256>(api, "GearEthBridge", "QueueMerkleRoot", at, vec![])
+        .await?
+        .context("initialized queue root missing; HOLD")?;
+    let id = match storage_decode::<u64>(api, "GearEthBridge", "QueueId", at, vec![]).await? {
+        Some(id) => id,
+        None => {
+            // Consult the runtime at this exact historical hash, not the
+            // connection's current metadata or a blanket absent-means-zero rule.
+            static ZERO_DEFAULT_RUNTIMES: LazyLock<Mutex<std::collections::BTreeSet<Hash32>>> =
+                LazyLock::new(Default::default);
+            let digest = runtime_code_hash_at(api, at).await?;
+            let known = ZERO_DEFAULT_RUNTIMES
+                .lock()
+                .expect("QueueId runtime cache")
+                .contains(&digest);
+            if !known {
+                let encoded = api
+                    .api
+                    .legacy()
+                    .state_call("Metadata_metadata", None, Some(at))
+                    .await?;
+                let mut input = encoded.as_slice();
+                let length = Compact::<u32>::decode(&mut input)?.0 as usize;
+                ensure!(
+                    length == input.len() && length <= 16 * 1024 * 1024,
+                    "historical metadata length is invalid; HOLD"
+                );
+                let metadata = subxt::metadata::Metadata::decode(&mut input)?;
+                ensure!(
+                    input.is_empty(),
+                    "historical metadata has trailing bytes; HOLD"
+                );
+                let pallet = metadata
+                    .pallet_by_name("GearEthBridge")
+                    .context("historical bridge metadata missing; HOLD")?;
+                let entry = pallet
+                    .storage()
+                    .and_then(|storage| storage.entry_by_name("QueueId"))
+                    .context("historical QueueId metadata missing; HOLD")?;
+                ensure!(
+                    entry.modifier() == subxt::metadata::types::StorageEntryModifier::Default
+                        && entry.default_bytes() == 0u64.to_le_bytes(),
+                    "absent QueueId has no runtime-qualified zero ValueQuery default; HOLD"
+                );
+                ZERO_DEFAULT_RUNTIMES
+                    .lock()
+                    .expect("QueueId runtime cache")
+                    .insert(digest);
+            }
+            0
+        }
+    };
+    Ok(Some((id, root)))
 }
 
 pub async fn bridge_paused(api: &GearApi, at: H256) -> Result<bool> {
@@ -1482,7 +1912,7 @@ async fn storage_encoded(
 
 fn authority_set_root(keys: &[Vec<u8>]) -> Result<Hash32> {
     let keys = key_arrays(keys)?;
-    authority_root(&authority_addresses(&keys)?)
+    authority_root(&authority_leaves(&keys)?)
 }
 
 fn key_arrays(keys: &[Vec<u8>]) -> Result<Vec<[u8; 33]>> {
@@ -1600,6 +2030,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unrelated_consensus_authority_logs_do_not_inherit_beefy_limit() -> Result<()> {
+        use sp_runtime::generic::DigestItem;
+        // Reconstructed from HTML O1: ordinary 1,000-authority BABE/GRANDPA
+        // announcements must not enlarge the BEEFY signing-set denominator.
+        let payload = (1u8, vec![([7u8; 32], 1u64); 1000]).encode();
+        for engine in [*b"BABE", *b"FRNK"] {
+            let encoded = DigestItem::Consensus(engine, payload.clone()).encode();
+            assert_eq!(decode_beefy_digest(&encoded)?, None);
+            let mut trailing = encoded;
+            trailing.push(0);
+            assert!(decode_beefy_digest(&trailing).is_err());
+        }
+        assert!(decode_beefy_digest(&DigestItem::Consensus(*b"BEEF", payload).encode()).is_err());
+        let root = sp_consensus_beefy::ConsensusLog::<AuthorityId>::MmrRoot([9u8; 32].into());
+        assert_eq!(
+            decode_beefy_digest(&DigestItem::Consensus(*b"BEEF", root.encode()).encode())?,
+            Some([9; 32])
+        );
+        Ok(())
+    }
+
+    #[test]
     fn restart_rewinds_proofless_scan_without_losing_pending_or_delivered_originals() -> Result<()>
     {
         let pending = (101..=100 + MAX_PENDING_JUSTIFICATIONS as u32)
@@ -1613,6 +2065,7 @@ mod tests {
             pending,
             delivered: Some((100, vec![4; 32])),
             retained_deliveries: Default::default(),
+            signature_alternatives: Default::default(),
         };
         let mut restored: ScanJournal = serde_json::from_slice(&serde_json::to_vec(&saved)?)?;
         restored.rewind_to(50, [5; 32]);
@@ -1777,6 +2230,67 @@ mod tests {
             first_insertion_hash: [6; 32],
             first_leaf_hash: [7; 32],
         };
+        // Reconstructed from HTML VB-11: independent approval admits new code
+        // without relabeling the original bootstrap, but not changed invariants.
+        let apis = [("BeefyApi", 5), ("MmrApi", 2), ("BeefyMmrApi", 1)].map(|(name, version)| {
+            json!([
+                format!("0x{}", hex::encode(sp_core::blake2_64(name.as_bytes()))),
+                version
+            ])
+        });
+        let runtime = |byte: u8| {
+            json!({
+                "runtimeCodeSha256": format!("0x{}", hex::encode([byte; 32])),
+                "runtimeCodeKeccak256": format!("0x{}", hex::encode([byte + 1; 32])),
+                "runtimeCodeBlake2b256": format!("0x{}", hex::encode([byte + 2; 32])),
+                "version": {"apis": apis},
+            })
+        };
+        let bootstrap = runtime(10);
+        let upgraded = runtime(20);
+        let approval = RuntimeTransitionApproval {
+            identity: SourceIdentity {
+                runtime: upgraded.clone(),
+                ..identity.clone()
+            },
+        };
+        assert!(!ensure_approved_runtime(&bootstrap, &bootstrap, None)?);
+        assert!(ensure_approved_runtime(&bootstrap, &upgraded, None).is_err());
+        assert!(ensure_approved_runtime(
+            &bootstrap,
+            &upgraded,
+            Some(&approval)
+        )?);
+        assert!(ensure_approved_runtime(&bootstrap, &runtime(30), Some(&approval)).is_err());
+        let mut missing_api = upgraded.clone();
+        missing_api["version"]["apis"] = json!([]);
+        assert!(ensure_approved_runtime(&bootstrap, &missing_api, Some(&approval)).is_err());
+        ensure_source_invariants(&identity, &approval.identity)?;
+        for field in [
+            "sourceGenesis",
+            "bridgeDomain",
+            "domainBindingBlock",
+            "beefyActivationBlock",
+            "mmrStartBlock",
+            "firstInsertionHash",
+            "firstLeafHash",
+        ] {
+            let mut changed = serde_json::to_value(&approval.identity)?;
+            if changed[field].is_array() {
+                changed[field][0] = json!(99);
+            } else {
+                changed[field] = json!(99);
+            }
+            let changed: SourceIdentity = serde_json::from_value(changed)?;
+            assert!(
+                ensure_source_invariants(&identity, &changed).is_err(),
+                "{field}"
+            );
+        }
+        let mut changed_order = approval.identity.clone();
+        changed_order.current.keys[0][0] ^= 1;
+        assert!(ensure_paired_identity(&approval.identity, &changed_order).is_err());
+        assert_eq!(bootstrap, runtime(10), "bootstrap must remain immutable");
         ensure_paired_identity(&identity, &identity)?;
         let mut changed = identity.clone();
         changed.runtime["babe"]["epochLength"] = json!(64);
@@ -2024,6 +2538,7 @@ mod tests {
                     pending: Default::default(),
                     delivered: None,
                     retained_deliveries: Default::default(),
+                    signature_alternatives: Default::default(),
                 };
                 fs::write(&path, serde_json::to_vec(&saved)?)?;
                 pending
@@ -2122,6 +2637,7 @@ mod tests {
                 pending: saturated_pending,
                 delivered: Some((reserved.block, reserved.raw.clone())),
                 retained_deliveries: Default::default(),
+                signature_alternatives: Default::default(),
             };
             fs::write(&path, serde_json::to_vec(&legacy)?)?;
 

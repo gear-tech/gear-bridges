@@ -256,6 +256,7 @@ pub struct TransactionManager {
     pub storage: Arc<dyn Storage>,
     lane_approvals: LaneApprovals,
     policy_api: Option<ethereum_client::EthApi>,
+    source_api: Option<gear_rpc_client::GearApi>,
 
     metrics: Metrics,
 }
@@ -276,9 +277,15 @@ impl TransactionManager {
             storage,
             lane_approvals: LaneApprovals::default(),
             policy_api: None,
+            source_api: None,
 
             metrics: Metrics::new(),
         }
+    }
+
+    pub fn with_source_api(mut self, api: gear_rpc_client::GearApi) -> Self {
+        self.source_api = Some(api);
+        self
     }
 
     pub fn with_lane_approvals(
@@ -451,7 +458,7 @@ impl TransactionManager {
             .find(|tx| tx.message.message.nonce_be == nonce)
         {
             anyhow::ensure!(
-                tx.message == *message,
+                tx.message.same_original(message),
                 "HOLD: source message conflicts with completed nonce {}",
                 hex::encode(nonce)
             );
@@ -465,7 +472,7 @@ impl TransactionManager {
             .find(|tx| tx.message.message.nonce_be == nonce)
         {
             anyhow::ensure!(
-                tx.message == *message,
+                tx.message.same_original(message),
                 "HOLD: source message conflicts with active nonce {}",
                 hex::encode(nonce)
             );
@@ -474,7 +481,10 @@ impl TransactionManager {
         Ok(None)
     }
 
-    async fn accept_message(&self, message: MessageInBlock) -> anyhow::Result<Option<Transaction>> {
+    async fn accept_message(
+        &self,
+        mut message: MessageInBlock,
+    ) -> anyhow::Result<Option<Transaction>> {
         let nonce = message.message.nonce_be;
         match self.existing_transaction(&message).await? {
             Some(ExistingTransaction::Completed) => {
@@ -504,6 +514,13 @@ impl TransactionManager {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("HOLD: no approved outbound lane configuration"))?;
         let policy = self.lane_approvals.qualify(api, &message.message, None)?;
+        if message.queue_id.is_none() {
+            message
+                .qualify_queue(self.source_api.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("HOLD: source identity requalification unavailable")
+                })?)
+                .await?;
+        }
         self.storage
             .block_storage()
             .complete_transaction(&message)
@@ -751,10 +768,35 @@ impl TransactionManager {
             if tx.ethereum_submission.is_some() {
                 continue;
             }
-            let root = match &tx.status {
+            if matches!(
+                tx.status,
+                TxStatus::WaitForMerkleRoot
+                    | TxStatus::FetchMerkleRoot(_)
+                    | TxStatus::PrepareMessage(..)
+            ) {
+                tx.message
+                    .qualify_queue(self.source_api.as_ref().ok_or_else(|| {
+                        anyhow::anyhow!("HOLD: source identity requalification unavailable")
+                    })?)
+                    .await?;
+            }
+            let mut root = match &tx.status {
                 TxStatus::FetchMerkleRoot(root) | TxStatus::PrepareMessage(root, _) => *root,
                 _ => continue,
             };
+            let saved_queue = root.queue_id;
+            root.queue_id = Some(
+                crate::message_relayer::common::gear::queue_id_at(
+                    self.source_api.as_ref().expect("source qualified"),
+                    root.block.0,
+                    root.block_hash,
+                )
+                .await?,
+            );
+            anyhow::ensure!(
+                saved_queue.is_none() || saved_queue == root.queue_id,
+                "HOLD: saved root QueueId changed"
+            );
             if view.is_none() {
                 view = Some(api.verified_finalized_view().await?);
             }
@@ -762,7 +804,10 @@ impl TransactionManager {
             let observed = api
                 .read_finalized_merkle_root_at(root.block.0, pin.block_number(), pin.block_hash())
                 .await?;
-            tx.status = if observed == Some(root.merkle_root.0)
+            tx.status = if root.covers(
+                tx.message.queue_id.expect("message qualified"),
+                tx.message.block,
+            ) && observed == Some(root.merkle_root.0)
                 && roots
                     .qualified_roots()
                     .iter()
@@ -783,10 +828,10 @@ impl TransactionManager {
                 .await?,
                 "HOLD: unsigned root qualification pin changed"
             );
-            drop(roots);
-            drop(transactions);
-            self.storage.save(self).await?;
         }
+        drop(roots);
+        drop(transactions);
+        self.storage.save(self).await?;
         Ok(())
     }
 
@@ -874,6 +919,13 @@ impl TransactionManager {
                 );
                 return Ok(None);
             }
+            anyhow::ensure!(
+                tx.message
+                    .queue_id
+                    .is_some_and(|queue| merkle_root.covers(queue, tx.message.block))
+                    && proof.root == merkle_root.merkle_root.0,
+                "HOLD: proof does not cover the original message QueueId/height/root"
+            );
             tx.status = TxStatus::PrepareMessage(merkle_root, proof);
             tx.message.message.clone()
         };
@@ -985,6 +1037,10 @@ impl TransactionManager {
                     if !accumulator.send_message(
                         tx.uuid,
                         tx.message.authority_set_id,
+                        tx.message
+                            .queue_id
+                            .ok_or_else(|| anyhow::anyhow!("HOLD: missing message QueueId"))?,
+                        None,
                         tx.message.block,
                         tx.message.block_hash,
                         ActorId::from(tx.message.message.source),
@@ -1144,7 +1200,9 @@ impl TransactionManager {
                     block.0,
                 );
 
-                if !accumulator.send_message(uuid, authority_set_id, block, block_hash, source) {
+                if !accumulator.send_message(uuid, authority_set_id,
+                    tx.message.queue_id.ok_or_else(|| anyhow::anyhow!("HOLD: missing message QueueId"))?,
+                    None, block, block_hash, source) {
                     log::warn!("Failed to send message to accumulator, exiting");
                     return Ok(false);
                 }
@@ -1164,7 +1222,8 @@ impl TransactionManager {
                                 return Ok(true);
                             }
                             anyhow::ensure!(
-                                tx.message.authority_set_id == authority_set_id && tx.message.block == block,
+                                tx.message.authority_set_id == authority_set_id && tx.message.block == block
+                                    && tx.message.queue_id.is_some_and(|queue| merkle_root.covers(queue, block)),
                                 "HOLD: accumulator response source block/set mismatch for {tx_uuid}"
                             );
                             tx.status = TxStatus::FetchMerkleRoot(merkle_root);
@@ -1209,15 +1268,6 @@ impl TransactionManager {
                         }
                     }
 
-                    accumulator::Response::Stuck { tx_uuid, .. } => {
-                        if self
-                            .fail_active_transaction(tx_uuid, "Message stuck".to_string())
-                            .await
-                            .is_none()
-                        {
-                            log::warn!("Received stuck response for unknown transaction: {tx_uuid}");
-                        }
-                    }
                 }
             }
 
@@ -1226,15 +1276,38 @@ impl TransactionManager {
                     log::info!("No more messages from proof fetcher, exiting");
                     return Ok(false);
                 };
+                let Some(proof) = message.proof else {
+                    let retry = {
+                        let mut transactions = self.transactions.write().await;
+                        if let Some(tx) = transactions.get_mut(&message.tx_uuid) {
+                            if matches!(&tx.status, TxStatus::FetchMerkleRoot(root) if *root == message.merkle_root)
+                                && tx.ethereum_submission.is_none() {
+                                tx.status = TxStatus::WaitForMerkleRoot;
+                                Some(tx.clone())
+                            } else { None }
+                        } else { None }
+                    };
+                    if let Some(tx) = retry {
+                        // Null is unavailable evidence, not authenticated non-membership.
+                        self.storage.save(self).await?;
+                        anyhow::ensure!(accumulator.send_message(
+                            tx.uuid, tx.message.authority_set_id,
+                            tx.message.queue_id.ok_or_else(|| anyhow::anyhow!("HOLD: missing message QueueId"))?,
+                            Some(message.merkle_root), tx.message.block, tx.message.block_hash,
+                            ActorId::from(tx.message.message.source),
+                        ), "Accumulator stopped accepting candidate retries");
+                    }
+                    return Ok(true);
+                };
 
                 if let Some(original_message) = self
-                    .journal_prepare_message(message.tx_uuid, message.merkle_root, message.proof.clone())
+                    .journal_prepare_message(message.tx_uuid, message.merkle_root, proof.clone())
                     .await?
                 {
                     if !message_sender.send(
                         original_message,
                         message.merkle_root,
-                        message.proof,
+                        proof,
                         message.tx_uuid,
                         None,
                         self.transactions.read().await.get(&message.tx_uuid).and_then(|tx| tx.lane_policy.clone()),
@@ -1567,6 +1640,7 @@ pub(crate) mod tests {
 
     fn inclusion(tx: &Transaction) -> (RelayedMerkleRoot, MerkleProof) {
         let root = RelayedMerkleRoot {
+            queue_id: Some(0),
             block: GearBlockNumber(43),
             block_hash: H256::repeat_byte(8),
             timestamp: 123,
@@ -1625,6 +1699,7 @@ pub(crate) mod tests {
     fn transaction() -> Transaction {
         Transaction::new(
             MessageInBlock {
+                queue_id: Some(0),
                 message: Message {
                     nonce_be: [7; 32],
                     source: [1; 32],
@@ -2089,6 +2164,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn every_active_status_suppresses_duplicate_submission() {
         let root = RelayedMerkleRoot {
+            queue_id: Some(0),
             block: GearBlockNumber(43),
             block_hash: H256::from_low_u64_be(100),
             timestamp: 123,
@@ -2156,6 +2232,7 @@ pub(crate) mod tests {
         let manager = TransactionManager::new(storage.clone());
         let mut tx = transaction();
         let root = RelayedMerkleRoot {
+            queue_id: Some(0),
             block: GearBlockNumber(43),
             block_hash: H256::from_low_u64_be(100),
             timestamp: 123,
@@ -2249,6 +2326,7 @@ pub(crate) mod tests {
     async fn stale_proof_cannot_revive_held_failed_or_already_sent_transfer() {
         let manager = TransactionManager::new(Arc::new(NoStorage::new()));
         let root = RelayedMerkleRoot {
+            queue_id: Some(0),
             block: GearBlockNumber(43),
             block_hash: H256::from_low_u64_be(100),
             timestamp: 123,
@@ -2291,6 +2369,7 @@ pub(crate) mod tests {
         let uuid = tx.uuid;
         manager.add_transaction(tx).await;
         let wrong_root = RelayedMerkleRoot {
+            queue_id: Some(0),
             merkle_root: H256::repeat_byte(0xff),
             ..root
         };
@@ -2302,6 +2381,57 @@ pub(crate) mod tests {
             .contains("HOLD"));
         assert!(
             matches!(&manager.transactions.read().await[&uuid].status, TxStatus::FetchMerkleRoot(remaining) if remaining == &root)
+        );
+    }
+
+    /// Reconstructed from supplied HTML VB-15 / audited 7fe1b032.
+    #[tokio::test]
+    async fn proof_handoff_requires_original_queue_and_covered_height() {
+        let manager = TransactionManager::new(Arc::new(NoStorage::new()));
+        let original = transaction();
+        let (root, proof) = inclusion(&original);
+        for candidate in [
+            RelayedMerkleRoot {
+                queue_id: Some(1),
+                ..root
+            },
+            RelayedMerkleRoot {
+                queue_id: None,
+                ..root
+            },
+            RelayedMerkleRoot {
+                block: GearBlockNumber(original.message.block.0 - 1),
+                ..root
+            },
+        ] {
+            let mut tx = original.clone();
+            tx.status = TxStatus::FetchMerkleRoot(candidate);
+            let before = serde_json::to_value(&tx).unwrap();
+            manager.add_transaction(tx).await;
+            assert!(manager
+                .journal_prepare_message(original.uuid, candidate, proof.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("QueueId"));
+            assert_eq!(
+                serde_json::to_value(&manager.transactions.read().await[&original.uuid]).unwrap(),
+                before
+            );
+        }
+        let mut tx = original.clone();
+        let later = RelayedMerkleRoot {
+            block: GearBlockNumber(root.block.0 + 1),
+            ..root
+        };
+        tx.status = TxStatus::FetchMerkleRoot(later);
+        manager.add_transaction(tx).await;
+        assert_eq!(
+            manager
+                .journal_prepare_message(original.uuid, later, proof)
+                .await
+                .unwrap(),
+            Some(original.message.message)
         );
     }
 

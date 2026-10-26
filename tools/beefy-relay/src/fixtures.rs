@@ -9,9 +9,9 @@ use std::{collections::BTreeMap, path::Path};
 
 use crate::{
     protocol::{
-        authority_addresses, authority_root, encode_outer_leaf, encode_queue_proof, keccak256,
-        verify_native_mmr_proof, Hash32, KeccakHasher, QueueSnapshot, RuntimeLeafProof,
-        MAX_MMR_PROOF_ITEMS, MAX_VALIDATORS,
+        authority_leaves, authority_root, encode_outer_leaf, encode_queue_proof, keccak256,
+        verify_native_mmr_proof, Hash32, QueueSnapshot, RuntimeLeafProof, MAX_MMR_PROOF_ITEMS,
+        MAX_VALIDATORS,
     },
     validate_signed_commitment,
 };
@@ -359,7 +359,7 @@ fn make_case(
     )?;
 
     let keys = authority_keys(validator_count)?;
-    let addresses = authority_addresses(&keys)?;
+    let addresses = authority_leaves(&keys)?;
     let authority_set_root = authority_root(&addresses)?;
     let historical_parent_hash = keccak256(format!("{name}:parent:{source}").as_bytes());
     let freshness_parent_hash = keccak256(format!("{name}:parent:{freshness_source}").as_bytes());
@@ -433,13 +433,10 @@ fn make_case(
         .iter()
         .enumerate()
         .map(|(index, _)| {
-            binary_merkle_tree::merkle_proof::<KeccakHasher, _, _>(addresses.iter(), index)
-                .proof
-                .iter()
-                .map(|item| hex0x(item))
-                .collect()
+            crate::authority_proof(&addresses, index)
+                .map(|proof| proof.siblings.iter().map(|item| hex0x(item)).collect())
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
     let freshness = FreshnessProof {
         source_genesis: hex0x(&source_genesis),
         bridge_domain: hex0x(&bridge_domain),
@@ -502,7 +499,10 @@ fn make_case(
         mmr_root: hex0x(&mmr_root),
         validator_count,
         authority_keys: keys.iter().map(|key| hex0x(key)).collect(),
-        authority_addresses: addresses.iter().map(|address| hex0x(address)).collect(),
+        authority_addresses: addresses
+            .iter()
+            .map(|address| hex0x(address.as_ref().expect("fixture signing key")))
+            .collect(),
         authority_root: hex0x(&authority_set_root),
         authority_proofs,
         payload_items,

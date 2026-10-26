@@ -6,7 +6,7 @@ use parity_scale_codec::{Compact, Decode, Encode};
 use sp_consensus_beefy::{
     ecdsa_crypto::{AuthorityId, Signature},
     mmr::BeefyAuthoritySet,
-    SignedCommitment, ValidatorSet, VersionedFinalityProof,
+    BeefyAuthorityId, SignedCommitment, ValidatorSet, VersionedFinalityProof,
 };
 use sp_core::crypto::UncheckedFrom;
 use sp_mmr_primitives::{mmr_lib, LeafProof};
@@ -177,7 +177,7 @@ pub fn authority_address(compressed_key: &[u8]) -> Result<[u8; 20]> {
     Ok(digest[12..].try_into().expect("fixed address length"))
 }
 
-pub fn authority_addresses(keys: &[[u8; 33]]) -> Result<Vec<[u8; 20]>> {
+pub fn authority_leaves(keys: &[[u8; 33]]) -> Result<Vec<Option<[u8; 20]>>> {
     ensure!(
         (1..=MAX_VALIDATORS).contains(&keys.len()),
         "authority count must be between 1 and {MAX_VALIDATORS}"
@@ -186,40 +186,51 @@ pub fn authority_addresses(keys: &[[u8; 33]]) -> Result<Vec<[u8; 20]>> {
     let mut seen_addresses = BTreeSet::new();
     keys.iter()
         .map(|key| {
-            let address = authority_address(key)?;
+            // Pinned BEEFY-MMR conversion retains an empty leaf for an unconvertible key.
+            let Ok(address) = authority_address(key) else {
+                return Ok(None);
+            };
             ensure!(seen_keys.insert(*key), "duplicate authority key");
             ensure!(
                 seen_addresses.insert(address),
                 "duplicate authority address"
             );
-            Ok(address)
+            Ok(Some(address))
         })
         .collect()
 }
 
-pub fn authority_root(addresses: &[[u8; 20]]) -> Result<Hash32> {
+pub fn authority_root(addresses: &[Option<[u8; 20]>]) -> Result<Hash32> {
     ensure!(
         (1..=MAX_VALIDATORS).contains(&addresses.len()),
         "authority count must be between 1 and {MAX_VALIDATORS}"
     );
     let mut seen = BTreeSet::new();
-    for address in addresses {
+    for address in addresses.iter().flatten() {
         ensure!(seen.insert(*address), "duplicate authority address");
     }
-    Ok(merkle_root::<KeccakHasher, _>(addresses.iter()))
+    Ok(merkle_root::<KeccakHasher, _>(addresses.iter().map(
+        |address| address.as_ref().map_or(&[][..], |value| value.as_slice()),
+    )))
 }
 
-/// Build a positional proof from the set validated by `authority_addresses`.
-pub fn authority_proof(addresses: &[[u8; 20]], index: usize) -> Result<AuthorityProof> {
+/// Build a positional proof from the set validated by `authority_leaves`.
+pub fn authority_proof(addresses: &[Option<[u8; 20]>], index: usize) -> Result<AuthorityProof> {
     ensure!(
         (1..=MAX_VALIDATORS).contains(&addresses.len()),
         "authority count must be between 1 and {MAX_VALIDATORS}"
     );
     ensure!(index < addresses.len(), "authority index outside set");
-    let proof = merkle_proof::<KeccakHasher, _, _>(addresses.iter(), index);
+    let address = addresses[index].context("placeholder authority cannot sign")?;
+    let proof = merkle_proof::<KeccakHasher, _, _>(
+        addresses
+            .iter()
+            .map(|address| address.as_ref().map_or(&[][..], |value| value.as_slice())),
+        index,
+    );
     Ok(AuthorityProof {
         index: index as u32,
-        address: addresses[index],
+        address,
         siblings: proof.proof,
         root: proof.root,
     })
@@ -402,36 +413,45 @@ pub fn decode_mmr_proof(bytes: &[u8]) -> Result<RuntimeLeafProof> {
     decode_full(bytes, "MMR proof")
 }
 
+// BABE/GRANDPA may advertise 1,000 32-byte keys plus weights in a header.
+// This transport bound is deliberately independent of the BEEFY signer limit.
+pub const MAX_HEADER_DIGEST_BYTES: usize = 1000 * 40 + 128;
+
 pub fn decode_beefy_digest(bytes: &[u8]) -> Result<Option<Hash32>> {
     use sp_consensus_beefy::ConsensusLog;
-    use sp_runtime::generic::DigestItem;
     ensure!(
-        bytes.len() <= MAX_VALIDATORS * 33 + 32,
+        bytes.len() <= MAX_HEADER_DIGEST_BYTES,
         "digest exceeds body limit"
     );
     let mut input = bytes;
     match take(&mut input, 1)?[0] {
         0 => {
-            let len = vector_len(&mut input, MAX_VALIDATORS * 33 + 16)?;
+            let len = vector_len(&mut input, MAX_HEADER_DIGEST_BYTES)?;
             take(&mut input, len)?;
         }
         4..=6 => {
-            take(&mut input, 4)?;
-            let len = vector_len(&mut input, MAX_VALIDATORS * 33 + 16)?;
+            let engine = take(&mut input, 4)?;
+            let limit = if engine == b"BEEF" {
+                MAX_VALIDATORS * 33 + 16
+            } else {
+                MAX_HEADER_DIGEST_BYTES
+            };
+            let len = vector_len(&mut input, limit)?;
             take(&mut input, len)?;
         }
         8 => {}
         _ => anyhow::bail!("unknown digest variant"),
     }
     ensure!(input.is_empty(), "digest has trailing bytes");
-    let item: DigestItem = decode_full(bytes, "digest")?;
-    let DigestItem::Consensus(engine, payload) = item else {
-        return Ok(None);
-    };
-    if engine != *b"BEEF" {
+    // Only decode/allocate a BEEFY consensus payload. Other engines have already
+    // passed complete canonical framing and their independent transport limit.
+    if bytes[0] != 4 || &bytes[1..5] != b"BEEF" {
         return Ok(None);
     }
-    let mut input = payload.as_slice();
+    let mut framed = &bytes[5..];
+    let len = vector_len(&mut framed, MAX_VALIDATORS * 33 + 16)?;
+    let payload = take(&mut framed, len)?;
+    let mut input = payload;
     match take(&mut input, 1)?[0] {
         1 => {
             scan_authorities(&mut input)?;
@@ -449,7 +469,7 @@ pub fn decode_beefy_digest(bytes: &[u8]) -> Result<Option<Hash32>> {
         input.is_empty(),
         "BEEFY consensus digest has trailing bytes"
     );
-    let consensus: ConsensusLog<AuthorityId> = decode_full(&payload, "BEEFY consensus digest")?;
+    let consensus: ConsensusLog<AuthorityId> = decode_full(payload, "BEEFY consensus digest")?;
     match consensus {
         ConsensusLog::MmrRoot(root) => Ok(Some(root.into())),
         ConsensusLog::AuthoritiesChange(set) => {
@@ -462,7 +482,7 @@ pub fn decode_beefy_digest(bytes: &[u8]) -> Result<Option<Hash32>> {
                         .expect("fixed authority width")
                 })
                 .collect();
-            authority_addresses(&keys)?;
+            authority_leaves(&keys)?;
             Ok(None)
         }
         ConsensusLog::OnDisabled(_) => Ok(None),
@@ -526,6 +546,24 @@ pub struct ValidatedCommitment {
     pub signed_indices: Vec<u32>,
 }
 
+#[derive(Debug)]
+pub struct InsufficientSignatures {
+    pub valid: usize,
+    pub required: usize,
+}
+
+impl std::fmt::Display for InsufficientSignatures {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "BEEFY signatures pending: {} valid, {} required",
+            self.valid, self.required
+        )
+    }
+}
+
+impl std::error::Error for InsufficientSignatures {}
+
 pub fn validate_signed_commitment(
     bytes: &[u8],
     authority_keys: &[[u8; 33]],
@@ -536,8 +574,8 @@ pub fn validate_signed_commitment(
         (1..=MAX_VALIDATORS).contains(&authority_keys.len()),
         "authority count must be between 1 and {MAX_VALIDATORS}"
     );
-    authority_addresses(authority_keys)?;
-    let signed = decode_versioned_finality_proof(bytes)?;
+    authority_leaves(authority_keys)?;
+    let mut signed = decode_versioned_finality_proof(bytes)?;
     if let Some(set_id) = expected_set_id {
         ensure!(
             signed.commitment.validator_set_id == set_id,
@@ -560,43 +598,56 @@ pub fn validate_signed_commitment(
     let mmr_root: Hash32 = root.as_slice().try_into().expect("checked length");
     ensure!(mmr_root != [0; 32], "mh payload root must be nonzero");
 
-    let authority_ids: Vec<_> = authority_keys
-        .iter()
-        .map(|key| AuthorityId::unchecked_from(*key))
-        .collect();
-    let validator_set = ValidatorSet::new(authority_ids, signed.commitment.validator_set_id)
-        .ok_or_else(|| anyhow::anyhow!("authority set cannot be empty"))?;
     ensure!(
-        signed.signatures.len() == validator_set.len(),
+        signed.signatures.len() == authority_keys.len(),
         "signature vector does not match authority set"
     );
-    for signature in signed.signatures.iter().flatten() {
+    let commitment_bytes = signed.commitment.encode();
+    for (slot, key) in signed.signatures.iter_mut().zip(authority_keys) {
+        let Some(signature) = slot.as_ref() else {
+            continue;
+        };
         let raw: &[u8] = signature.as_ref();
-        ensure!(raw[64] <= 1, "unsupported ECDSA recovery id");
-        let parsed = K256Signature::from_slice(&raw[..64]).context("invalid ECDSA signature")?;
-        ensure!(
-            parsed.normalize_s().is_none(),
-            "high-S ECDSA signature rejected"
-        );
+        let parity = match raw[64] {
+            0 | 1 => raw[64],
+            27 | 28 => raw[64] - 27,
+            _ => {
+                *slot = None;
+                continue;
+            }
+        };
+        let Ok(parsed) = K256Signature::from_slice(&raw[..64]) else {
+            *slot = None;
+            continue;
+        };
+        let mut normalized = [0u8; 65];
+        if let Some(low_s) = parsed.normalize_s() {
+            normalized[..64].copy_from_slice(&low_s.to_bytes());
+            normalized[64] = parity ^ 1;
+        } else {
+            normalized[..64].copy_from_slice(&raw[..64]);
+            normalized[64] = parity;
+        }
+        let normalized = Signature::unchecked_from(normalized);
+        let authority = AuthorityId::unchecked_from(*key);
+        *slot = <AuthorityId as BeefyAuthorityId<Keccak256>>::verify(
+            &authority,
+            &normalized,
+            &commitment_bytes,
+        )
+        .then_some(normalized);
     }
-    let valid = signed
-        .verify_signatures::<AuthorityId, Keccak256>(signed.commitment.block_number, &validator_set)
-        .map_err(|_| anyhow::anyhow!("BEEFY signature layout does not match authority set"))?;
-    ensure!(
-        valid.len() == signed.signature_count(),
-        "one or more available BEEFY signatures is invalid"
-    );
-    ensure!(
-        valid.len() >= authority_keys.len() - (authority_keys.len() - 1) / 3,
-        "insufficient BEEFY signatures"
-    );
+    let valid = signed.signature_count();
+    let required = authority_keys.len() - (authority_keys.len() - 1) / 3;
+    if valid < required {
+        return Err(InsufficientSignatures { valid, required }.into());
+    }
     let signed_indices = signed
         .signatures
         .iter()
         .enumerate()
         .filter_map(|(index, signature)| signature.as_ref().map(|_| index as u32))
         .collect();
-    let commitment_bytes = signed.commitment.encode();
     Ok(ValidatedCommitment {
         signed,
         commitment_hash: keccak256(&commitment_bytes),
@@ -991,21 +1042,21 @@ mod tests {
     #[test]
     fn authority_tree_preserves_positions_and_bounds() {
         let keys: Vec<[u8; 33]> = (1..=3).map(scalar_key).collect();
-        let addresses = authority_addresses(&keys).expect("valid keys");
+        let addresses = authority_leaves(&keys).expect("valid keys");
         let root = authority_root(&addresses).expect("root");
         for index in 0..keys.len() {
             let proof = authority_proof(&addresses, index).expect("proof");
             assert!(verify_authority_proof(&root, &proof, keys.len()));
         }
-        assert!(authority_addresses(&[]).is_err());
-        assert!(authority_addresses(&[keys[0], keys[0]]).is_err());
+        assert!(authority_leaves(&[]).is_err());
+        assert!(authority_leaves(&[keys[0], keys[0]]).is_err());
         assert!(authority_proof(&addresses, addresses.len()).is_err());
         assert!(authority_proof(&[], 0).is_err());
         assert!(!verify_authority_proof(
             &root,
             &AuthorityProof {
                 index: 3,
-                address: addresses[0],
+                address: addresses[0].unwrap(),
                 siblings: Vec::new(),
                 root,
             },

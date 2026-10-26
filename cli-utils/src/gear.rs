@@ -51,9 +51,7 @@ pub struct GearSignerArgs {
     #[clap(flatten)]
     pub connection: GearConnectionArgs,
 
-    /// Substrate URI that identifies a user by a mnemonic phrase or
-    /// provides default users from the keyring (e.g., "//Alice", "//Bob",
-    /// etc.).
-    #[arg(long = "gear-suri", env = "GEAR_SURI", default_value = "//Alice")]
+    /// Explicit Substrate signer URI. Empty permits read-only commands, never signing.
+    #[arg(long = "gear-suri", env = "GEAR_SURI", default_value = "")]
     pub suri: String,
 }

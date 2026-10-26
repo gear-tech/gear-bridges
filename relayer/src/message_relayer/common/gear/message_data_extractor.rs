@@ -131,6 +131,8 @@ async fn run_inner(
         let (block, authority_set_id) = block_data;
         let messages = common::message_queued_events_of(&block);
         let block_hash = block.hash();
+        let queue_id =
+            super::queue_id_at(&this.api_provider.client(), block.number(), block_hash).await?;
         let Some(sender) = this.sender.upgrade() else {
             log::info!("Unable to upgrade sender channel.");
 
@@ -146,6 +148,7 @@ async fn run_inner(
             log::trace!("Processing message in block: {message_queued:?}");
 
             let message_in_block = MessageInBlock {
+                queue_id: Some(queue_id),
                 message: message_queued,
                 block: GearBlockNumber(block.number()),
                 block_hash: block_hash.0.into(),

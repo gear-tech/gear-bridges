@@ -68,7 +68,10 @@ impl Relayer {
         eth_unprocessed_block_storage_path: String,
         cutover_seal: Option<std::path::PathBuf>,
         approved_manager_code: Option<H256>,
+        root_minimum_receipt_slot: Option<u64>,
         native_wrapper_approval: Option<Arc<gear_common::native_wrapper::ApprovedNativeWrapper>>,
+        approved_gear_gas_limit: Option<u64>,
+        historical_receipts: Vec<gear_common::receipt_framing::HistoricalReceiptApproval>,
     ) -> anyhow::Result<Self> {
         cutover::reject_sealed(std::path::Path::new(&storage_path))?;
         cutover::reject_sealed(std::path::Path::new(&eth_unprocessed_block_storage_path))?;
@@ -123,6 +126,7 @@ impl Relayer {
             &client,
             cutover_seal.as_deref(),
             approved_manager_code,
+            root_minimum_receipt_slot,
             native_wrapper_approval.as_deref(),
         )
         .await?;
@@ -152,7 +156,13 @@ impl Relayer {
             Some(erc20_manager_address),
         )
         .with_native_wrapper_approval(native_wrapper_approval)
+        .with_historical_receipt_approvals(historical_receipts)?
         .with_signer_ownership(signer_ownership);
+        let gear_message_sender = if let Some(limit) = approved_gear_gas_limit {
+            gear_message_sender.with_approved_gear_gas_limit(limit)?
+        } else {
+            gear_message_sender
+        };
 
         let proof_composer = ProofComposer::new(
             api_provider,

@@ -351,7 +351,7 @@ contract MessageQueueTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
+            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -403,7 +403,7 @@ contract MessageQueueTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
+            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -464,7 +464,7 @@ contract MessageQueueTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
+            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -516,7 +516,7 @@ contract MessageQueueTest is Test, Base {
             nonce: messageNonce++,
             source: governanceAdmin.governance(),
             destination: address(governanceAdmin),
-            payload: UnpauseProxyMessage({proxy: address(messageQueue)}).pack()
+            payload: UnpauseProxyMessage({proxy: address(messageQueue)}).pack(_unpauseControl(address(messageQueue)))
         });
         assertEq(messageQueue.isProcessed(message3.nonce), false);
 
@@ -547,7 +547,7 @@ contract MessageQueueTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
+            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -599,7 +599,7 @@ contract MessageQueueTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: UnpauseProxyMessage({proxy: address(messageQueue)}).pack()
+            payload: UnpauseProxyMessage({proxy: address(messageQueue)}).pack(_unpauseControl(address(messageQueue)))
         });
         assertEq(messageQueue.isProcessed(message3.nonce), false);
 
@@ -641,7 +641,7 @@ contract MessageQueueTest is Test, Base {
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
                 proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
-            }).pack()
+            }).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -761,7 +761,7 @@ contract MessageQueueTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
+            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -830,7 +830,7 @@ contract MessageQueueTest is Test, Base {
             destination: address(governanceAdmin),
             payload: UpgradeProxyMessage({
                 proxy: address(messageQueue), newImplementation: address(newImplementationMock), data: ""
-            }).pack()
+            }).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message2.nonce), false);
 
@@ -908,7 +908,7 @@ contract MessageQueueTest is Test, Base {
             nonce: messageNonce++,
             source: governancePauser.governance(),
             destination: address(governancePauser),
-            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack()
+            payload: PauseProxyMessage({proxy: address(messageQueue)}).pack(_control())
         });
         assertEq(messageQueue.isProcessed(message1.nonce), false);
 
@@ -1124,11 +1124,9 @@ contract MessageQueueTest is Test, Base {
         assertEq(messageQueue.getMerkleRoot(42), root);
     }
 
-    function test_PublicationRequiresBeefyFloor() public {
+    function test_EmptyProgressRequiresBeefyFloor() public {
         vm.store(address(messageQueue), bytes32(uint256(14)), bytes32(0));
 
-        vm.expectRevert(IMessageQueue.InvalidBeefyVerifier.selector);
-        messageQueue.submitMerkleRoot(100, bytes32(uint256(0x22)), "");
         vm.expectRevert(IMessageQueue.InvalidBeefyVerifier.selector);
         messageQueue.submitEmptyQueueProgress(100, "");
         assertEq(messageQueue.genesisBlock(), 0);

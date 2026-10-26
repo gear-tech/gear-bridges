@@ -84,6 +84,7 @@ impl Relayer {
             .replay_from_block(event_start_block, GearEventStream::Queued)
             .await?;
         let tx_manager = TransactionManager::new(storage.clone())
+            .with_source_api(api_provider.client())
             .with_lane_approvals(eth_api.clone(), lane_approvals);
         tx_manager.load_from_storage().await?;
         eth_api

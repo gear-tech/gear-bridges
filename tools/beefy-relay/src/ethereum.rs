@@ -3875,13 +3875,19 @@ mod tests {
                     .await?;
                 let included = ethereum
                     .verify_accepted_commitment(hash, &anchor, &snapshot)
-                    .await?;
+                    .await
+                    .context("external accepted commitment")?;
                 let finalized = ethereum
                     .api
                     .get_finalized_receipt(hash)
-                    .await?
+                    .await
+                    .context("external receipt finality")?
                     .context("external effect did not finalize")?;
-                let mut view = ethereum.api.verified_finalized_view().await?;
+                let mut view = ethereum
+                    .api
+                    .verified_finalized_view()
+                    .await
+                    .context("external verification view")?;
                 assert_eq!(
                     ethereum
                         .verify_accepted_commitment_evidence(
@@ -3892,7 +3898,8 @@ mod tests {
                             &anchor,
                             &snapshot,
                         )
-                        .await?,
+                        .await
+                        .context("external finalized effect proof")?,
                     included
                 );
                 // A real successful receipt with the right event bytes but a

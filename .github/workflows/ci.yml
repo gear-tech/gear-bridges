@@ -401,6 +401,11 @@ jobs:
           docker pull ghcr.io/gear-tech/node:v2.1.1
           docker run --name "$NODE_CONTAINER_NAME" --detach --rm --publish 127.0.0.1:9944:9944 ghcr.io/gear-tech/node:v2.1.1 gear --dev --tmp --rpc-external
 
+      - name: Provision native-test signer ownership
+        run: |
+          signer_lock_dir="$(realpath "$(mktemp -d "$RUNNER_TEMP/bridge-signers.XXXXXX")")"
+          echo "VARA_BRIDGE_SIGNER_LOCK_DIR=$signer_lock_dir" >> "$GITHUB_ENV"
+
       - name: Run retained-manager regressions
         run: |
           cargo test --locked --release -p tests vft_manager::gtest::test_zero_receiver_rejected_without_economic_effects -- --exact --nocapture --test-threads=1

@@ -44,6 +44,11 @@ creation. Separate hosts must use distinct signing accounts: filesystem locks
 are not cross-host nonce coordination. Preserve durable cutover ownership even
 after a process exits.
 
+Native tests that spawn owned signing fixtures require this namespace too. CI
+provisions one private temporary directory per test job and shares it across
+Cargo invocations. Local test runs must likewise provision and export a canonical
+`0700` directory; disposable test directories must not be used by persistent relayers.
+
 Gear signer URIs are explicit (`--gear-suri` / `GEAR_SURI`), with no Alice default.
 Development accounts, including equivalent mnemonic/seed spellings, are rejected
 unless `GEAR_BRIDGE_OWNED_FIXTURE=1` and the endpoint has a numeric loopback host.

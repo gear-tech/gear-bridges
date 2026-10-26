@@ -45,9 +45,10 @@ are not cross-host nonce coordination. Preserve durable cutover ownership even
 after a process exits.
 
 Native tests that spawn owned signing fixtures require this namespace too. CI
-provisions one private temporary directory per test job and shares it across
-Cargo invocations. Local test runs must likewise provision and export a canonical
-`0700` directory; disposable test directories must not be used by persistent relayers.
+provisions one private temporary directory per test job, shares it across Cargo
+invocations, and sets `GEAR_BRIDGE_OWNED_FIXTURE=1` for its numeric-loopback node.
+Local test runs require both settings. Disposable test directories and the
+owned-fixture opt-in must not be used by persistent production relayers.
 
 Gear signer URIs are explicit (`--gear-suri` / `GEAR_SURI`), with no Alice default.
 Development accounts, including equivalent mnemonic/seed spellings, are rejected

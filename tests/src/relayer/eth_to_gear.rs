@@ -538,15 +538,15 @@ async fn test_tx_manager() {
                     .expect("transaction manager failed while retaining a paused receipt"),
                 "transaction manager channel closed before reconciliation evidence arrived"
             );
-            if tx_manager.transactions.read().await.values().any(|tx| {
-                tx.tx.tx_hash == TX_TO_FAIL
-                    && matches!(tx.status, TxStatus::NeedsReconciliation { .. })
-                    && tx
-                        .receipt
-                        .as_ref()
-                        .and_then(|receipt| receipt.initial_response.as_ref())
-                        .is_some()
-            }) {
+            let held_uuid = tx_manager
+                .transactions
+                .read()
+                .await
+                .values()
+                .find(|tx| tx.tx.tx_hash == TX_TO_FAIL)
+                .map(|tx| tx.uuid);
+            let failed = tx_manager.failed.read().await;
+            if held_uuid.is_some_and(|uuid| failed.contains_key(&uuid)) {
                 break;
             }
         }
@@ -557,11 +557,15 @@ async fn test_tx_manager() {
                 .values()
                 .find(|tx| tx.tx.tx_hash == TX_TO_FAIL)
                 .unwrap();
-            assert!(matches!(held.status, TxStatus::NeedsReconciliation { .. }));
+            assert!(matches!(held.status, TxStatus::PreparingSubmission));
             let receipt = held.receipt.as_ref().unwrap();
-            let signed = receipt.signed_submission.as_ref().unwrap();
-            assert!(signed.message_id.is_some());
-            assert!(signed.inclusion_block_hash.is_some());
+            assert!(receipt.signed_submission.is_none());
+            assert!(receipt.initial_response.is_none());
+            assert!(receipt.submission_attempts.is_empty());
+            assert_eq!(
+                held.receipt_event().unwrap().encode(),
+                TRANSACTIONS.get(&TX_TO_FAIL).unwrap().event().encode()
+            );
             receipt.receipt_key
         };
         assert_eq!(

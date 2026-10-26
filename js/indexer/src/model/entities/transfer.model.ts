@@ -97,8 +97,8 @@ export class Transfer {
   destNetwork!: Network;
 
   @Index()
-  @Column({ nullable: false })
-  destination!: string;
+  @Column('varchar', { nullable: true })
+  destination?: string | null;
 
   @Column('enum', { enum: Status, nullable: false })
   status!: Status;

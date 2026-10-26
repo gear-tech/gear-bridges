@@ -1,8 +1,9 @@
-import { Account, PublicClient, WalletClient } from 'viem';
+import { Account, PublicClient, WalletClient, BaseError, ContractFunctionRevertedError } from 'viem';
 import { GearApi, HexString } from '@gear-js/api';
 import { hexToBn } from '@polkadot/util';
+import type { Bytes } from '@polkadot/types';
 
-import { getMessageQueueClient, getProcessMessageArgs } from '../ethereum/index.js';
+import { getMessageQueueClient, getProcessMessageArgs, MessageQueueAbi } from '../ethereum/index.js';
 import { GearClient } from '../vara/index.js';
 import { VaraMessage, Proof } from '../vara/types.js';
 import { messageHash } from './util.js';
@@ -98,6 +99,24 @@ async function prepareOriginalVaraToEthRelay(params: PrepareVaraToEthParams & { 
   const message = await gearClient.findMessageQueuedEvent(originalHash, nonce);
   if (!message) throw new Error('Message with nonce ' + nonce + ' is unavailable in original finalized block ' + blockNumber);
   const hash = messageHash(message);
+  // Read raw storage at historical metadata/hash: an absent ValueQuery is not
+  // evidence for QueueId zero. Unknown runtime/storage remains a release gate.
+  const queueIds = new Map<HexString, bigint>();
+  const queueIdAt = async (at: HexString): Promise<bigint> => {
+    const cached = queueIds.get(at);
+    if (cached !== undefined) return cached;
+    const query = (await gearApi.at(at)).query.gearEthBridge?.queueId;
+    if (!query) throw new Error('HOLD: historical QueueId metadata unavailable at ' + at);
+    const raw = await gearApi.rpc.state.getStorage<Bytes>(query.key(), at);
+    checkDeadline();
+    if (!raw || raw.isEmpty || raw.toU8a(true).length !== 8) {
+      throw new Error('HOLD: historical QueueId evidence unavailable or malformed at ' + at);
+    }
+    const id = BigInt(hexToBn(raw.toHex(), { isLe: true }).toString());
+    queueIds.set(at, id);
+    return id;
+  };
+  const originalQueueId = await queueIdAt(originalHash);
   let scanFrom = 0n;
   let discoveryFloor = 0n;
   let deploymentChecked = false;
@@ -143,6 +162,10 @@ async function prepareOriginalVaraToEthRelay(params: PrepareVaraToEthParams & { 
       }
       let proof: Proof;
       try {
+        if (await queueIdAt(candidateHash) !== originalQueueId) {
+          failures.set(height, 'Stored root belongs to a different authenticated QueueId');
+          return null;
+        }
         proof = await gearClient.fetchMerkleProof(candidateHash, hash);
       } catch (error) {
         failures.set(height, error instanceof Error ? error.message : 'Historical proof unavailable');
@@ -155,6 +178,23 @@ async function prepareOriginalVaraToEthRelay(params: PrepareVaraToEthParams & { 
         failures.set(height, 'Historical inclusion proof does not match the selected stored root');
         return null;
       }
+      const args = getProcessMessageArgs(height, message, proof);
+      try {
+        // Execute the contract's selected-block maturity policy at the retained
+        // finalized pin, including its governance-specific delay. Never borrow
+        // the timestamp of the original message or an earlier cumulative root.
+        await ethereumPublicClient.simulateContract({
+          address: messageQueueAddress, abi: MessageQueueAbi, functionName: 'processMessage',
+          args, blockNumber: finalized.number,
+        });
+      } catch (error) {
+        const revert = error instanceof BaseError ? error.walk(cause => cause instanceof ContractFunctionRevertedError) : undefined;
+        const reason = revert instanceof ContractFunctionRevertedError ? revert.data?.errorName : undefined;
+        if (!reason || !['MerkleRootDelayNotPassed', 'InvalidMerkleProof'].includes(reason)) throw error;
+        failures.set(height, reason);
+        checkDeadline();
+        return null;
+      }
       if (!(await gearApi.blocks.getBlockHash(priorSource.height)).eq(priorSource.hash) ||
           (priorEthereum && (await ethereumPublicClient.getBlock({ blockNumber: priorEthereum.height })).hash !== priorEthereum.hash) ||
           !(await gearApi.blocks.getBlockHash(height)).eq(candidateHash) ||
@@ -165,7 +205,7 @@ async function prepareOriginalVaraToEthRelay(params: PrepareVaraToEthParams & { 
       }
       checkDeadline();
       statusCb('Historical message proof matched stored root', { blockNumber: height.toString(), merkleRoot: root, msgHash: hash });
-      return { blockNumber: height, message, proof, args: getProcessMessageArgs(height, message, proof) };
+      return { blockNumber: height, message, proof, args };
     };
     const exact = await queue.getMerkleRoot(blockNumber, finalized.number);
     if (exact) {

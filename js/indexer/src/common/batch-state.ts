@@ -49,7 +49,7 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     if (activeOnBlock) {
       condition =
         activeOnBlock === 'latest'
-          ? { where: { isRemoved: false, upgradedTo: IsNull() } }
+          ? { where: { isActive: true, isRemoved: false, upgradedTo: IsNull() } }
           : {
               where: [
                 { activeSinceBlock: LessThanOrEqual(activeOnBlock), activeToBlock: IsNull() },
@@ -62,6 +62,15 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
 
     const pairs = await this._ctx.store.find(Pair, condition);
 
+    const vara = new Set<string>(), ethereum = new Set<string>();
+    for (const pair of pairs) {
+      if (pair.tokenSupply !== Network.Vara && pair.tokenSupply !== Network.Ethereum ||
+          vara.has(pair.varaToken.toLowerCase()) || ethereum.has(pair.ethToken.toLowerCase())) {
+        throw new Error('HOLD: conflicting active pair identity or supply');
+      }
+      vara.add(pair.varaToken.toLowerCase());
+      ethereum.add(pair.ethToken.toLowerCase());
+    }
     for (const pair of pairs) {
       if (this._network === Network.Ethereum) {
         this._pairs.set(pair.ethToken, pair);
@@ -82,12 +91,12 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
       await new Promise((resolve) => setTimeout(resolve, PAIR_RETRY_DELAY));
 
       if (this._network === Network.Ethereum) {
-        pair = await this._ctx.store.get(Pair, { where: { ethToken: src } });
+        pair = await this._ctx.store.get(Pair, { where: { ethToken: src, isActive: true, isRemoved: false, upgradedTo: IsNull() } });
         if (pair) {
           this._pairs.set(pair.ethToken, pair);
         }
       } else {
-        pair = await this._ctx.store.get(Pair, { where: { varaToken: src } });
+        pair = await this._ctx.store.get(Pair, { where: { varaToken: src, isActive: true, isRemoved: false, upgradedTo: IsNull() } });
         if (pair) {
           this._pairs.set(pair.varaToken, pair);
         }
@@ -203,7 +212,10 @@ export abstract class BaseBatchState<Context extends SubstrateContext<Store, any
     transfer.sender = transfer.sender.toLowerCase();
     transfer.receiver = transfer.receiver.toLowerCase();
     try {
-      transfer.destination = await this._getDestinationAddress(transfer.source);
+      // An absent mapping is a retained inbound liability, not a fabricated
+      // destination or refund. Outbound requests still require a real mapping.
+      transfer.destination = this._network === Network.Ethereum && !this._pairs.has(transfer.source)
+        ? null : await this._getDestinationAddress(transfer.source);
     } catch (error) {
       this._log.error(
         {

@@ -11,6 +11,7 @@ import { assertBridgeReply, submitVaraBridgeRequest, type BridgeReply } from '..
 import { Extrinsic, FormattedValues } from '../../types';
 
 import { usePayFees } from './use-pay-fees';
+import { useTokenAdmission } from '../use-token-admission';
 import { usePrepareApprove } from './use-prepare-approve';
 import { usePrepareMint } from './use-prepare-mint';
 import { usePrepareRequestBridging } from './use-prepare-request-bridging';
@@ -27,6 +28,7 @@ type Params = {
 function useSendVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, onTransactionStart }: Params) {
   const { api } = useApi();
   const { token } = useBridgeContext();
+  const admit = useTokenAdmission(token);
 
   const prepareTxs = usePrepareVaraTxs({
     bridgingFee,
@@ -64,6 +66,7 @@ function useSendVaraTxs({ bridgingFee, shouldPayBridgingFee, vftManagerFee, onTr
     });
     return submitVaraBridgeRequest(
       async () => {
+        await admit(token, { managerFee: vftManagerFee });
         const original = await signAndSend.mutateAsync({
           extrinsic: api.tx.utility.batchAll(extrinsics),
           destinations: transactions.map(({ programId }) => programId),

@@ -148,3 +148,22 @@ test('observation keeps signer ownership and durable progress beyond an aggregat
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+// Reconstructed from HTML VB-40 at 7fe1b032dff5143df41b1df22ecaf23c4e2f7cb6.
+// Candidate uses the real authorization function; no original PoC bundle claimed.
+test('HTML7fe1b032 separate faucet authentication and exact POST origin', () => {
+  const { approvedOrigin, authorizeRequest } = require('./test-faucet.cjs');
+  const origin = 'https://faucet.example.test';
+  assert.equal(approvedOrigin(origin).origin, origin);
+  for (const value of ['http://faucet.example.test', 'https://faucet.example.test/path', 'https://u:p@faucet.example.test', 'https://*.example.test'])
+    assert.throws(() => approvedOrigin(value));
+  const headers = { origin, 'x-faucet-authenticated': 'dedicated-faucet-user' };
+  assert.doesNotThrow(() => authorizeRequest({ method: 'POST', headers }, origin));
+  assert.doesNotThrow(() => authorizeRequest({ method: 'GET', headers: { 'x-faucet-authenticated': 'dedicated-faucet-user' } }, origin));
+  for (const rejected of [
+    { ...headers, origin: 'https://funds.example.test' },
+    { ...headers, origin: undefined },
+    { ...headers, origin: 'null' },
+    { origin },
+  ]) assert.throws(() => authorizeRequest({ method: 'POST', headers: rejected }, origin), error => error.code === 403);
+});

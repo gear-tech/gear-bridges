@@ -9,9 +9,12 @@ import {
   type InboundProofProfile,
   type NativeWrapperMode,
 } from '@gear-js/bridge';
+import { nativeAssetKind, validateTokenPairInventory } from '@gear-js/bridge';
 import { Sails } from 'sails-js';
 import { SailsIdlParser } from 'sails-js-parser';
 
+import { assertCurrentToken } from '../src/context/token-selection.ts';
+import type { Token } from '../src/context/tokens';
 import { createNativeRedemptionReader } from '../src/features/swap/native-redemption.ts';
 
 const actor: HexString = `0x${'ab'.repeat(32)}`;
@@ -68,7 +71,18 @@ for (const mode of ['escrow-v1', 'held-escrow-v2'] as const) {
     },
     forks: [{ name: 'electra', epoch: 0n, version: '0xABCDEFAB' }],
   };
+  // Reconstructed from supplied HTML, audited 7fe1b032: VB-38/39.
   const approved = immutableInboundProfile(profile);
+  assert.equal(nativeAssetKind(approved, actor, token, 'Gear'), 'vara');
+  assert.equal(nativeAssetKind(approved, `0x${'99'.repeat(32)}`, token, 'Gear'), undefined);
+  assert.equal(nativeAssetKind(approved, actor, token, 'Ethereum'), undefined);
+  const pair = { varaToken: actor, ethToken: token, tokenSupply: 'Gear', isActive: true, symbol: 'ETH VARA USDC' };
+  assert.doesNotThrow(() => validateTokenPairInventory([pair], [[actor, token, 'Gear']]));
+  assert.throws(
+    () => validateTokenPairInventory([{ ...pair, varaToken: `0x${'99'.repeat(32)}` }], [[actor, token, 'Gear']]),
+    /HOLD/,
+  );
+  assert.throws(() => validateTokenPairInventory([pair, pair], [[actor, token, 'Gear']]), /HOLD/);
   assert.equal(approved.nativeWrapper!.programId, actor);
   assert.equal(approved.nativeWrapper!.idlSha256, digest(wrapperIdl));
   assert.equal(Object.isFrozen(approved.nativeWrapper), true);
@@ -120,6 +134,47 @@ for (const mode of ['escrow-v1', 'held-escrow-v2'] as const) {
   ])
     assert.throws(() => createNativeRedemptionReader(api, changed), /HOLD/);
   assert.equal(calls, 1, 'Rejected capability bindings must not query or sign');
+}
+// Reconstructed from supplied HTML 7fe1b032: late indexer/profile replies cannot enable a wallet operation.
+const selected: Token = {
+  address: actor,
+  destinationAddress: token,
+  name: 'spoof ETH',
+  symbol: 'USDC',
+  displaySymbol: 'USDC',
+  decimals: 12,
+  isNative: true,
+  supply: 'Gear',
+  network: 'vara',
+  isActive: true,
+};
+const selection = {
+  api: {},
+  client: {},
+  NETWORK_PRESET: {},
+  pairs: [selected],
+  selectedToken: selected,
+  getActiveToken: () => selected,
+};
+assert.doesNotThrow(() => assertCurrentToken(selection, selection, selected));
+for (const changed of [
+  { ...selection, selectedToken: undefined },
+  { ...selection, selectedToken: { ...selected, address: `0x${'99'.repeat(32)}` as const } },
+  { ...selection, NETWORK_PRESET: {} },
+  { ...selection, api: {} },
+  { ...selection, client: {} },
+  { ...selection, pairs: undefined },
+  { ...selection, getActiveToken: () => ({ ...selected, destinationAddress: `0x${'99'.repeat(20)}` as const }) },
+  { ...selection, getActiveToken: () => ({ ...selected, supply: 'Ethereum' as const }) },
+  { ...selection, getActiveToken: () => ({ ...selected, isActive: false }) },
+]) {
+  let signed = false;
+  await assert.rejects(async () => {
+    await Promise.resolve();
+    assertCurrentToken(selection, changed, selected);
+    signed = true;
+  }, /HOLD/);
+  assert.equal(signed, false);
 }
 console.log(
   'Native profile assertions passed: exact v1/v2 IDLs, read-only shared codec, mode binding and case-normalized approvals',

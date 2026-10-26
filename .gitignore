@@ -24,6 +24,7 @@ js/bridge-js/lib/
 js/common/lib/
 js/indexer/lib/
 js/frontend/dist/
+js/frontend/dist-faucet/
 js/indexer/assets/
 js/**/*.log
 *.log

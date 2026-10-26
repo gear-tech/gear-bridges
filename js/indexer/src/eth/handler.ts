@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { In, IsNull, MoreThan, Not } from 'typeorm';
 import * as bridgingPayment from './abi/bridging-payment.js';
@@ -12,7 +11,7 @@ import { config } from './config.js';
 import { createEthereumEvidenceClients, createReceiptAuthenticator, recheckFinality, receiptDate,
   receiptAuthorization, proofReference, assertReceiptAuthorization, assertAuthorizationCheckpoint, requalificationLinksFor,
   requireFinalizedBatch, retainCheckpoint, type EthereumEvidenceClients, type AuthenticatedReceipt } from './finality.js';
-import { assertRetainedReceipt, qualifyOutboundCompletion } from './completion.js';
+import { assertRetainedReceipt, authenticateSourceReceipt, qualifyOutboundCompletion } from './completion.js';
 
 let pendingCompletionCursor: string | undefined;
 let pendingCompletionBatch: string | undefined;
@@ -131,12 +130,21 @@ export async function handleBatch(ctx: Context): Promise<void> {
       const blockNumber = BigInt(receipt.blockNumber);
       if (address === config.erc20Manager) {
         const [from, to, token, amount] = erc20ManagerAbi.events.BridgingRequested.decode(log);
-        const firstDeposit = !receipt.logs.slice(0, localIndex).some((entry) => entry.address === config.erc20Manager &&
-          entry.topics[0] === erc20ManagerAbi.events.BridgingRequested.topic);
+        // Resolve retained rows by authenticated coordinates, never the old
+        // concatenated nonce (block 1/tx 23 aliases block 12/tx 3).
+        const retained = await ctx.store.find(Transfer, { where: { sourceNetwork: Network.Ethereum, txHash } });
+        const matches: Transfer[] = [];
+        for (const candidate of retained) {
+          const source = await authenticateSourceReceipt(clients, candidate, config.erc20Manager, checkpoint, authenticate);
+          if (!source) throw new Error('HOLD: retained source row cannot be authenticated');
+          if (source.localLogIndex === localIndex) matches.push(candidate);
+        }
+        if (matches.length > 1) throw new Error('HOLD: ambiguous retained deposit coordinates');
+        if (matches.length) continue; // Preserve original IDs, nonce, status and authorization.
         const transactionIndex = BigInt(receipt.transactionIndex);
         await state.addTransfer(new Transfer({
-          id: randomUUID(), txHash, blockNumber, timestamp,
-          nonce: ethNonce(firstDeposit ? `${blockNumber}${transactionIndex}` : `${blockNumber}:${transactionIndex}:${localIndex}`),
+          id: `eth:${blockNumber}:${transactionIndex}:${localIndex}`, txHash, blockNumber, timestamp,
+          nonce: ethNonce(`${blockNumber}:${transactionIndex}:${localIndex}`),
           sourceTransactionIndex: transactionIndex, sourceLogIndex: BigInt(localIndex),
           sourceReceiptAuth: { ...receiptAuthorization(original), localLogIndex: localIndex },
           sourceNetwork: Network.Ethereum, source: token, destNetwork: Network.Vara,
@@ -160,7 +168,10 @@ export async function handleBatch(ctx: Context): Promise<void> {
       } else if (address === config.msgQ) {
         const [height, root] = messageQueueAbi.events.MerkleRoot.decode(log);
         state.newMerkleRoot(height, root, blockNumber, txHash);
-      } else state.bridgingPaid(txHash);
+      } else {
+        bridgingPayment.events.FeePaid.decode(log);
+        state.bridgingPaid(txHash);
+      }
     }
   }
 

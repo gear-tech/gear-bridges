@@ -1,8 +1,4 @@
-import { HexString } from '@gear-js/api';
-
-import { fetchWithGuard } from '@/utils';
-
-const API_URL = import.meta.env.VITE_FAUCET_API_URL as string;
+import type { HexString } from '@gear-js/api';
 
 const getErrorMessage = async (response: Response) => {
   const result = (await response.json()) as unknown;
@@ -11,11 +7,19 @@ const getErrorMessage = async (response: Response) => {
     return result.error;
 };
 
-const FETCH_PARAMETERS = {
-  method: 'POST',
-  getErrorMessage,
-  isJson: false,
-} as const;
+async function request(parameters: (VaraPayload & { token: string }) | (EthPayload & { token: string })) {
+  const response = await fetch('/faucet/bridge/request', {
+    method: 'POST',
+    credentials: 'same-origin',
+    mode: 'same-origin',
+    redirect: 'error',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(parameters),
+  });
+  if (!response.ok) throw new Error((await getErrorMessage(response)) || 'Faucet request could not be confirmed');
+  return response;
+}
 
 type VaraPayload = {
   address: string;
@@ -28,14 +32,12 @@ type EthPayload = {
 };
 
 type GetBalanceParameters<T> = {
-  token: string; // hCaptcha token
+  token: string; // Turnstile proof, validated by the existing payout service.
 } & T;
 
-const getVaraAccountBalance = (parameters: GetBalanceParameters<VaraPayload>) =>
-  fetchWithGuard({ ...FETCH_PARAMETERS, url: `${API_URL}/bridge/request`, parameters });
+const getVaraAccountBalance = (parameters: GetBalanceParameters<VaraPayload>) => request(parameters);
 
-const getEthTokenBalance = (parameters: GetBalanceParameters<EthPayload>) =>
-  fetchWithGuard({ ...FETCH_PARAMETERS, url: `${API_URL}/bridge/request`, parameters });
+const getEthTokenBalance = (parameters: GetBalanceParameters<EthPayload>) => request(parameters);
 
 export { getVaraAccountBalance, getEthTokenBalance };
 export type { GetBalanceParameters };

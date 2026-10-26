@@ -16,6 +16,9 @@ interface CutoverStatus {
   transfer_count: number;
   completed_transfer_count: number;
   in_flight_transfer_count: number;
+  generation: string | number;
+  predecessor_generation: string | number | null;
+  custody_started: boolean;
 }
 
 const actor = (id: unknown): id is string => typeof id === 'string' && /^0x[0-9a-f]{64}$/.test(id) && id !== ZERO_ADDRESS;
@@ -37,6 +40,8 @@ async function queryStatus(ctx: ProcessorContext, block: Block, id: string): Pro
     throw new Error('HOLD: invalid manager cutover phase');
   }
   slot(status.minimum_receipt_slot);
+  slot(status.generation);
+  if (status.predecessor_generation !== null) slot(status.predecessor_generation);
   if (status.last_receipt_slot !== null) slot(status.last_receipt_slot);
   return status;
 }
@@ -103,6 +108,7 @@ export async function authenticateManagerRouting(
     const boundary = slot(source.last_receipt_slot);
     const destination = await queryStatus(ctx, block, successor);
     if (destination.predecessor !== current || slot(destination.minimum_receipt_slot) !== boundary + 1n ||
+        destination.predecessor_generation === null || slot(destination.predecessor_generation) !== slot(source.generation) ||
         destination.config_fingerprint !== source.config_fingerprint) {
       throw new Error('HOLD: mismatched retained manager successor');
     }

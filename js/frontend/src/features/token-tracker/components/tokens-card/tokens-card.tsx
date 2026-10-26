@@ -7,7 +7,7 @@ import { ReactNode } from 'react';
 import EthSVG from '@/assets/eth.svg?react';
 import VaraSVG from '@/assets/vara.svg?react';
 import { useTokens } from '@/context';
-import { GetBalanceButton } from '@/features/faucet';
+import { FaucetLink } from '@/components/faucet-link';
 import { NETWORK } from '@/features/swap/consts';
 import {
   useEthAccount,
@@ -133,7 +133,7 @@ function VaraTokensCard() {
       useBurn={useBurnVaraTokens}
       useFTBalances={useVaraFTBalances}
       useAccountBalance={useVaraAccountBalance}
-      renderNativeActions={() => <GetBalanceButton.VaraAccount />}
+      renderNativeActions={() => <FaucetLink />}
     />
   );
 }
@@ -149,12 +149,8 @@ function EthTokensCard() {
       useBurn={useBurnEthTokens}
       useFTBalances={useEthFTBalances}
       useAccountBalance={useEthAccountBalance}
-      renderNativeActions={(address, onSuccess) => (
-        <GetBalanceButton.EthToken address={address} symbol="ETH" onSuccess={onSuccess} />
-      )}
-      renderTokenActions={(address, symbol, onSuccess) => (
-        <GetBalanceButton.EthToken address={address} symbol={symbol} onSuccess={onSuccess} />
-      )}
+      renderNativeActions={() => <FaucetLink />}
+      renderTokenActions={() => <FaucetLink />}
     />
   );
 }

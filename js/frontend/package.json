@@ -6,8 +6,15 @@
   "scripts": {
     "start": "vite",
     "build": "vite build",
+    "build:faucet": "vite build --mode faucet",
+    "serve": "serve -s dist --config serve.json",
+    "serve:faucet": "serve -s dist-faucet --config serve.json",
+    "test:policy": "node --experimental-strip-types test/web-policy.test.ts",
     "test": "node --experimental-strip-types test/submission.test.ts && node --experimental-strip-types test/native-profile.test.ts",
     "preview": "vite preview",
+    "preview:faucet": "vite preview --mode faucet",
+    "generate:sails": "node generate-sails.mjs",
+    "check:sails": "node generate-sails.mjs --check",
     "codegen": "graphql-codegen --require dotenv/config"
   },
   "dependencies": {
@@ -32,7 +39,6 @@
     "graphql-ws": "6.0.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-gtm-module": "2.0.11",
     "react-hook-form": "7.69.0",
     "react-number-format": "5.4.4",
     "react-router-dom": "7.11.0",
@@ -49,9 +55,9 @@
     "@polkadot/types": "16.4.6",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
-    "@types/react-gtm-module": "2.0.4",
     "sails-js-parser": "0.5.0",
     "sass": "1.97.1",
+    "serve": "14.2.5",
     "typescript": "5.9.2",
     "vite": "7.1.5"
   }

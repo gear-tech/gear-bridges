@@ -73,7 +73,7 @@ export async function reconcileReceiptSettlements(
       if (transfer.completionAuth || settlement.matched) throw new Error('HOLD: authenticated receipt settlement effect changed');
     };
     if (transfer.status === Status.Failed || transfer.source.toLowerCase() !== d.eth_token_id.toLowerCase() ||
-        transfer.destination.toLowerCase() !== d.vara_token_id.toLowerCase() ||
+        (transfer.destination != null && transfer.destination.toLowerCase() !== d.vara_token_id.toLowerCase()) ||
         transfer.sender.toLowerCase() !== d.sender.toLowerCase() || transfer.receiver.toLowerCase() !== d.receiver.toLowerCase() ||
         BigInt(transfer.amount) !== BigInt(d.amount)) { conflict(); continue; }
     if (transfer.receiptSlot != null && BigInt(transfer.receiptSlot) !== BigInt(d.slot)) {
@@ -81,6 +81,9 @@ export async function reconcileReceiptSettlements(
     }
     const source = await authenticateSource(transfer);
     if (!source) { conflict(); continue; }
+    // A missing advisory mapping is filled only by the authenticated manager's
+    // actual economic effect. Rejected(UnmappedToken) emits no such effect.
+    if (transfer.destination == null) transfer.destination = d.vara_token_id.toLowerCase();
     const outcome = 'outcome' in d && d.outcome === 'Refunded' ? Status.Refunded : Status.Completed;
     const archived = transfer.legacyEthereumAuth?.completionAuth;
     if (archived && (archived.kind !== 'gear-settlement' || archived.receiptRelayId !== relayId ||

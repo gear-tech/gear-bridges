@@ -4,12 +4,14 @@ import { waitForTransactionReceipt, writeContract } from 'wagmi/actions';
 
 import { WRAPPED_ETH_ABI } from '@/consts';
 import { useTokens } from '@/context';
+import { useTokenAdmission } from '@/features/swap/hooks/use-token-admission';
 import { useNetworkType } from '@/context/network-type';
 import { definedAssert } from '@/utils';
 
 function useBurnEthTokens() {
   const { nativeToken } = useTokens();
-  const { syncEthWalletNetwork } = useNetworkType();
+  const admit = useTokenAdmission(nativeToken.eth, 'unwrap');
+  const { syncEthWalletNetwork, NETWORK_PRESET } = useNetworkType();
 
   const config = useConfig();
 
@@ -18,7 +20,9 @@ function useBurnEthTokens() {
 
     await syncEthWalletNetwork();
 
+    await admit(nativeToken.eth);
     const hash = await writeContract(config, {
+      chainId: NETWORK_PRESET.ETH_CHAIN_ID,
       address: nativeToken.eth.address,
       abi: WRAPPED_ETH_ABI,
       functionName: 'withdraw',

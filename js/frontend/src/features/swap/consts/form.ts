@@ -43,7 +43,6 @@ const SUBMIT_STATUS = {
   FEE: 'fee',
   MINT: 'mint',
   APPROVE: 'approve',
-  PERMIT: 'permit',
 } as const;
 
 export { FIELD_NAME, ERROR_MESSAGE, DEFAULT_VALUES, ADDRESS_SCHEMA, SUBMIT_STATUS };

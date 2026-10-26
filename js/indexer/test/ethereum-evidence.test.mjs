@@ -396,7 +396,10 @@ test('bootstrap approval digest is independently checked by the actual child', a
 });
 
 function store(rows = [], insertionError) {
-  return { inserted: [], async find() { return rows; }, async findOneBy(_, { id }) { return rows.find((row) => row.id === id); },
+  return { inserted: [], async find(_, options) {
+    return rows.filter((row) => !options?.where?.id || row.id > options.where.id.value)
+      .sort((a, b) => a.id.localeCompare(b.id)).slice(0, options?.take ?? rows.length);
+  }, async findOneBy(_, { id }) { return rows.find((row) => row.id === id); },
     async insert(row) { if (insertionError) throw insertionError; this.inserted.push(row); } };
 }
 function row(checkpoint) {
@@ -476,4 +479,82 @@ test('native environment requires approved identity and an exclusive archive per
       if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
   }
+});
+
+// Reconstructed from HTML7fe1b032 VB-42; the missing original PoC is not claimed.
+test('HTML7fe1b032 reconstructed: every retained fence crosses keyset pages and late conflicts HOLD', { timeout: 180_000 }, async (t) => {
+  const f = await fixture(t, { finalizedHeight: 1025, finalizedHeights: [0, 11, 1025] });
+  const originals = f.headers.slice(0, 1025).map((header, number) => row({
+    schemaVersion: 1, policy: 'independent-two-el-v1', chainId: '31337',
+    genesisHash: f.headers[0].hash, number: String(number), timestamp: BigInt(header.timestamp).toString(),
+    ...Object.fromEntries(['hash', 'parentHash', 'stateRoot', 'transactionsRoot', 'receiptsRoot'].map((key) => [key, header[key]])),
+  }));
+  const storage = store(originals), find = storage.find.bind(storage), pages = [];
+  storage.find = async (entity, options) => {
+    assert.equal(options.take, 512);
+    assert.deepEqual(options.order, { id: 'ASC' });
+    const result = await find(entity, options);
+    pages.push(result.map((row) => row.id));
+    return result;
+  };
+  const request = f.client.native.request.bind(f.client.native), fences = [];
+  t.mock.method(f.client.native, 'request', async (input) => {
+    fences.push(...(input.checkpointFences ?? []));
+    return request(input);
+  });
+  assert.equal((await evidence.qualifyStoredFinality(storage, f.client)).number, '1025');
+  assert.deepEqual(pages.map((page) => page.length), [512, 512, 1]);
+  assert.equal(new Set(pages.flat()).size, 1025);
+  assert.equal(fences.filter((fence) => fence.schemaVersion === 1).length, 1025);
+  const lastId = pages.at(-1).at(-1);
+  const late = originals.find((row) => row.id === lastId);
+  late.checkpoint = { ...late.checkpoint, stateRoot: hash(999) };
+  await assert.rejects(evidence.qualifyStoredFinality(storage, f.client), /HOLD/);
+  assert.equal(storage.inserted.length, 0, 'qualification is not a SQL commit or checkpoint insertion');
+});
+
+test('HTML7fe1b032 reconstructed: interrupted long-gap native descent resumes retained chunks', { timeout: 180_000 }, async (t) => {
+  const { readdir, readFile } = await import('node:fs/promises');
+  const { join } = await import('node:path');
+  const { once } = await import('node:events');
+  const f = await fixture(t, { finalizedHeight: 11, finalizedHeights: [11, 3613] });
+  const previous = await evidence.qualifyFinality(f.client), original = structuredClone(previous);
+  const owner = f.client.native;
+  const closed = once(owner.child, 'close');
+  const directory = join(f.env.ETH_FINALITY_ARCHIVE_ROOT, 'eth', 'beacon', 'headers');
+  let calls = 0, retainedChunk, retainedBytes, range;
+  f.state.finalizedHeight = 3613;
+  f.state.fault = async ({ method, result }) => {
+    if ((method === 'eth_getBlockByNumber' || method === 'eth_getBlockByHash') && ++calls % 100 === 0) {
+      const names = await readdir(directory);
+      retainedChunk = names.find((name) => {
+        const match = /^headers-(\d+)-[0-9a-f]{64}-(\d+)\.json$/.exec(name);
+        if (!match || Number(match[1]) <= 11) return false;
+        range = [Number(match[2]), Number(match[1])];
+        return true;
+      });
+      if (retainedChunk) {
+        retainedBytes = await readFile(join(directory, retainedChunk));
+        evidence.destroyEthereumEvidenceClients('eth');
+      }
+    }
+    return result;
+  };
+  await assert.rejects(evidence.qualifyFinality(f.client, previous), /HOLD/);
+  await closed;
+  assert.ok(retainedChunk, 'interrupt only after the real native authority persists an authenticated header chunk');
+  assert.deepEqual(previous, original, 'partial catch-up cannot advance the original checkpoint');
+  const deniedHashes = new Set(f.headers.slice(range[0] + 2, range[1] - 1).map((header) => header.hash));
+  let denied = 0;
+  f.state.fault = ({ method, result }) => {
+    if ((method === 'eth_getBlockByNumber' || method === 'eth_getBlockByHash') && deniedHashes.has(result?.hash)) {
+      denied++;
+      throw new Error('persisted chunk must supply this historical header');
+    }
+    return result;
+  };
+  assert.equal((await evidence.qualifyFinality(f.client, previous)).number, '3613');
+  assert.equal(denied, 0, 'restart reuses the retained chain instead of walking it again');
+  assert.deepEqual(await readFile(join(directory, retainedChunk)), retainedBytes);
+  assert.deepEqual(previous, original);
 });

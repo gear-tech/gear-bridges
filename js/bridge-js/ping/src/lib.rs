@@ -3,10 +3,9 @@
 extern crate alloc;
 
 use alloc::{collections::BTreeMap, rc::Rc};
-use alloy_rlp::Decodable;
 use alloy_sol_types::SolEvent;
 use core::cell::RefCell;
-use ethereum_common::utils::ReceiptEnvelope;
+use ethereum_common::utils::decode_canonical_receipt;
 use gstd::{msg, MessageId};
 use sails_rs::prelude::*;
 
@@ -303,14 +302,12 @@ fn validate_payload(application_id: H256, length: usize) -> Result<(), PingError
 }
 
 fn decode_delivery(state: &State, receipt_rlp: &[u8]) -> Result<Delivery, PingError> {
-    let mut bytes = receipt_rlp;
-    let receipt = ReceiptEnvelope::decode(&mut bytes).map_err(|_| PingError::InvalidReceipt)?;
+    let receipt = decode_canonical_receipt(receipt_rlp).map_err(|_| PingError::InvalidReceipt)?;
     // A post-state root is not an authenticated successful status on this lane.
-    if !bytes.is_empty()
-        || receipt
-            .as_receipt()
-            .and_then(|receipt| receipt.status.as_eip658())
-            != Some(true)
+    if receipt
+        .as_receipt()
+        .and_then(|receipt| receipt.status.as_eip658())
+        != Some(true)
     {
         return Err(PingError::InvalidReceipt);
     }

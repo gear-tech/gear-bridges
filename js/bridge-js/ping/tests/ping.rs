@@ -1,6 +1,5 @@
 use alloy_consensus::Receipt;
 use alloy_primitives::{Address, Bytes, Log as EthLog};
-use alloy_rlp::Encodable;
 use alloy_sol_types::{sol, SolEvent};
 use ethereum_common::utils::ReceiptEnvelope;
 use gtest::{CoreLog, Log, Program, System, WasmProgram};
@@ -169,9 +168,7 @@ fn receipt(success: bool, logs: Vec<EthLog>) -> Vec<u8> {
         }
         .with_bloom(),
     );
-    let mut bytes = Vec::new();
-    receipt.encode(&mut bytes);
-    bytes
+    ethereum_common::utils::rlp_encode_index_and_receipt(&0, &receipt).1
 }
 
 #[test]
@@ -222,16 +219,16 @@ fn receipt_authentication_exact_payload_and_two_replay_keys() {
     let mut data = padded_log.data.data.to_vec();
     *data.last_mut().unwrap() = 1;
     padded_log.data.data = Bytes::from(data);
-    let mut root_only_receipt = Vec::new();
-    ReceiptEnvelope::Eip1559(
+    let root_only_receipt = ReceiptEnvelope::Eip1559(
         Receipt {
             status: alloy_primitives::B256::ZERO.into(),
             cumulative_gas_used: 42_000,
             logs: vec![valid_log.clone()],
         }
         .with_bloom(),
-    )
-    .encode(&mut root_only_receipt);
+    );
+    let root_only_receipt =
+        ethereum_common::utils::rlp_encode_index_and_receipt(&0, &root_only_receipt).1;
     let rejected = [
         (
             receipt(

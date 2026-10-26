@@ -1,6 +1,5 @@
 import { ProgramName, VftManagerMethods, VftManagerServices } from '../util.js';
 import { InitiatedTransfer, Network, Status, Transfer } from '../../model/index.js';
-import { setPrograms, updateId } from '../programIds.js';
 import { gearNonce } from '../../common/index.js';
 import {
   BridgingRequested,
@@ -65,6 +64,7 @@ export async function handleVftManagerEvents(ctx: UserMessageSentHandlerContext)
         ctx.method,
         msg.payload,
       );
+      if (supply_type !== 'Ethereum' && supply_type !== 'Gear') throw new Error('HOLD: invalid token supply');
 
       await ctx.state.addPair(
         vara_token_id.toLowerCase(),
@@ -86,9 +86,7 @@ export async function handleVftManagerEvents(ctx: UserMessageSentHandlerContext)
     case VftManagerMethods.HistoricalProxyAddressChanged: {
       const data = decoder.decodeEvent<HistoricalProxyAddressChanged>(service, method, msg.payload);
       ctx.log.info({ newProgramId: data.new }, 'Historical proxy program changed');
-      await updateId(ProgramName.HistoricalProxy, data.new);
-      await state.save();
-      await setPrograms();
+      await state.updateProgramId(ProgramName.HistoricalProxy, data.new);
       return;
     }
     case VftManagerMethods.RequestBridging: {
@@ -112,11 +110,20 @@ function requireReceiptDomain(ctx: UserMessageSentHandlerContext, receiptSlot: s
 export function handleVftManagerInMsg(ctx: MessageQueuedContext) {
   const { payload } = ctx.event.call!.args;
 
-  const service = ctx.decoder.service(payload);
-  if (service !== VftManagerServices.VftManager) return;
-
-  const method = ctx.decoder.method(payload);
-  if (method !== VftManagerMethods.RequestBridging) return;
+  // Only untrusted input decoding is skippable. Projection/store failures below
+  // must escape so the processor rolls back the complete callback.
+  try {
+    const service = ctx.decoder.service(payload);
+    if (service !== VftManagerServices.VftManager) return;
+    const method = ctx.decoder.method(payload);
+    if (method !== VftManagerMethods.RequestBridging) return;
+    ctx.decoder.decodeInput(service, method, payload);
+  } catch (error) {
+    ctx.log.warn({ block: ctx.blockHeader.height, blockHash: ctx.blockHeader.hash,
+      event: ctx.event.id, message: ctx.event.args.id, txHash: ctx.event.extrinsic?.hash,
+      error: error instanceof Error ? error.message : String(error) }, 'Skipping malformed queued manager request');
+    return;
+  }
 
   const transfer = new InitiatedTransfer({
     id: ctx.event.args.id,

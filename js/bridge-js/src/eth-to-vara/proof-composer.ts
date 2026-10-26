@@ -1,7 +1,7 @@
 import { ByteVectorType } from '@chainsafe/ssz';
 import { MapDB, hexToBytes, bigIntToBytes, concatBytes, bytesToHex } from '@ethereumjs/util';
 import { TransactionReceipt, TransactionType } from 'viem';
-import { HexString } from '@gear-js/api';
+import { GearApi, HexString } from '@gear-js/api';
 import { blake2AsHex } from '@polkadot/util-crypto';
 import type { Bytes } from '@polkadot/types';
 import { QueryBuilder } from 'sails-js';
@@ -44,6 +44,11 @@ export interface InboundProofProfile {
   readonly sourceBlockHash: HexString;
   /** Blake2-256 of raw source :code, not build-artifact SHA256. */
   readonly sourceRuntimeCodeHash: HexString;
+  /** Independently requalified runtime activations; never learned from the connected RPC. */
+  readonly runtimeTransitions?: readonly Readonly<{ blockHash: HexString; codeHash: HexString }>[];
+  readonly nativeEth?: Readonly<{ ethereumToken: HexString; runtimeCodeHash: HexString; varaToken: HexString; varaCodeId: HexString }>;
+  readonly queueDeployment?: Readonly<{ address: HexString; block: bigint }>;
+  readonly historicalReceipts?: readonly Readonly<{ managerId: HexString; managerCodeId: HexString; endpointId: HexString; endpointCodeId: HexString; framing: 'network-rlp'; minimumSlot: bigint; maximumSlot: bigint }>[];
   readonly historicalProxyId: HexString;
   readonly historicalProxyCodeId: HexString;
   readonly historicalProxyIdlSha256: string;
@@ -76,6 +81,18 @@ export function immutableInboundProfile(profile: InboundProofProfile): InboundPr
         !copy.checkpoint.network || Object.keys(copy.checkpoint.network).length !== 1 || !('localFixture' in copy.checkpoint.network))) {
     throw new Error('HOLD: incomplete or unknown inbound deployment profile');
   }
+  const nonzeroHex = (value: unknown, bytes: number) => typeof value === 'string' && new RegExp(`^0x[0-9a-fA-F]{${bytes * 2}}$`).test(value) && BigInt(value) !== 0n;
+  if ((copy.runtimeTransitions && (!Array.isArray(copy.runtimeTransitions) || copy.runtimeTransitions.some(row => !nonzeroHex(row.blockHash, 32) || !nonzeroHex(row.codeHash, 32)))) ||
+      (copy.nativeEth && (!nonzeroHex(copy.nativeEth.ethereumToken, 20) || !nonzeroHex(copy.nativeEth.runtimeCodeHash, 32) || !nonzeroHex(copy.nativeEth.varaToken, 32) || !nonzeroHex(copy.nativeEth.varaCodeId, 32))) ||
+      (copy.queueDeployment && (!nonzeroHex(copy.queueDeployment.address, 20) || typeof copy.queueDeployment.block !== 'bigint' || copy.queueDeployment.block < 0n)) ||
+      (copy.historicalReceipts && (!Array.isArray(copy.historicalReceipts) || copy.historicalReceipts.some(row =>
+        ![row.managerId, row.managerCodeId, row.endpointId, row.endpointCodeId].every(id => nonzeroHex(id, 32)) ||
+        row.framing !== 'network-rlp' || typeof row.minimumSlot !== 'bigint' || typeof row.maximumSlot !== 'bigint' || row.minimumSlot < 0n || row.maximumSlot < row.minimumSlot)))) {
+    throw new Error('HOLD: malformed independently approved capability');
+  }
+  for (const [index, row] of (copy.historicalReceipts ?? []).entries()) {
+    if (copy.historicalReceipts!.slice(0, index).some(other => other.managerId.toLowerCase() === row.managerId.toLowerCase() && other.minimumSlot <= row.maximumSlot && row.minimumSlot <= other.maximumSlot)) throw new Error('HOLD: overlapping historical receipt approvals');
+  }
   const lowerHex = (value: HexString) => value.toLowerCase() as HexString;
   const actor = <T extends { programId: HexString; codeId: HexString; idlSha256: string }>(value: T): T =>
     ({ ...value, programId: lowerHex(value.programId), codeId: lowerHex(value.codeId), idlSha256: value.idlSha256.toLowerCase() });
@@ -85,13 +102,18 @@ export function immutableInboundProfile(profile: InboundProofProfile): InboundPr
     historicalProxyId: lowerHex(copy.historicalProxyId), historicalProxyCodeId: lowerHex(copy.historicalProxyCodeId),
     historicalProxyIdlSha256: copy.historicalProxyIdlSha256.toLowerCase(),
     endpoint: actor(copy.endpoint), checkpoint: actor(copy.checkpoint), consumer: actor(copy.consumer),
+    runtimeTransitions: copy.runtimeTransitions && Object.freeze(copy.runtimeTransitions.map(row => Object.freeze({ blockHash: lowerHex(row.blockHash), codeHash: lowerHex(row.codeHash) }))),
+    nativeEth: copy.nativeEth && Object.freeze({ ethereumToken: lowerHex(copy.nativeEth.ethereumToken), runtimeCodeHash: lowerHex(copy.nativeEth.runtimeCodeHash), varaToken: lowerHex(copy.nativeEth.varaToken), varaCodeId: lowerHex(copy.nativeEth.varaCodeId) }),
+    queueDeployment: copy.queueDeployment && Object.freeze({ ...copy.queueDeployment, address: lowerHex(copy.queueDeployment.address) }),
+    historicalReceipts: copy.historicalReceipts && Object.freeze(copy.historicalReceipts.map(row => Object.freeze({ ...row, managerId: lowerHex(row.managerId), managerCodeId: lowerHex(row.managerCodeId), endpointId: lowerHex(row.endpointId), endpointCodeId: lowerHex(row.endpointCodeId) }))),
     nativeWrapper: copy.nativeWrapper ? { ...actor(copy.nativeWrapper), ethereumToken: lowerHex(copy.nativeWrapper.ethereumToken) } : undefined,
     forks: copy.forks.map(fork => ({ ...fork, version: lowerHex(fork.version) })) };
   if (copy.endpoint.framing !== 'electra' || copy.endpoint.idlSha256 !== ELECTRA_IDL_SHA256 ||
       (copy.checkpoint.idlSha256 !== CHECKPOINT_IDL_SHA256 &&
         !(typeof copy.checkpoint.network === 'string' && copy.checkpoint.idlSha256 === LEGACY_PUBLIC_CHECKPOINT_IDL_SHA256)) ||
       copy.historicalProxyIdlSha256 !== PROXY_IDL_SHA256 ||
-      (copy.consumer.service === 'VftManager' && copy.consumer.idlSha256 !== VFT_MANAGER_IDL_SHA256) ||
+      (copy.consumer.service === 'VftManager' && copy.consumer.idlSha256 !== VFT_MANAGER_IDL_SHA256 &&
+        !copy.historicalReceipts?.some(row => row.managerId === copy.consumer.programId && row.managerCodeId === copy.consumer.codeId && row.endpointId === copy.endpoint.programId && row.endpointCodeId === copy.endpoint.codeId)) ||
       (copy.nativeWrapper && copy.nativeWrapper.idlSha256 !== nativeWrapperIdlSha256(copy.nativeWrapper.mode))) {
     throw new Error('HOLD: unqualified deployed inbound IDL or proof framing');
   }
@@ -117,12 +139,41 @@ export function immutableInboundProfile(profile: InboundProofProfile): InboundPr
   return Object.freeze(copy);
 }
 
+/** Authenticate the original bootstrap and a finalized runtime activation without replacing either pin. */
+export async function authenticateInboundSource(api: GearApi, supplied: InboundProofProfile, pin: HexString): Promise<void> {
+  const profile = immutableInboundProfile(supplied);
+  if (api.genesisHash.toHex().toLowerCase() !== profile.sourceGenesisHash) throw new Error('HOLD: source genesis mismatch');
+  const [header, anchor, finalizedHash] = await Promise.all([api.rpc.chain.getHeader(pin), api.rpc.chain.getHeader(profile.sourceBlockHash), api.blocks.getFinalizedHead()]);
+  const finalized = await api.rpc.chain.getHeader(finalizedHash);
+  if (header.number.toBigInt() > finalized.number.toBigInt() || header.number.toBigInt() < anchor.number.toBigInt() ||
+      !(await api.blocks.getBlockHash(header.number.toBigInt())).eq(pin) || !(await api.blocks.getBlockHash(anchor.number.toBigInt())).eq(profile.sourceBlockHash)) {
+    throw new Error('HOLD: source pin is not canonical finalized approved history');
+  }
+  const anchorCode = await api.rpc.state.getStorage<Bytes>(':code', profile.sourceBlockHash);
+  if (!anchorCode || anchorCode.isEmpty || blake2AsHex(anchorCode.toU8a(true), 256) !== profile.sourceRuntimeCodeHash) throw new Error('HOLD: original runtime approval changed');
+  let expected = profile.sourceRuntimeCodeHash;
+  let activation = anchor.number.toBigInt();
+  for (const transition of profile.runtimeTransitions ?? []) {
+    const at = await api.rpc.chain.getHeader(transition.blockHash);
+    if (at.number.toBigInt() <= activation) throw new Error('HOLD: runtime approvals must be ordered after bootstrap');
+    activation = at.number.toBigInt();
+    if (activation > header.number.toBigInt()) continue;
+    const code = await api.rpc.state.getStorage<Bytes>(':code', transition.blockHash);
+    if (!(await api.blocks.getBlockHash(activation)).eq(transition.blockHash) || !code || code.isEmpty || blake2AsHex(code.toU8a(true), 256) !== transition.codeHash) throw new Error('HOLD: runtime activation differs from approval');
+    expected = transition.codeHash;
+  }
+  const code = await api.rpc.state.getStorage<Bytes>(':code', pin);
+  if (!code || code.isEmpty || blake2AsHex(code.toU8a(true), 256) !== expected) throw new Error('HOLD: unapproved runtime at source pin');
+}
+
 /** Parse caller-approved JSON, including the nested Sails fixture identity. */
 export function parseInboundProofProfile(value: string): InboundProofProfile {
   const supplied = JSON.parse(value);
   const network = supplied.checkpoint?.network;
   return immutableInboundProfile({ ...supplied, ethereumChainId: BigInt(supplied.ethereumChainId),
     beaconGenesisTime: BigInt(supplied.beaconGenesisTime),
+    queueDeployment: supplied.queueDeployment && { ...supplied.queueDeployment, block: BigInt(supplied.queueDeployment.block) },
+    historicalReceipts: supplied.historicalReceipts?.map((row: NonNullable<InboundProofProfile['historicalReceipts']>[number]) => ({ ...row, minimumSlot: BigInt(row.minimumSlot), maximumSlot: BigInt(row.maximumSlot) })),
     checkpoint: { ...supplied.checkpoint, network: typeof network === 'string' ? network :
       { ...network, localFixture: { ...network?.localFixture, genesis_time: BigInt(network?.localFixture?.genesis_time) } } },
     forks: supplied.forks.map((fork: { epoch: string }) => ({ ...fork, epoch: BigInt(fork.epoch) })) });
@@ -258,10 +309,7 @@ export async function composeProof(
         !previousCanonical.eq(previousHash)) {
       throw new Error('Original or observed finalized inbound source history changed');
     }
-    const runtimeCode = await read(() => api.rpc.state.getStorage<Bytes>(':code', pin));
-    if (!runtimeCode || runtimeCode.isEmpty || blake2AsHex(runtimeCode.toU8a(true), 256) !== profile.sourceRuntimeCodeHash.toLowerCase()) {
-      throw new Error('Inbound proof source runtime identity mismatch');
-    }
+    await read(() => authenticateInboundSource(api, profile, pin));
     if (pin !== observedHash) { previousHash = observedHash; previousHeight = observedHeight; }
     observedHash = pin;
     observedHeight = height;
@@ -270,7 +318,7 @@ export async function composeProof(
   statusCb('Requesting transaction receipt', { txHash });
   const receipt = await read(() => ethClient.getTransactionReceipt(txHash));
   const block = await read(() => ethClient.getBlockByHash(receipt.blockHash));
-  if (receipt.status !== 'success' || receipt.transactionHash.toLowerCase() !== txHash.toLowerCase() ||
+  if (receipt.root !== undefined || receipt.status !== 'success' || receipt.transactionHash.toLowerCase() !== txHash.toLowerCase() ||
       block.hash !== receipt.blockHash || block.number !== receipt.blockNumber ||
       block.transactions[receipt.transactionIndex] !== receipt.transactionHash) {
     throw new Error('Original Ethereum receipt does not match its successful canonical block transaction');
@@ -446,8 +494,15 @@ async function buildInclusionProof(
 
 function rlpEncodeReceipt(receipt: TransactionReceipt): Uint8Array {
   // https://eips.ethereum.org/EIPS/eip-2718#receipts
-  const status = receipt.status === 'success' ? Uint8Array.from([1]) : Uint8Array.from([]);
-  const cumulativeGasUsed = bigIntToBytes(receipt.cumulativeGasUsed);
+  if (receipt.root !== undefined && !/^0x[0-9a-fA-F]{64}$/.test(receipt.root)) {
+    throw new Error('Invalid historical receipt post-state root');
+  }
+  if (receipt.root === undefined && receipt.status !== 'success' && receipt.status !== 'reverted') {
+    throw new Error('Missing receipt execution status');
+  }
+  const status = receipt.root !== undefined ? hexToBytes(receipt.root) :
+    receipt.status === 'success' ? Uint8Array.from([1]) : Uint8Array.from([]);
+  const cumulativeGasUsed = receipt.cumulativeGasUsed === 0n ? new Uint8Array() : bigIntToBytes(receipt.cumulativeGasUsed);
   const bloom = hexToBytes(receipt.logsBloom);
 
   const logs = receipt.logs.map((log) => {
@@ -499,8 +554,7 @@ export async function generateMerkleProof(txIndex: number, receipts: Transaction
 
   return {
     proof,
-    // Alloy RLP receipt envelopes wrap typed EIP-2718 bytes, but not legacy RLP lists.
-    receiptRlp: targetReceipt.type === 'legacy' ? receipt : rlpEncode(receipt),
+    receiptRlp: receipt,
     root: trie.root(),
   };
 }

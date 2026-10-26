@@ -58,7 +58,9 @@ function receiptFixture(token = false, txHash = hash(7)) {
 
 function rootsFixture() {
   const roots = new Map([[8n, hash(8)], [10n, hash(10)], [12n, proof.root]]);
+  const queueIds = new Map([[8n, 7n], [10n, 7n], [12n, 7n]]);
   const api = {
+    at: async () => ({ query: { gearEthBridge: { queueId: { key: () => hash(90) } } } }),
     blocks: {
       getFinalizedHead: async () => pin(hash(20)),
       getBlockHash: async (height: bigint | number) => pin(hash(Number(height))),
@@ -66,7 +68,16 @@ function rootsFixture() {
         nonce: scalar(0n), source: pin(hash(3)), destination: pin(address(4)), payload: { toU8a: () => message.payload },
       }] } }],
     },
-    rpc: { chain: { getHeader: async (at: HexString | { toHex(): HexString }) => ({ number: scalar(BigInt(typeof at === 'string' ? at : at.toHex())) }) } },
+    rpc: {
+      chain: { getHeader: async (at: HexString | { toHex(): HexString }) => ({ number: scalar(BigInt(typeof at === 'string' ? at : at.toHex())) }) },
+      state: { getStorage: async (_key: string, at: HexString) => {
+        const id = queueIds.get(BigInt(at));
+        if (id === undefined) return null;
+        const bytes = new Uint8Array(8);
+        new DataView(bytes.buffer).setBigUint64(0, id, true);
+        return { isEmpty: false, toU8a: () => bytes, toHex: () => '0x' + Buffer.from(bytes).toString('hex') };
+      } },
+    },
     ethBridge: { merkleProof: async (_hash: HexString, rootPin: HexString) => ({
       root: pin(BigInt(rootPin) === 12n ? proof.root : hash(99)), proof: [], number_of_leaves: scalar(1n), leaf_index: scalar(0n),
     }) },
@@ -76,8 +87,9 @@ function rootsFixture() {
     getBlock: async () => ({ number: 2n, hash: hash(2) }),
     getLogs: async () => [{ args: { blockNumber: 12n, merkleRoot: proof.root } }, { args: { blockNumber: 10n, merkleRoot: hash(10) } }],
     readContract: async ({ args }: { args: readonly bigint[] }) => roots.get(args[0]) ?? hash(0),
+    simulateContract: vi.fn(async () => ({})),
   } as unknown as PublicClient;
-  return { roots, params: { gearApi: api, ethereumPublicClient: client, messageQueueAddress: address(1), blockNumber: 8n,
+  return { roots, queueIds, params: { gearApi: api, ethereumPublicClient: client, messageQueueAddress: address(1), blockNumber: 8n,
     nonce: 0n, wait: false, deadline: Date.now() + 1000 } };
 }
 
@@ -248,6 +260,93 @@ describe('SDK outbound acceptance', () => {
     expect(prepared.message.nonce).toBe(0n);
     expect(prepared.proof.root).toBe(proof.root);
     expect(prepared.args).toEqual(getProcessMessageArgs(12n, message, proof));
+  });
+
+  // Reconstructed from supplied HTML VB-15 / audited 7fe1b032, not the unavailable original PoC.
+  test('matching proofs cannot authorize a different QueueId; a later same-queue root covers the original', async () => {
+    const fixture = rootsFixture();
+    fixture.queueIds.set(10n, 8n);
+    const originalProof = fixture.params.gearApi.ethBridge.merkleProof;
+    const fetch = vi.spyOn(fixture.params.gearApi.ethBridge, 'merkleProof')
+      .mockImplementation(async (leaf, at) => {
+        if (at === hash(10)) return { root: pin(hash(10)), proof: [], number_of_leaves: scalar(1n), leaf_index: scalar(0n) } as never;
+        return originalProof(leaf, at);
+      });
+    const prepared = await prepareVaraToEthRelay(fixture.params);
+    expect(prepared.blockNumber).toBe(12n);
+    expect(prepared.message).toEqual(message);
+    expect(fetch.mock.calls.some(([, at]) => at === hash(10))).toBe(false);
+    expect(fetch).toHaveBeenCalledWith(messageHash(message), hash(12));
+  });
+
+  test.each(['original', 'candidate', 'malformed'])('missing %s QueueId evidence never becomes zero', async (kind) => {
+    const fixture = rootsFixture();
+    for (const height of fixture.queueIds.keys()) fixture.queueIds.set(height, 0n);
+    if (kind === 'original') fixture.queueIds.delete(8n);
+    else if (kind === 'candidate') fixture.queueIds.delete(12n);
+    else fixture.params.gearApi.rpc.state.getStorage = (async () => ({
+      isEmpty: false, toU8a: () => new Uint8Array(9), toHex: () => '0x' + '00'.repeat(9),
+    })) as never;
+    await expect(prepareVaraToEthRelay(fixture.params)).rejects.toThrow(
+      kind === 'candidate' ? 'No authenticated stored-root claim' : 'QueueId evidence unavailable or malformed');
+    expect(fixture.params.ethereumPublicClient.simulateContract).not.toHaveBeenCalled();
+  });
+
+  test('explicit QueueId zero is valid evidence, pinned independently at the original and selected source hashes', async () => {
+    const fixture = rootsFixture();
+    for (const height of fixture.queueIds.keys()) fixture.queueIds.set(height, 0n);
+    const metadata = vi.spyOn(fixture.params.gearApi, 'at');
+    const storage = vi.spyOn(fixture.params.gearApi.rpc.state, 'getStorage');
+    expect((await prepareVaraToEthRelay(fixture.params)).blockNumber).toBe(12n);
+    expect(metadata).toHaveBeenCalledWith(hash(8));
+    expect(metadata).toHaveBeenCalledWith(hash(12));
+    expect(storage).toHaveBeenCalledWith(hash(90), hash(8));
+    expect(storage).toHaveBeenCalledWith(hash(90), hash(12));
+  });
+
+  test.each(['MerkleRootDelayNotPassed', 'InvalidMerkleProof'] as const)(
+    'selected root %s rejection permits another root using its own finalized simulation', async (errorName) => {
+      const fixture = rootsFixture();
+      fixture.roots.set(8n, proof.root);
+      vi.spyOn(fixture.params.gearApi.ethBridge, 'merkleProof').mockImplementation(async (_leaf, at) => ({
+        root: pin(at === hash(10) ? hash(99) : proof.root), proof: [], number_of_leaves: scalar(1n), leaf_index: scalar(0n),
+      }) as never);
+      const simulated: bigint[] = [];
+      fixture.params.ethereumPublicClient.simulateContract = (async ({ args, blockNumber }: { args: readonly bigint[]; blockNumber: bigint }) => {
+        expect(blockNumber).toBe(2n);
+        simulated.push(args[0]);
+        if (args[0] === 8n) throw new ContractFunctionRevertedError({
+          abi: MessageQueueAbi, functionName: 'processMessage',
+          data: encodeErrorResult({ abi: MessageQueueAbi, errorName }),
+        });
+        return {};
+      }) as never;
+      expect((await prepareVaraToEthRelay(fixture.params)).blockNumber).toBe(12n);
+      expect(simulated).toEqual([8n, 12n]);
+    });
+
+  test('unavailable membership is retried without a persistent height watermark or changed original', async () => {
+    vi.useFakeTimers();
+    const fixture = rootsFixture();
+    fixture.roots.delete(8n);
+    fixture.roots.delete(10n);
+    const fetch = vi.spyOn(fixture.params.gearApi.ethBridge, 'merkleProof')
+      .mockRejectedValueOnce(new Error('membership unavailable'));
+    try {
+      const pending = prepareVaraToEthRelay({ ...fixture.params, wait: true });
+      await vi.advanceTimersByTimeAsync(5);
+      const prepared = await pending;
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch.mock.calls[0]).toEqual(fetch.mock.calls[1]);
+      expect(prepared.args).toEqual(getProcessMessageArgs(12n, message, proof));
+    } finally { vi.useRealTimers(); }
+  });
+
+  test('unqualified finalized simulation errors stay visible rather than authorizing a candidate', async () => {
+    const fixture = rootsFixture();
+    const failure = new Error('finalized simulation archive unavailable');
+    vi.mocked(fixture.params.ethereumPublicClient.simulateContract).mockRejectedValue(failure);
+    await expect(prepareVaraToEthRelay(fixture.params)).rejects.toBe(failure);
   });
 
   test('recent finalized roots are tried before walking millions of empty historical blocks', async () => {

@@ -7,7 +7,7 @@ const LINKS = {
 
   [ROUTE.TOKEN_TRACKER]: {
     [NETWORK_TYPE.MAINNET]: 'My Tokens',
-    [NETWORK_TYPE.TESTNET]: 'My Tokens & Faucet',
+    [NETWORK_TYPE.TESTNET]: 'My Tokens',
   },
 
   [ROUTE.TVL]: 'TVL',

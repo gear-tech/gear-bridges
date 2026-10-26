@@ -244,6 +244,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: check-files-changed
     if: ${{ needs.check-files-changed.outputs.frontend_changed == 'true' || needs.check-files-changed.outputs.common_changed == 'true' || needs.check-files-changed.outputs.bridge_js_changed == 'true' }}
+    env:
+      # Offline build-only origins: never deployment approvals or network fixtures.
+      VITE_FUNDS_ORIGIN: https://funds.build.invalid
+      VITE_FAUCET_ORIGIN: https://faucet.build.invalid
+      BRIDGE_CSP_CONNECT_ORIGINS: '[]'
+      VITE_ISOLATED_FAUCET: 'true'
 
     steps:
       - name: Checkout repository
@@ -264,8 +270,20 @@ jobs:
       - name: Install dependencies
         run: yarn workspaces focus frontend gear-bridges gear-bridge-common @gear-js/bridge
 
+      - name: Compare frontend clients with checked-in canonical IDLs
+        run: yarn workspace frontend check:sails
+
       - name: Build
         run: yarn build:frontend
+
+      - name: Build separate faucet entry (offline policy fixture)
+        run: yarn build:faucet
+
+      - name: Reconstructed HTML7fe1b032 web isolation policy regressions
+        run: |
+          yarn workspace frontend test:policy
+          node --experimental-strip-types js/frontend/src/features/faucet/isolated-api.check.mjs
+          node --test tools/test-faucet.test.cjs
 
       - name: Run submission and native profile regressions
         run: yarn workspace frontend test

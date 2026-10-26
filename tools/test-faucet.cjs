@@ -1,9 +1,9 @@
 'use strict';
 
 // Run with Node 22 and NODE_PATH pointing at the existing root node_modules.
-// This loopback service trusts nginx for whole-site Basic authentication; POSTs
-// additionally require the exact configured Origin. Never run a second copy on
-// another host against these signers/state, or restore an older journal.
+// This loopback service trusts the dedicated faucet nginx authentication scope.
+// POSTs additionally require its exact independently configured Origin. Never
+// run a second copy against these signers/state, or restore an older journal.
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
@@ -16,6 +16,7 @@ const GENESIS = '0xa12f631344f61644239b70f9ab53e4842e540d8b0c1e7adb9570c06a62c3a
 const ETH_GENESIS = '0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b';
 const TOKEN = '0xd4d65b1100b522cbde9664b9ba78c8add04e5b53';
 const CODE_HASH = '0x6e3c691cf46703cdedaade8a407c2ee68e62f5094dd38e8f1278d4c0a5437e3d';
+// Historical journal identity ONLY. Moving the HTTP origin must not rewrite it.
 const ORIGIN = 'https://bridge-62-238-54-143.sslip.io';
 const CHAIN_ID = 560048;
 const COOLDOWN = 86400000;
@@ -237,9 +238,25 @@ class Faucet {
   }
 }
 
+function approvedOrigin(value) {
+  assert(typeof value === 'string' && !/[\s*'"\\]/.test(value), 'Exact HTTPS origin required');
+  const url = new URL(value);
+  assert(url.protocol === 'https:' && !url.username && !url.password && value === url.origin &&
+    /^(?:[a-z0-9.-]+|\[[0-9a-f:]+\])$/.test(url.hostname), 'Exact HTTPS origin required');
+  return url;
+}
+function authorizeRequest(req, origin) {
+  // nginx overwrites this header only after its own faucet-only Basic auth.
+  if (typeof req.headers['x-faucet-authenticated'] !== 'string' || !req.headers['x-faucet-authenticated'])
+    throw fail('Separate faucet authentication required', 403);
+  if ((req.method === 'POST' && req.headers.origin !== origin) ||
+      (req.headers.origin && req.headers.origin !== origin)) throw fail('Exact faucet Origin required', 403);
+}
 function configFromFile(file) {
   const c = JSON.parse(privateFile(file));
-  assert(c.origin === ORIGIN && c.genesis === GENESIS && c.chainId === CHAIN_ID && c.ethereumGenesis === ETH_GENESIS && c.usdcContract === TOKEN && c.usdcCodeHash === CODE_HASH, 'Unapproved faucet configuration');
+  const origin = approvedOrigin(c.origin), funds = approvedOrigin(c.fundsOrigin);
+  assert(origin.hostname !== funds.hostname && c.origin !== ORIGIN, 'Separate approved faucet hostname required');
+  assert(c.genesis === GENESIS && c.chainId === CHAIN_ID && c.ethereumGenesis === ETH_GENESIS && c.usdcContract === TOKEN && c.usdcCodeHash === CODE_HASH, 'Unapproved faucet configuration');
   assert(c.sourceRpc === 'ws://127.0.0.1:52545' && c.witnessRpc === 'ws://127.0.0.1:52547', 'Unapproved Gear endpoints');
   const eth = new URL(c.ethereumRpc);
   assert(eth.protocol === 'https:' && !eth.username && !eth.password, 'HTTPS Ethereum endpoint required');
@@ -454,8 +471,9 @@ async function main() {
       if (!ready || stopping) throw fail('Faucet not ready');
       if (active.size >= 32) throw fail('Faucet request capacity reached');
       if (req.url.length > 1024) throw fail('Request URL too long', 400);
-      const url = new URL(req.url, ORIGIN);
-      if (req.headers.origin && req.headers.origin !== ORIGIN) throw fail('Origin rejected', 403);
+      authorizeRequest(req, c.origin);
+      const url = new URL(req.url, c.origin);
+      if (url.origin !== c.origin) throw fail('Origin rejected', 403);
       const route = url.pathname;
       if (!['/faucet/config', '/faucet/request', '/faucet/status'].includes(route)) throw fail('Not found', 404);
       if (req.method !== (route === '/faucet/request' ? 'POST' : 'GET')) throw fail('Method not allowed', 405);
@@ -464,7 +482,7 @@ async function main() {
         if ([...url.searchParams.keys()].some(k => !['asset', 'address'].includes(k)) || url.searchParams.getAll('asset').length !== 1 || url.searchParams.getAll('address').length !== 1) throw fail('Invalid status query', 400);
         return send(res, 200, faucet.status(url.searchParams.get('asset'), url.searchParams.get('address')));
       }
-      if (req.headers.origin !== ORIGIN) throw fail('Exact Origin required', 403);
+      if (req.headers.origin !== c.origin) throw fail('Exact Origin required', 403);
       const input = await bounded(body(req), 5000);
       if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).sort().join(',') !== 'address,asset,chainId,genesis' || input.genesis !== GENESIS || input.chainId !== CHAIN_ID) throw fail('Invalid request or network', 400);
       return send(res, 202, await faucet.request(input.asset, input.address));
@@ -512,5 +530,5 @@ async function main() {
     timer = setTimeout(tick, 1000);
   } catch { console.error('Faucet startup held: configuration, chain identity or journal validation failed'); await stop(); process.exit(1); }
 }
-module.exports = { Journal, Faucet, admission, normalize, AMOUNTS, COOLDOWN, GENESIS, ETH_GENESIS, TOKEN, CODE_HASH, ORIGIN, CHAIN_ID, ABI };
+module.exports = { Journal, Faucet, admission, normalize, approvedOrigin, authorizeRequest, AMOUNTS, COOLDOWN, GENESIS, ETH_GENESIS, TOKEN, CODE_HASH, ORIGIN, CHAIN_ID, ABI };
 if (require.main === module) main().catch(() => { console.error('Faucet could not acquire exclusive loopback ownership'); process.exit(1); });

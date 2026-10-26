@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { NativeEvidenceClient, EthereumEvidenceError, exactObject } from './native-evidence.js';
 import type { Store } from '@subsquid/typeorm-store';
+import { MoreThan } from 'typeorm';
 import { getEthereumEvidenceConfig, type EvidenceOwner } from '../common/env.js';
 import { EthereumFinalityCheckpoint } from '../model/entities/ethereumFinalityCheckpoint.model.js';
 import type { Receipt, ReceiptLog } from './completion.js';
@@ -456,13 +457,22 @@ export async function loadCheckpoint(store: Store, clients: EthereumEvidenceClie
 
 async function loadCheckpoints(store: Store, clients: EthereumEvidenceClients): Promise<HistoricalCheckpoint[]> {
   approved(clients);
-  const rows = await store.find(EthereumFinalityCheckpoint, {});
-  return rows.map((row) => {
-    const checkpoint = normalizedCheckpoint(row.checkpoint);
-    approved(clients, checkpoint);
-    if (row.id !== checkpointId(checkpoint) || BigInt(row.blockNumber) !== BigInt(checkpoint.number)) hold('retained checkpoint row identity is inconsistent');
-    return row.checkpoint;
-  });
+  const checkpoints: HistoricalCheckpoint[] = [];
+  let after: string | undefined;
+  for (;;) {
+    const rows = await store.find(EthereumFinalityCheckpoint, {
+      where: after === undefined ? {} : { id: MoreThan(after) }, order: { id: 'ASC' }, take: 512,
+    });
+    for (const row of rows) {
+      if (after !== undefined && row.id <= after) hold('retained checkpoint keyset did not advance');
+      const checkpoint = normalizedCheckpoint(row.checkpoint);
+      approved(clients, checkpoint);
+      if (row.id !== checkpointId(checkpoint) || BigInt(row.blockNumber) !== BigInt(checkpoint.number)) hold('retained checkpoint row identity is inconsistent');
+      checkpoints.push(checkpoint);
+      after = row.id;
+    }
+    if (rows.length < 512) return checkpoints;
+  }
 }
 
 export async function qualifyStoredFinality(

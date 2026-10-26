@@ -14,7 +14,6 @@ import { assertSuccessfulReceipt } from '../../submission';
 type Parameters = {
   amount: bigint;
   accountAddress: HexString;
-  permit?: { deadline: bigint; v: number; r: HexString; s: HexString };
 };
 
 function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
@@ -41,30 +40,21 @@ function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
     });
   };
 
-  const transferWithFee = async ({ amount, accountAddress, permit }: Parameters) => {
+  const transferWithFee = async ({ amount, accountAddress }: Parameters) => {
     definedAssert(token?.address, 'Fungible token address');
     definedAssert(fee, 'Fee');
 
-    const tx = { abi: ERC20_MANAGER_ABI, address: NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS, value: fee };
-    const permitArgs = permit ? ([permit.deadline, permit.v, permit.r, permit.s] as const) : undefined;
-
-    const hash = permitArgs
-      ? await writeContractAsync({
-          ...tx,
-          functionName: 'requestBridgingPayingFeeWithPermit',
-          args: [
-            token.address,
-            amount,
-            accountAddress,
-            ...permitArgs,
-            NETWORK_PRESET.ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS,
-          ],
-        })
-      : await writeContractAsync({
-          ...tx,
-          functionName: 'requestBridgingPayingFee',
-          args: [token.address, amount, accountAddress, NETWORK_PRESET.ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
-        });
+    const tx = {
+      chainId: NETWORK_PRESET.ETH_CHAIN_ID,
+      abi: ERC20_MANAGER_ABI,
+      address: NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS,
+      value: fee,
+    };
+    const hash = await writeContractAsync({
+      ...tx,
+      functionName: 'requestBridgingPayingFee',
+      args: [token.address, amount, accountAddress, NETWORK_PRESET.ETH_BRIDGING_PAYMENT_CONTRACT_ADDRESS],
+    });
 
     return assertSuccessfulReceipt(await waitForTransactionReceipt(config, { hash }), hash);
   };
@@ -84,23 +74,19 @@ function useTransfer(fee: bigint | undefined, shouldPayBridgingFee: boolean) {
     });
   };
 
-  const transferWithoutFee = async ({ amount, accountAddress, permit }: Parameters) => {
+  const transferWithoutFee = async ({ amount, accountAddress }: Parameters) => {
     definedAssert(token?.address, 'Fungible token address');
 
-    const tx = { abi: ERC20_MANAGER_ABI, address: NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS };
-    const permitArgs = permit ? ([permit.deadline, permit.v, permit.r, permit.s] as const) : undefined;
-
-    const hash = permitArgs
-      ? await writeContractAsync({
-          ...tx,
-          functionName: 'requestBridgingWithPermit',
-          args: [token.address, amount, accountAddress, ...permitArgs],
-        })
-      : await writeContractAsync({
-          ...tx,
-          functionName: 'requestBridging',
-          args: [token.address, amount, accountAddress],
-        });
+    const tx = {
+      chainId: NETWORK_PRESET.ETH_CHAIN_ID,
+      abi: ERC20_MANAGER_ABI,
+      address: NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS,
+    };
+    const hash = await writeContractAsync({
+      ...tx,
+      functionName: 'requestBridging',
+      args: [token.address, amount, accountAddress],
+    });
 
     return assertSuccessfulReceipt(await waitForTransactionReceipt(config, { hash }), hash);
   };

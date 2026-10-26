@@ -2,6 +2,7 @@ import { GearApi } from '@gear-js/api';
 import { TypeRegistry, Struct, u64, Bytes } from '@polkadot/types';
 import { H256, QueryBuilder, getServiceNamePrefix, getFnNamePrefix, ZERO_ADDRESS } from 'sails-js';
 import { StatusCb } from '../util';
+import { subscribeAdvisory } from './advisory-subscription.js';
 
 export type CheckpointError = 'OutDated' | 'NotPresent';
 
@@ -89,23 +90,25 @@ export class ServiceCheckpointFor {
         throw new Error(`Slot ${slot} is not present yet`);
       }
 
-      let unsub: () => void;
+      let unsub: (() => void) | undefined;
+      let finished = false;
       statusCb(`Slot hasn't been submitted yet`, { slot: slot.toString() });
 
       const [_slot, _treeHashRoot] = await new Promise<[number, H256]>((resolve, reject) => {
         statusCb(`Subscribing for new slots`);
         this._program.serviceSyncUpdate
-          .subscribeToNewCheckpointEvent((event) => {
+          .subscribeToNewCheckpointEvent(async (event) => {
             statusCb(`Received new slot`, { slot: event.slot.toString() });
             if (event.slot >= slot) {
-              resolve([event.slot, event.tree_hash_root]);
+              const current = await query.call();
+              if ('ok' in current) resolve([Number(current.ok[0]), current.ok[1]]);
             }
-          })
+          }, reject)
           .then((_unsub) => {
-            unsub = _unsub;
+            if (finished) _unsub(); else unsub = _unsub;
           })
-          .catch((e) => reject(e));
-      }).finally(unsub!);
+          .catch(reject);
+      }).finally(() => { finished = true; unsub?.(); });
 
       return [_slot, _treeHashRoot];
     }
@@ -117,25 +120,19 @@ export class ServiceSyncUpdate {
 
   public subscribeToNewCheckpointEvent(
     callback: (data: { slot: number; tree_hash_root: H256 }) => void | Promise<void>,
+    onError?: (error: unknown) => void | Promise<void>,
   ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
-      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
-        return;
-      }
-
-      const _payload = message.payload.toHex();
-      const service = getServiceNamePrefix(_payload, true);
-      const method = getFnNamePrefix(_payload, true);
-
-      if (service.service === 'ServiceSyncUpdate' && method.fn === 'NewCheckpoint') {
-        const payload = this._program.registry.createType<NewCheckpointEventData>(
-          '{"slot":"u64","tree_hash_root":"H256"}',
-          message.payload.slice(service.bytesLength + method.bytesLength),
-        );
-
-        callback({ slot: payload['slot'].toNumber(), tree_hash_root: payload['tree_hash_root'].toHex() });
-      }
-    });
+    return subscribeAdvisory((dispatch) => this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+      dispatch(() => {
+        if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) return;
+        const raw = message.payload.toHex();
+        if (getServiceNamePrefix(raw) !== 'ServiceSyncUpdate' || getFnNamePrefix(raw) !== 'NewCheckpoint') return;
+        const decoded = this._program.registry.createType('(String,String,{"slot":"u64","tree_hash_root":"H256"})', raw);
+        if (decoded.toHex() !== raw.toLowerCase()) throw new Error('Malformed or trailing checkpoint event payload');
+        const payload = decoded[2] as NewCheckpointEventData;
+        return { slot: payload.slot.toNumber(), tree_hash_root: payload.tree_hash_root.toHex() };
+      });
+    }), callback, onError);
   }
 }
 

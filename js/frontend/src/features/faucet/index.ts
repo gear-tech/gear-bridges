@@ -1,3 +1,1 @@
-import { GetBalanceButton } from './components';
-
-export { GetBalanceButton };
+export { Faucet } from './faucet';

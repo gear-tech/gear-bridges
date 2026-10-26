@@ -1,9 +1,8 @@
-import { KeyringPair } from '@polkadot/keyring/types';
+import type { KeyringPair } from '@polkadot/keyring/types';
 import { SignerOptions } from '@polkadot/api/types';
 import { GearApi, HexString, decodeAddress } from '@gear-js/api';
 import { Header } from '@polkadot/types/interfaces';
-import type { Bytes, Enum } from '@polkadot/types';
-import { blake2AsHex } from '@polkadot/util-crypto';
+import type { Enum } from '@polkadot/types';
 import { TypeRegistry } from '@polkadot/types';
 import type { ITuple } from '@polkadot/types/types';
 import { getServiceNamePrefix, getFnNamePrefix, TransactionBuilder } from 'sails-js';
@@ -11,8 +10,9 @@ import { PublicClient, bytesToHex } from 'viem';
 
 import { encodeEthToVaraEvent, getPrefix, GearClient, HistoricalProxyClient, ProxyError, ProofResult } from '../vara/index.js';
 import { createBeaconClient, createEthereumClient } from '../ethereum/index.js';
-import { composeProof, InboundProofProfile, immutableInboundProfile } from './proof-composer.js';
+import { composeProof, InboundProofProfile, immutableInboundProfile, authenticateInboundSource } from './proof-composer.js';
 import { StatusCb, withOriginalDeadline } from '../util.js';
+import { authenticateHistoricalReceipt, type HistoricalReceiptOriginal } from './historical-receipt.js';
 import { VFT_MANAGER_IDL_SHA256, validateInboundTokenEffect, validateNativePendingCohort, validateNativeCohortContinuity, validateNativeRedemption, validateNativeTokenEffect,
   type NativeReceiptDeposit, type NativeRedemption, type NativeReceiptIdentity, type InboundTokenEffect, type NativeTokenSettlement } from './token-effect.js';
 
@@ -33,6 +33,7 @@ export interface RelayResult {
   nativeSettlements?: readonly NativeTokenSettlement[];
 }
 export interface ConsumerReplyContract {
+  readonly reconciliationOnly?: boolean;
   readonly registry: TypeRegistry;
   readonly nativeSettlement?: Readonly<{
     expectedEffect: InboundTokenEffect;
@@ -64,10 +65,11 @@ async function readNativeRedemptions(rows: readonly NativeReceiptDeposit[], pin:
 
 /** Standard manager adapter; arbitrary consumers must still supply their own verifyEffect. */
 export function createVftManagerReplyContract(profile: InboundProofProfile,
-  adapter: Pick<ConsumerReplyContract, 'registry' | 'idlSha256'> & NonNullable<ConsumerReplyContract['nativeSettlement']>): ConsumerReplyContract {
+  adapter: Pick<ConsumerReplyContract, 'registry' | 'idlSha256'> & NonNullable<ConsumerReplyContract['nativeSettlement']> & { historicalOriginal?: HistoricalReceiptOriginal }): ConsumerReplyContract {
   profile = immutableInboundProfile(profile);
   if (profile.consumer.service !== 'VftManager' || profile.consumer.method !== 'SubmitReceipt' ||
-      adapter.idlSha256.toLowerCase() !== VFT_MANAGER_IDL_SHA256) {
+      adapter.idlSha256.toLowerCase() !== profile.consumer.idlSha256 ||
+      (!adapter.historicalOriginal && adapter.idlSha256.toLowerCase() !== VFT_MANAGER_IDL_SHA256)) {
     throw new Error('HOLD: consumer decoder does not match approved deployed IDL');
   }
   if (profile.nativeWrapper &&
@@ -75,20 +77,42 @@ export function createVftManagerReplyContract(profile: InboundProofProfile,
       (adapter.expectedEffect.sourceToken.toLowerCase() === profile.nativeWrapper.ethereumToken)) {
     throw new Error('HOLD: native token mapping differs from approved wrapper binding');
   }
-  const { registry, idlSha256, ...settlement } = adapter;
+  const { registry, idlSha256, historicalOriginal: suppliedOriginal, ...suppliedSettlement } = adapter;
+  const historicalOriginal = suppliedOriginal && Object.freeze({ ...suppliedOriginal });
+  const settlement = { ...suppliedSettlement, expectedEffect: Object.freeze({ ...suppliedSettlement.expectedEffect }) };
   return {
-    registry, idlSha256: idlSha256.toLowerCase(), resultType: 'Result<Null, Error>',
+    registry, idlSha256: idlSha256.toLowerCase(), resultType: 'Result<Null, Error>', reconciliationOnly: !!historicalOriginal,
     nativeSettlement: profile.nativeWrapper ? settlement : undefined,
     verifyEffect: async (_value, result, proof) => {
       const pin = result.effectBlockHash ?? result.replyBlockHash;
+      const framing = historicalOriginal ? await authenticateHistoricalReceipt(profile, historicalOriginal, proof.receiptRlp, BigInt(proof.proofBlock.block.slot), BigInt(proof.transactionIndex)) : undefined;
+      if (historicalOriginal) await authenticateEffectProfile(historicalOriginal.api, profile, pin);
       const deposits = await settlement.readDeposits(pin, proof);
       if (!deposits.some(deposit => deposit.native)) {
-        validateInboundTokenEffect(proof.receiptRlp, deposits, settlement.expectedEffect);
+        validateInboundTokenEffect(proof.receiptRlp, deposits, settlement.expectedEffect, framing);
         return;
       }
       if (!profile.nativeWrapper) throw new Error('HOLD: native wrapper identity is unavailable is not defined');
-      const identity = nativeReceiptIdentity(profile, proof, settlement.expectedEffect);
+      const identity = { ...nativeReceiptIdentity(profile, proof, settlement.expectedEffect), historicalReceipt: framing };
       const redemptions = await readNativeRedemptions(deposits, pin, settlement.readRedemption);
+      if (historicalOriginal && !result.nativeSettlements) {
+        await authenticateEffectProfile(historicalOriginal.api, profile, result.replyBlockHash);
+        for (const at of new Set([result.replyBlockHash, pin])) {
+          const wrapper = await historicalOriginal.api.programStorage.getProgram(profile.nativeWrapper.programId, at);
+          if (!wrapper.state.isInitialized || !wrapper.codeId.eq(profile.nativeWrapper.codeId)) throw new Error('HOLD: historical native wrapper code mismatch');
+        }
+        const originalRows = structuredClone(await settlement.readDeposits(result.replyBlockHash, proof));
+        validateNativePendingCohort(identity, originalRows);
+        validateNativeCohortContinuity(originalRows, deposits, true);
+        const originalRedemptions = await readNativeRedemptions(originalRows, result.replyBlockHash, settlement.readRedemption);
+        const authenticated = new Map<HexString, NativeRedemption>();
+        for (const row of originalRows.filter(row => row.native)) {
+          const redemption = originalRedemptions.get(row.operation_id);
+          validateNativeRedemption(row, identity.managerId, identity.wrapperMode, redemption ?? null);
+          authenticated.set(row.operation_id, redemption!);
+        }
+        result.nativeSettlements = validateNativeTokenEffect(identity, deposits, redemptions, authenticated);
+      }
       if (!result.nativeSettlements) throw new Error('HOLD: authenticated original native settlements are missing is not defined');
       const originals = new Map(result.nativeSettlements.map(entry => [entry.operationId, entry.redemption]));
       const settlements = validateNativeTokenEffect(identity, deposits, redemptions, originals);
@@ -103,8 +127,7 @@ export function createVftManagerReplyContract(profile: InboundProofProfile,
 
 function consumerResult(payload: HexString, profile: InboundProofProfile, contract: Pick<ConsumerReplyContract, 'registry' | 'resultType' | 'idlSha256'>) {
   profile = immutableInboundProfile(profile);
-  if ((profile.consumer.service === 'VftManager' && profile.consumer.idlSha256 !== VFT_MANAGER_IDL_SHA256) ||
-      contract.idlSha256.toLowerCase() !== profile.consumer.idlSha256 || !/^Result<.+>$/.test(contract.resultType)) {
+  if (contract.idlSha256.toLowerCase() !== profile.consumer.idlSha256 || !/^Result<.+>$/.test(contract.resultType)) {
     throw new Error('HOLD: consumer decoder does not match approved deployed IDL');
   }
   const decoded = contract.registry.createType<ITuple>(
@@ -119,9 +142,9 @@ export function decodeConsumerReply(payload: HexString, profile: InboundProofPro
   return result.asOk.toJSON();
 }
 async function authenticateEffectProfile(api: GearApi, profile: InboundProofProfile, pin: HexString): Promise<void> {
-  const code = await api.rpc.state.getStorage<Bytes>(':code', pin);
+  await authenticateInboundSource(api, profile, pin);
   const consumer = await api.programStorage.getProgram(profile.consumer.programId, pin);
-  if (code.isEmpty || blake2AsHex(code.toU8a(true), 256) !== profile.sourceRuntimeCodeHash.toLowerCase() || !consumer.state.isInitialized || !consumer.codeId.eq(profile.consumer.codeId)) {
+  if (!consumer.state.isInitialized || !consumer.codeId.eq(profile.consumer.codeId)) {
     throw new Error('HOLD: finalized effect runtime or consumer differs from immutable approval');
   }
 }
@@ -324,6 +347,8 @@ async function prepareOriginalEthToVaraRelay(params: PrepareEthToVaraParams & { 
   const deadline = params.deadline;
   const read = <T>(operation: () => Promise<T>) => withOriginalDeadline(deadline, operation);
   const profile = params.inboundProfile;
+  if ((profile.consumer.service === 'VftManager' && profile.consumer.idlSha256 !== VFT_MANAGER_IDL_SHA256) ||
+      profile.historicalReceipts?.some(row => row.managerId === profile.consumer.programId && row.managerCodeId === profile.consumer.codeId && row.endpointId === profile.endpoint.programId && row.endpointCodeId === profile.endpoint.codeId)) throw new Error('HOLD: historical manager profile is reconciliation-only');
   if (params.historicalProxyId.toLowerCase() !== profile.historicalProxyId.toLowerCase() ||
       params.clientId.toLowerCase() !== profile.consumer.programId.toLowerCase() ||
       params.clientServiceName !== profile.consumer.service || params.clientMethodName !== profile.consumer.method) {
@@ -521,6 +546,7 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
     consumerReply: params.consumerReply ? Object.freeze({ ...params.consumerReply,
       nativeSettlement: params.consumerReply.nativeSettlement ? Object.freeze({ ...params.consumerReply.nativeSettlement,
         expectedEffect: Object.freeze({ ...params.consumerReply.nativeSettlement.expectedEffect }) }) : undefined }) : params.consumerReply };
+  if (params.consumerReply?.reconciliationOnly) throw new Error('HOLD: historical receipt adapter cannot sign a fresh request');
   if (!params.consumerReply || params.consumerReply.idlSha256 !== params.inboundProfile.consumer.idlSha256 ||
       typeof params.consumerReply.verifyEffect !== 'function') {
     throw new Error('HOLD: exact deployed consumer decoder and effect verification are required');
@@ -533,6 +559,8 @@ export async function relayEthToVara(params: RelayEthToVaraParams): Promise<Rela
   transaction.withValue(0n);
   const requestPayload = transaction.extrinsic.args[1].toHex();
   const sender = decodeAddress(typeof params.signer === 'string' ? params.signer : params.signer.address);
+  const signingPin = (await withOriginalDeadline(deadline, () => params.gearApi.blocks.getFinalizedHead())).toHex();
+  await withOriginalDeadline(deadline, () => authenticateEffectProfile(params.gearApi, params.inboundProfile, signingPin));
   await withOriginalDeadline(deadline, () => transaction.extrinsic.signAsync(params.signer, params.signerOptions));
   if (Date.now() >= deadline) throw new Error('Original relay deadline expired before submission');
   const txHash = transaction.extrinsic.hash.toHex();

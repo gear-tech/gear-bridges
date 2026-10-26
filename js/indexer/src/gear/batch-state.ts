@@ -20,6 +20,8 @@ import { createEthereumEvidenceClients, createReceiptAuthenticator, qualifyStore
 import { authenticateSourceReceipt } from '../eth/completion.js';
 import { reconcileReceiptSettlements, validateReceiptSettlement } from './receipt-reconciliation.js';
 import { config } from './config.js';
+import { updateId } from './programIds.js';
+import { ProgramName } from './util.js';
 
 function sameDeposit(a: ReceiptDepositEffect, b: ReceiptDepositEffect): boolean {
   return Object.keys(a).length === Object.keys(b).length &&
@@ -89,6 +91,10 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
       this._initiatedTransfers.set(transfer.id, transfer);
     }
   }
+  public async updateProgramId(name: ProgramName, programId: string) {
+    await updateId(this._ctx.store, name, programId);
+  }
+
 
   private async _savePairs() {
     const pairs: Pair[] = [];
@@ -325,18 +331,13 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     const eth = ethToken.toLowerCase();
     const id = createPairHash(vara, eth);
 
-    // Check if pair already exists or is being added in this block
-    const existingPair = this._pairs.get(vara);
-    const addedPair = this._addedPairs.get(id);
-
-    if (existingPair && !existingPair.isRemoved && !existingPair.upgradedTo) {
-      this._log.debug({ varaToken, ethToken }, 'Pair already exists, skipping addition');
-      return;
-    }
-
-    if (addedPair) {
-      this._log.debug({ varaToken, ethToken }, 'Pair already being added in this batch, skipping addition');
-      return;
+    if (supply !== Network.Ethereum && supply !== Network.Vara) throw new Error('HOLD: invalid pair supply');
+    for (const pair of this._pairs.values()) {
+      if (!pair.isActive || this._removedPairs.has(pair.id) || this._upgradedPairs.has(pair.id)) continue;
+      if (pair.varaToken === vara || pair.ethToken === eth) {
+        if (pair.id !== id || pair.tokenSupply !== supply) throw new Error('HOLD: conflicting active token pair or supply');
+        return;
+      }
     }
 
     // Fetch metadata
@@ -397,6 +398,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
     const vftAddr = varaToken.toLowerCase();
     const erc20Addr = ethToken.toLowerCase();
     this._removedPairs.set(createPairHash(vftAddr, erc20Addr), blockNumber);
+    this._pairs.delete(vftAddr);
     this._log.info(
       {
         varaToken: vftAddr,
@@ -408,6 +410,7 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
 
   public removePairById(pairId: string, blockNumber: bigint) {
     this._removedPairs.set(pairId, blockNumber);
+    for (const [token, pair] of this._pairs) if (pair.id === pairId) this._pairs.delete(token);
     this._log.info(
       {
         pairId,
@@ -429,8 +432,9 @@ export class BatchState extends BaseBatchState<DataHandlerContext<Store, any>> {
       newId,
       activeToBlock: BigInt(block.height),
     });
+    this._pairs.delete(vftAddr);
 
-    await this.addPair(vftAddr, pair.ethToken, pair.tokenSupply, block);
+    await this.addPair(newId, pair.ethToken, pair.tokenSupply, block);
 
     this._log.info({ varaToken: vftAddr, newProgramId: newId }, 'Vara token upgraded');
   }

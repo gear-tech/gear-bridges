@@ -38,7 +38,7 @@ function useApprove() {
     const functionName = FUNCTION_NAME.FUNGIBLE_TOKEN_APPROVE;
     const args = [NETWORK_PRESET.ERC20_MANAGER_CONTRACT_ADDRESS, amount] as const;
 
-    const hash = await writeContractAsync({ address, abi, functionName, args });
+    const hash = await writeContractAsync({ address, abi, functionName, args, chainId: NETWORK_PRESET.ETH_CHAIN_ID });
 
     return assertSuccessfulReceipt(await waitForTransactionReceipt(config, { hash }), hash);
   };

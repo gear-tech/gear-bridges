@@ -12,6 +12,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ComponentType } from 'react';
 import { http, WagmiProvider } from 'wagmi';
 
+import EthImage from './assets/eth.svg';
+import WalletImage from './features/swap/assets/wallet.svg';
+
 import {
   DEFAULT_NETWORK_PRESET,
   DEFAULT_NETWORK_TYPE,
@@ -48,9 +51,7 @@ const metadata = {
   name: 'Vara Network Bridge',
   description: 'Bridge Vara and Ethereum with ease',
   url: window.location.origin,
-  icons: [
-    'https://raw.githubusercontent.com/gear-tech/gear-bridges/refs/heads/main/js/frontend/public/favicons/web-app-manifest-512x512.png',
-  ],
+  icons: [new URL('/favicons/web-app-manifest-512x512.png', window.location.origin).href],
 };
 
 // createConfig uses first item in chains as default chain,
@@ -94,6 +95,17 @@ createAppKit({
   networks,
   metadata,
   projectId,
+  chainImages: {
+    [NETWORK_PRESET.MAINNET.ETH_CHAIN_ID]: EthImage,
+    [NETWORK_PRESET.TESTNET.ETH_CHAIN_ID]: EthImage,
+  },
+  connectorImages: {
+    injected: WalletImage,
+    walletConnect: WalletImage,
+    coinbaseWalletSDK: WalletImage,
+    [METAMASK_WALLET_ID]: WalletImage,
+    [COINBASE_WALLET_ID]: WalletImage,
+  },
   features: { analytics: false, email: false, socials: false },
   enableWalletGuide: false,
   enableNetworkSwitch: false,

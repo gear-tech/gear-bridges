@@ -7,12 +7,14 @@ import { ERROR_MESSAGE, NETWORK } from './consts';
 
 type BridgeToken = {
   network: (typeof NETWORK)[keyof typeof NETWORK];
-  symbol: string;
+  address: string;
 };
 
 // Mainnet business restriction: bridged USDC is not tradeable on DEX.
 const isEthToVaraUsdcBridgeDisabled = (token: BridgeToken | undefined, isMainnet: boolean) =>
-  isMainnet && token?.network === NETWORK.ETH && token.symbol.toLowerCase().includes('usdc');
+  isMainnet &&
+  token?.network === NETWORK.ETH &&
+  token.address.toLowerCase() === '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
 
 const getAmountSchema = (
   isNativeToken: boolean | undefined,

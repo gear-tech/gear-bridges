@@ -1,24 +1,22 @@
 import * as Sentry from '@sentry/react';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import TagManager from 'react-gtm-module';
 import { Outlet, RouterProvider, createBrowserRouter } from 'react-router-dom';
 
 import { useAccountsConnection } from '@/hooks';
 
 import { App } from './app';
-import { ROUTE, GTM_ID, SENTRY_DSN } from './consts';
+import { ROUTE, SENTRY_DSN } from './consts';
 import { NotFound, Home, Transactions, FAQ, TokenTracker, ConnectWallet, Transaction, TVL } from './pages';
+import { deploymentOrigin } from './utils/deployment-origin';
+
+if (window.location.origin !== deploymentOrigin(import.meta.env.VITE_FUNDS_ORIGIN))
+  throw new Error('Funds application must be served on its independently approved origin');
 
 if (SENTRY_DSN)
   Sentry.init({
     dsn: SENTRY_DSN,
-    integrations: [Sentry.replayIntegration()],
-    replaysSessionSampleRate: 0,
-    replaysOnErrorSampleRate: 1.0,
   });
-
-if (GTM_ID) TagManager.initialize({ gtmId: GTM_ID });
 
 // eslint-disable-next-line react-refresh/only-export-components
 function PrivateRoute() {

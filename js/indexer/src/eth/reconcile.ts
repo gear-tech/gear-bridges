@@ -46,8 +46,8 @@ export function parseReconcileArgs(args: readonly string[]): ReconcileOptions {
       if (!/^[1-9][0-9]{0,3}$/.test(value) || value.trim() !== value || Number(value) > 1000) throw new Error('Invalid --limit: expected 1..1000');
       limit = Number(value);
     } else {
-      // Transfer IDs are Gear message hashes or generated UUIDs, not arbitrary SQL/cursor text.
-      if (value.trim() !== value || !/^(?:0x[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.test(value)) {
+      // Keep retained UUID/Gear IDs and accept canonical new deposit coordinates.
+      if (value.trim() !== value || !/^(?:0x[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|eth:(?:0|[1-9][0-9]*):(?:0|[1-9][0-9]*):(?:0|[1-9][0-9]*))$/.test(value)) {
         throw new Error('Invalid --after transfer ID');
       }
       after = value;

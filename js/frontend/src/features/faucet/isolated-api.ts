@@ -41,7 +41,13 @@ type IsolatedConfig = z.infer<typeof configSchema>;
 type IsolatedClaim = z.infer<typeof claimSchema>;
 
 async function faucetFetch(path: string, init?: RequestInit): Promise<unknown> {
-  const response = await fetch(`/faucet/${path}`, { ...init, credentials: 'same-origin', cache: 'no-store' });
+  const response = await fetch(`/faucet/${path}`, {
+    ...init,
+    credentials: 'same-origin',
+    mode: 'same-origin',
+    redirect: 'error',
+    cache: 'no-store',
+  });
   const body: unknown = await response.json();
 
   if (!response.ok) {

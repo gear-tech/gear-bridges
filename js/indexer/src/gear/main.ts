@@ -3,7 +3,7 @@ import { TypeormDatabase } from '@subsquid/typeorm-store';
 import { isEthBridgeMessageQueued, isMessageQueued, isProgramChanged, isUserMessageSent, ProgramName } from './util.js';
 import { ProcessorContext, getProcessor } from './processor.js';
 import { getDecoder, initDecoders } from './decoders.js';
-import { programs, setPrograms } from './programIds.js';
+import { programs, setPrograms, reloadPrograms } from './programIds.js';
 import { BatchState } from './batch-state.js';
 import {
   handleVftManagerEvents,
@@ -22,9 +22,11 @@ import { requireFinalizedBatch } from './finality.js';
 const state = new BatchState();
 
 let isFirstRun = true;
+let firstSyncBatch: string | undefined;
 
 const handler = async (ctx: ProcessorContext) => {
   await requireFinalizedBatch(ctx);
+  await reloadPrograms(ctx.store);
   await state.new(ctx);
   if (!ctx.blocks.length) return;
   const history = await ctx.store.find(GearManagerHandoff, {});
@@ -35,7 +37,9 @@ const handler = async (ctx: ProcessorContext) => {
   };
   let routing = await authenticateManagerRouting(ctx, ctx.blocks[0].header, managerRoot(), history);
 
-  if (ctx.isHead && isFirstRun) {
+  const batchKey = ctx.blocks.map(({ header }) => `${header.height}:${header.hash}`).join(',');
+  if (ctx.isHead && (isFirstRun || firstSyncBatch === batchKey)) {
+    firstSyncBatch = batchKey;
     ctx.log.info('First run of the processor, syncing active pairs from VFT Manager');
     const activePairs = await queryVftManagerPairs(ctx._chain.rpc, routing.current, ctx.blocks[0].header.hash);
 
@@ -48,9 +52,20 @@ const handler = async (ctx: ProcessorContext) => {
     );
     const actualActivePairs: Set<string> = new Set();
     const currentInactivePairs = pairs.filter((p) => !p.isActive).map((p) => p.id);
+    const varaTokens = new Set<string>(), ethereumTokens = new Set<string>();
 
     for (const pair of activePairs) {
       const id = createPairHash(pair[0].toLowerCase(), pair[1].toLowerCase());
+      if (pair[2] !== 'Ethereum' && pair[2] !== 'Gear') throw new Error('HOLD: invalid active pair supply');
+      const existing = pairs.find((row) => row.id === id && row.isActive);
+      if (existing && existing.tokenSupply !== (pair[2] === 'Ethereum' ? Network.Ethereum : Network.Vara)) {
+        throw new Error('HOLD: authenticated active pair supply changed');
+      }
+      if (varaTokens.has(pair[0].toLowerCase()) || ethereumTokens.has(pair[1].toLowerCase())) {
+        throw new Error('HOLD: duplicate or conflicting authenticated active pairs');
+      }
+      varaTokens.add(pair[0].toLowerCase());
+      ethereumTokens.add(pair[1].toLowerCase());
       if (currentActivePairs.includes(id)) {
         ctx.log.info({ id }, 'Pair is already in the database as active');
         actualActivePairs.add(id);
@@ -59,11 +74,6 @@ const handler = async (ctx: ProcessorContext) => {
       if (currentInactivePairs.includes(id)) {
         ctx.log.error({ id }, 'Pair is in the database as inactive, but active in VFT Manager');
         throw new Error(`Pair ${id} is already in the database as inactive`);
-      }
-
-      if (pair[2] !== 'Ethereum' && pair[2] !== 'Gear') {
-        ctx.log.error({ id, supplyType: pair[2] }, 'Unknown supply type for pair');
-        throw new Error(`Unknown supply type ${pair[2]} for pair ${id}`);
       }
 
       ctx.log.info({ id, vara: pair[0], eth: pair[1] }, 'Adding pair to the database as active');
@@ -116,6 +126,7 @@ const handler = async (ctx: ProcessorContext) => {
 
 
         const decoder = getDecoder(name);
+        try {
 
         const eventCtx = {
           state,
@@ -132,6 +143,10 @@ const handler = async (ctx: ProcessorContext) => {
         else if (name === ProgramName.HistoricalProxy) handleHistoricalProxyEvents(eventCtx);
         else if (name === ProgramName.BridgingPayment) handleBridgingPaymentEvents(eventCtx);
         else ctx.log.error({ programName: name }, 'Unknown program name');
+        } catch (cause) {
+          // Trusted effects, including storage failures, abort the entire callback.
+          throw new Error(`HOLD: ${name} event ${event.id} at ${block.header.height}:${block.header.hash} from ${source}`, { cause });
+        }
 
         continue;
       }

@@ -340,7 +340,8 @@ test('inbound creation uses qualified receipt-local coordinates and header time 
     address: addr('99'), topics: [hash('99')], data: '0x',
   })));
   const ctx = await context(receipt, undefined, undefined, '0xb', [prefix]);
-  ctx.store.rows.set(Pair, new Map([['pair', new Pair({ id: 'pair', varaToken: hash('77'), ethToken: addr('66'), isRemoved: false })]]));
+  ctx.store.rows.set(Pair, new Map([['pair', new Pair({ id: 'pair', varaToken: hash('77'), ethToken: addr('66'),
+    isActive: true, isRemoved: false, tokenSupply: Network.Ethereum })]]));
   ctx.blocks[0] = { header: { ...block, timestamp: 0 }, logs: receipt.logs.map((log) => ({
     ...log, logIndex: Number(BigInt(log.logIndex)), transactionIndex: 1,
   })) };
@@ -354,6 +355,7 @@ test('inbound creation uses qualified receipt-local coordinates and header time 
   const created = [...ctx.store.rows.get(Transfer).values()];
   assert.equal(created.length, 2);
   assert.notEqual(created[0].nonce, created[1].nonce);
+  assert.deepEqual(created.map((row) => row.id), ['eth:11:1:0', 'eth:11:1:1']);
   assert.deepEqual(created.map((row) => row.sourceLogIndex), [0n, 1n]);
   for (const row of created) {
     assert.equal(row.txHash, receipt.transactionHash);
@@ -365,6 +367,9 @@ test('inbound creation uses qualified receipt-local coordinates and header time 
       `0x${(20 + Number(row.sourceLogIndex)).toString(16)}`);
   }
   assert.equal(primaryReceipts, 1);
+  const retained = structuredClone(created);
+  await handleBatch(ctx);
+  assert.deepEqual([...ctx.store.rows.get(Transfer).values()].map((row) => structuredClone(row)), retained);
 });
 
 test('qualified outbound terminal binding survives advancing finality but rejects changed originals', async () => {
@@ -1084,6 +1089,17 @@ test('authenticated Gear program rotations survive sequential dispatch, reload a
   await import('../lib/gear/main.js');
   const handleGearBatch = await ready;
   assert.deepEqual([...rows.values()].sort(), [hash('11'), hash('22'), hash('33')].sort());
+  const { GearProgram } = await import('../lib/model/index.js');
+  const roleStore = () => {
+    const store = memoryStore(), find = store.find.bind(store), save = store.save.bind(store);
+    store.find = async (entity, options) => entity === GearProgram
+      ? [...rows].map(([id, programId]) => new GearProgram({ id, programId })) : find(entity, options);
+    store.save = async (items) => {
+      for (const row of Array.isArray(items) ? items : [items]) if (row instanceof GearProgram) rows.set(row.id, row.programId);
+      await save(items);
+    };
+    return store;
+  };
 
   const parser = new SailsIdlParser();
   await parser.init();
@@ -1098,7 +1114,7 @@ test('authenticated Gear program rotations survive sequential dispatch, reload a
         ['VftManager', method, { old: hash('22'), new: next }]).toHex() } },
   });
   const ctx = finalityContext('Gear', [11]);
-  Object.assign(ctx, { store: memoryStore(), log: quiet, isHead: false });
+  Object.assign(ctx, { store: roleStore(), log: quiet, isHead: false });
   ctx.blocks[0].header._runtime = { decodeStorageValue(name, data) {
     assert.equal(name, 'GearProgram.ProgramStorage');
     assert.equal(data, 'exited-manager');
@@ -1111,6 +1127,16 @@ test('authenticated Gear program rotations survive sequential dispatch, reload a
     assert.equal(params[1], ctx.blocks[0].header.hash);
     return 'exited-manager';
   };
+  // Reconstructed from HTML7fe1b032 VB-41: all three authenticated role
+  // boundaries abort before the final callback save, unlike queued user input.
+  for (const source of [hash('11'), hash('22'), hash('33')]) {
+    const rejected = { ...ctx, store: roleStore(), blocks: [{ ...ctx.blocks[0], events: [{
+      id: 'malformed-effect', name: 'Gear.UserMessageSent', extrinsic: { hash: hash('dd') },
+      args: { message: { source, payload: '0xff' } },
+    }] }] };
+    await assert.rejects(handleGearBatch(rejected), /HOLD: .* event malformed-effect at/);
+    assert.equal(rejected.store.saves.length, 0, 'trusted malformed event cannot commit a checkpoint or effect');
+  }
   ctx.blocks[0].events = [
     { name: 'Gear.ProgramChanged', args: { id: hash('11'), change: { __kind: 'Inactive' } } },
     proxyEvent(managerId, proxyId),
@@ -1141,11 +1167,11 @@ test('authenticated Gear program rotations survive sequential dispatch, reload a
   const successor = hash('77'), third = hash('88'), fingerprint = hash('ab');
   const active = { phase: 'Active', predecessor: null, successor: null, minimum_receipt_slot: '0',
     last_receipt_slot: null, config_fingerprint: null, transfer_count: 0, completed_transfer_count: 0,
-    in_flight_transfer_count: 0 };
+    in_flight_transfer_count: 0, generation: '1', predecessor_generation: null, custody_started: false };
   const retired = { ...active, phase: 'Retired', successor, last_receipt_slot: '200',
     config_fingerprint: fingerprint, transfer_count: 1, completed_transfer_count: 1 };
   const prepared = { ...active, phase: 'AwaitingSource', predecessor: managerId, minimum_receipt_slot: '201',
-    config_fingerprint: fingerprint };
+    config_fingerprint: fingerprint, predecessor_generation: '1' };
   const managerEvent = (source, method, value, id = hash('cc')) => ({
     name: 'Gear.UserMessageSent', extrinsic: { hash: hash('dd') },
     args: { message: { id, source, destination: hash('00'),
@@ -1173,7 +1199,7 @@ test('authenticated Gear program rotations survive sequential dispatch, reload a
   };
 
   // No capability query before the explicit boundary, including immutable old programs.
-  await handleGearBatch(batch(11, memoryStore(), { [managerId]: new Error('unsupported legacy query') }));
+  await handleGearBatch(batch(11, roleStore(), { [managerId]: new Error('unsupported legacy query') }));
   for (const [name, badSource, badDestination] of [
     ['predecessor', retired, { ...prepared, phase: 'Active', predecessor: hash('99') }],
     ['floor', retired, { ...prepared, phase: 'Active', minimum_receipt_slot: '200' }],
@@ -1182,16 +1208,17 @@ test('authenticated Gear program rotations survive sequential dispatch, reload a
     ['unresolved', { ...retired, in_flight_transfer_count: 1 }, { ...prepared, phase: 'Active' }],
     ['cycle', { ...retired, successor: managerId }, prepared],
   ]) {
-    const store = memoryStore();
+    const store = roleStore();
     await assert.rejects(handleGearBatch(batch(12, store, { [managerId]: badSource, [successor]: badDestination })), /HOLD:/, name);
     assert.equal((await store.find(GearManagerHandoff)).length, 0, name);
     assert.equal((await store.find(Transfer)).length, 0, name);
   }
-  await assert.rejects(handleGearBatch(batch(12, memoryStore(), { [managerId]: new Error('archive RPC unavailable') })),
+  await assert.rejects(handleGearBatch(batch(12, roleStore(), { [managerId]: new Error('archive RPC unavailable') })),
     /archive RPC unavailable/);
 
-  const store = memoryStore();
-  await store.save([new Pair({ id: 'pair', varaToken: hash('77'), ethToken: addr('66'), isRemoved: false }),
+  const store = roleStore();
+  await store.save([new Pair({ id: 'pair', varaToken: hash('77'), ethToken: addr('66'),
+    isActive: true, isRemoved: false, tokenSupply: Network.Ethereum }),
     ...['predecessor-deposit', 'successor-deposit', 'successor-refund'].map((id, index) => new Transfer({
       id, txHash: hash('bc'), sourceNetwork: Network.Ethereum, destNetwork: Network.Vara, blockNumber: 100n,
       sourceTransactionIndex: 2n, sourceLogIndex: BigInt(index + 3), source: addr('66'), destination: hash('77'),
@@ -1254,7 +1281,7 @@ test('authenticated Gear program rotations survive sequential dispatch, reload a
   for (const [source, value] of [[managerId, { ...deposit, slot: '201' }],
     [successor, { ...deposit, slot: '200' }]]) {
     await assert.rejects(handleGearBatch(batch(14, store, { [successor]: { ...prepared, phase: 'Active' } },
-      [managerEvent(source, 'ReceiptDepositSettled', value)])), /outside authenticated manager deployment domain/);
+      [managerEvent(source, 'ReceiptDepositSettled', value)])), /HOLD: vft_manager event/);
   }
   // Historical replay ignores a persisted future link and reauthenticates at its original block.
   await handleGearBatch(batch(12, store, { [managerId]: retired, [successor]: prepared },
@@ -1263,7 +1290,7 @@ test('authenticated Gear program rotations survive sequential dispatch, reload a
   const secondRetired = { ...prepared, phase: 'Retired', successor: third, last_receipt_slot: '300',
     transfer_count: 1, completed_transfer_count: 1 };
   await handleGearBatch(batch(15, store, { [successor]: secondRetired,
-    [third]: { ...active, predecessor: successor, minimum_receipt_slot: '301', config_fingerprint: fingerprint } }));
+    [third]: { ...active, predecessor: successor, predecessor_generation: '1', minimum_receipt_slot: '301', config_fingerprint: fingerprint } }));
   assert.equal((await store.find(GearManagerHandoff)).length, 2);
   for (const changed of [undefined, 13]) {
     gearConfig.retainedCutoverFromBlock = changed;
@@ -1279,3 +1306,96 @@ test('authenticated Gear program rotations survive sequential dispatch, reload a
     assert.match(result.stderr, /Invalid GEAR_RETAINED_CUTOVER_FROM_BLOCK/);
   }
 });
+
+// Reconstructed from HTML7fe1b032 (VB-41 and adjacent F7/F8 requirements).
+// These exercise candidate sources, not the unavailable original PoC bundle.
+test('HTML7fe1b032 reconstructed: malformed queued inputs skip locally; projection failures escape', async () => {
+  const { Decoder } = await import('../lib/gear/codec.js');
+  const { handleVftManagerInMsg, handleVftManagerEvents } = await import('../lib/gear/handlers/vft-manager.js');
+  const { readFileSync } = await import('node:fs');
+  const { Sails } = await import('sails-js');
+  const { SailsIdlParser } = await import('sails-js-parser');
+  const parser = new SailsIdlParser();
+  await parser.init();
+  const sails = new Sails(parser).parseIdl(readFileSync(new URL('../../../api/gear/vft_manager.idl', import.meta.url), 'utf8'));
+  const decoder = new Decoder(sails);
+  const valid = sails.services.VftManager.functions.RequestBridging.encodePayload(hash('77'), '10', addr('55'));
+  const projected = [], warnings = [];
+  const ctx = { decoder, blockHeader: block, log: { ...quiet, warn: (...args) => warnings.push(args) },
+    state: { addInitiatedTransfer: (row) => projected.push(row) },
+    event: { id: 'queued:0', args: { id: hash('aa') }, extrinsic: { hash: hash('bb') }, call: { args: { payload: valid } } } };
+  for (const payload of ['0xff', '0x80ff', valid.slice(0, -2), `${valid}00`]) {
+    await handleVftManagerInMsg({ ...ctx, event: { ...ctx.event, call: { args: { payload } } } });
+  }
+  assert.equal(projected.length, 0);
+  assert.equal(warnings.length, 4);
+  assert.equal(warnings[0][0].block, block.height);
+  await handleVftManagerInMsg(ctx);
+  assert.equal(projected.length, 1);
+  const failure = new Error('database write failure');
+  await assert.rejects(handleVftManagerInMsg({ ...ctx, state: { async addInitiatedTransfer() { throw failure; } } }),
+    (error) => error === failure);
+  const method = 'HistoricalProxyAddressChanged';
+  const payload = sails.registry.createType(`(String,String,${JSON.stringify(sails.services.VftManager.events[method].type)})`,
+    ['VftManager', method, { old: hash('22'), new: hash('66') }]).toHex();
+  let rotations = 0;
+  await assert.rejects(handleVftManagerEvents({ ...ctx, service: 'VftManager', method,
+    state: { async updateProgramId() { rotations++; } },
+    event: { args: { message: { payload: `${payload}00` } } } }), /Invalid.*payload/);
+  assert.equal(rotations, 0);
+});
+
+test('HTML7fe1b032 reconstructed: canonical economic events reject trailing bytes and extra topics', () => {
+  for (const [abi, name, args, address] of [
+    [manager.abi, 'BridgingRequested', [addr('55'), hash('44'), addr('66'), 10n], addr('11')],
+    [queue.abi, 'MerkleRoot', [12n, hash('88')], addr('22')],
+    [payment.abi, 'FeePaid', [], addr('33')],
+  ]) {
+    const decoder = name === 'BridgingRequested' ? manager.events[name] : name === 'MerkleRoot' ? queue.events[name] : payment.events[name];
+    const original = event(abi, name, args, address, 0);
+    decoder.decode(original);
+    assert.throws(() => decoder.decode({ ...original, data: `${original.data}00` }), /HOLD: malformed/);
+    assert.throws(() => decoder.decode({ ...original, topics: [...original.topics, hash('ff')] }), /HOLD: malformed/);
+  }
+});
+
+test('HTML7fe1b032 reconstructed: active pair conflicts HOLD and upgrade uses actual inheritor', async () => {
+  const pair = new Pair({ id: 'old-pair', varaToken: hash('77'), ethToken: addr('66'),
+    tokenSupply: Network.Ethereum, isActive: true, isRemoved: false });
+  for (const sibling of [
+    new Pair({ ...pair, id: 'conflict', varaToken: hash('88') }),
+    new Pair({ ...pair, id: 'conflict', ethToken: addr('99') }),
+    new Pair({ ...pair, tokenSupply: 'invalid' }),
+  ]) {
+    const store = memoryStore();
+    await store.save([pair, sibling]);
+    await assert.rejects(new GearState().new({ store, log: quiet, blocks: [] }), /HOLD: conflicting/);
+  }
+  const store = memoryStore(), state = new GearState(), next = hash('88');
+  await store.save(pair);
+  await state.new({ store, log: quiet, blocks: [], _chain: { rpc: { call: async () => 'exited' } } });
+  await assert.rejects(state.addPair(hash('77'), addr('66'), Network.Vara, block), /HOLD: conflicting/);
+  let admitted;
+  state.addPair = async (...args) => { admitted = args; };
+  await state.upgradePair(hash('77'), { ...block, _runtime: { decodeStorageValue: () => ({ __kind: 'Exited', value: next }) } });
+  assert.deepEqual(admitted, [next, addr('66'), Network.Ethereum, { ...block, _runtime: admitted[3]._runtime }]);
+  assert.equal(state.getActiveVaraTokens().includes(hash('77')), false);
+});
+
+test('HTML7fe1b032 reconstructed: unmapped deposit remains a liability beside a mapped sibling', async () => {
+  const receipt = fullReceipt([
+    event(manager.abi, 'BridgingRequested', [addr('55'), hash('44'), addr('99'), 10n], addr('11'), 0),
+    event(manager.abi, 'BridgingRequested', [addr('55'), hash('44'), addr('66'), 10n], addr('11'), 1),
+  ]);
+  const ctx = await context(receipt);
+  await ctx.store.save(new Pair({ id: 'pair', varaToken: hash('77'), ethToken: addr('66'),
+    tokenSupply: Network.Ethereum, isActive: true, isRemoved: false }));
+  ctx.blocks[0].logs = receipt.logs.map((log) => ({ ...log, logIndex: Number(BigInt(log.logIndex)), transactionIndex: 0 }));
+  await handleBatch(ctx);
+  const transfers = await ctx.store.find(Transfer);
+  assert.equal(transfers.length, 2);
+  assert.equal(transfers.find((row) => row.source === addr('99')).destination, null);
+  assert.equal(transfers.find((row) => row.source === addr('66')).destination, hash('77'));
+  assert.ok(transfers.every((row) => !row.completionAuth && row.status !== Status.Completed && row.status !== Status.Refunded));
+});
+

@@ -4,6 +4,8 @@ import { definedAssert } from '@/utils';
 
 import { usePreparePayVaraFee } from './use-prepare-pay-vara-fee';
 import { useSignAndSend } from './use-sign-and-send';
+import { useTokenAdmission } from '../use-token-admission';
+import { useBridgeContext } from '../../context';
 
 type Params = {
   fee: bigint | undefined;
@@ -12,6 +14,8 @@ type Params = {
 
 function usePayFees({ fee, shouldPayBridgingFee }: Params) {
   const { api } = useApi();
+  const { token } = useBridgeContext();
+  const admit = useTokenAdmission(token);
 
   const payFee = usePreparePayVaraFee();
   const signAndSend = useSignAndSend({ programs: [payFee.program] });
@@ -30,6 +34,7 @@ function usePayFees({ fee, shouldPayBridgingFee }: Params) {
     definedAssert(fee, 'Fee');
 
     const { transaction } = await payFee.prepareTransactionAsync({ args: [nonce], value: fee });
+    await admit(token, { bridgingFee: fee });
     await signAndSend.mutateAsync({
       extrinsic: api.tx.utility.batchAll([transaction.extrinsic]),
       destinations: [transaction.programId],

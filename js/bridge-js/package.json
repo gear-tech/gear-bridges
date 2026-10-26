@@ -49,7 +49,8 @@
     "@ethereumjs/rlp": "10.0.0",
     "@ethereumjs/trie": "6.2.1",
     "@ethereumjs/util": "10.0.0",
-    "@lodestar/types": "1.33.0"
+    "@lodestar/types": "1.33.0",
+    "@polkadot/keyring": "13.5.6"
   },
   "devDependencies": {
     "@gear-js/api": "0.44.1",

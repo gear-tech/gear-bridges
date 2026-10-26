@@ -1,4 +1,5 @@
 // Run with Node 22: node --experimental-strip-types js/frontend/src/features/faucet/isolated-api.check.mjs
+// Reconstructed isolation regression from HTML VB-40, audited 7fe1b032.
 import assert from 'node:assert/strict';
 
 import { getIsolatedConfig, getIsolatedStatus, requestIsolatedBalance } from './isolated-api.ts';
@@ -17,7 +18,12 @@ let body = config;
 let calls = 0;
 
 // Only the HTTP transport is replaced: exercise the production pin validation and finality boundary.
-globalThis.fetch = async () => {
+globalThis.fetch = async (url, options) => {
+  assert(String(url).startsWith('/faucet/'));
+  assert.equal(options.credentials, 'same-origin');
+  assert.equal(options.mode, 'same-origin');
+  assert.equal(options.redirect, 'error');
+  assert.equal(options.cache, 'no-store');
   calls += 1;
   return Response.json(body);
 };

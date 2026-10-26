@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { ssz } from '@lodestar/types';
 import { Trie } from '@ethereumjs/trie';
-import { encode as rlpEncode, decode as rlpDecode } from '@ethereumjs/rlp';
+import { encode as rlpEncode } from '@ethereumjs/rlp';
 import { bytesToHex, hexToBytes, keccak256, formatTransactionReceipt, type Hex, type RpcTransactionReceipt } from 'viem';
 import { generateMerkleProof } from '../src/eth-to-vara/proof-composer.js';
 
@@ -76,7 +76,7 @@ for (const fixture of provenance.fixtures) {
     expect(bytesToHex(proof.root)).toBe(execution.receiptsRoot);
     expect(bytesToHex(proof.root)).toBe(bytesToHex(block.body.executionPayload.receiptsRoot));
     const trie = await Trie.create();
-    const receiptBytes = receipts[index].type === 'legacy' ? proof.receiptRlp : rlpDecode(proof.receiptRlp) as Uint8Array;
+    const receiptBytes = proof.receiptRlp;
     expect(await trie.verifyProof(proof.root, rlpEncode(index), proof.proof)).toEqual(receiptBytes);
     const retained = capture(fixture.files.inclusion_proof);
     expect(retained.index).toBe(index);

@@ -1,5 +1,6 @@
 import { GearApi } from '@gear-js/api';
 import { TypeRegistry } from '@polkadot/types';
+import { subscribeAdvisory } from './advisory-subscription.js';
 import {
   TransactionBuilder,
   ActorId,
@@ -156,32 +157,18 @@ export class HistoricalProxy {
    * underlying program.
    */
   public subscribeToRelayedEvent(
-    callback: (data: {
-      slot: number | string | bigint;
-      block_number: number | string | bigint;
-      transaction_index: number;
-    }) => void | Promise<void>,
+    callback: (data: { slot: number | string | bigint; block_number: number | string | bigint; transaction_index: number }) => void | Promise<void>,
+    onError?: (error: unknown) => void | Promise<void>,
   ): Promise<() => void> {
-    return this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
-      if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) {
-        return;
-      }
-
-      const payload = message.payload.toHex();
-      if (getServiceNamePrefix(payload) === 'HistoricalProxy' && getFnNamePrefix(payload) === 'Relayed') {
-        callback(
-          this._program.registry
-            .createType(
-              '(String, String, {"slot":"u64","block_number":"u64","transaction_index":"u32"})',
-              message.payload,
-            )[2]
-            .toJSON() as unknown as {
-            slot: number | string | bigint;
-            block_number: number | string | bigint;
-            transaction_index: number;
-          },
-        );
-      }
-    });
+    return subscribeAdvisory((dispatch) => this._program.api.gearEvents.subscribeToGearEvent('UserMessageSent', ({ data: { message } }) => {
+      dispatch(() => {
+        if (!message.source.eq(this._program.programId) || !message.destination.eq(ZERO_ADDRESS)) return;
+        const raw = message.payload.toHex();
+        if (getServiceNamePrefix(raw) !== 'HistoricalProxy' || getFnNamePrefix(raw) !== 'Relayed') return;
+        const decoded = this._program.registry.createType('(String,String,{"slot":"u64","block_number":"u64","transaction_index":"u32"})', raw);
+        if (decoded.toHex() !== raw.toLowerCase()) throw new Error('Malformed or trailing proxy event payload');
+        return decoded[2].toJSON() as unknown as { slot: number | string | bigint; block_number: number | string | bigint; transaction_index: number };
+      });
+    }), callback, onError);
   }
 }

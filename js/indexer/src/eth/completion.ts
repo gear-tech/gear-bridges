@@ -69,7 +69,7 @@ export function matchesOutboundCompletion(
   const [sender, receiver, token, amount] = manager.events.Bridged.decode(effects[0]);
   return sender.toLowerCase() === transfer.sender.toLowerCase() &&
     receiver.toLowerCase() === transfer.receiver.toLowerCase() &&
-    token.toLowerCase() === transfer.destination.toLowerCase() && amount === BigInt(transfer.amount);
+    token.toLowerCase() === transfer.destination?.toLowerCase() && amount === BigInt(transfer.amount);
 }
 
 export function qualifyOutboundCompletion(

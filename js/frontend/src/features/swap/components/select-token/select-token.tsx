@@ -74,7 +74,7 @@ function SelectTokenModal({ close }: ModalProps) {
 
     return filteredTokens.map(({ address, symbol, displaySymbol, isNative, network: tokenNetwork }, index) => {
       const isActive = address === token?.address;
-      const isDisabled = isEthToVaraUsdcBridgeDisabled({ network: tokenNetwork, symbol }, isMainnet);
+      const isDisabled = isEthToVaraUsdcBridgeDisabled({ network: tokenNetwork, address }, isMainnet);
       const networkText = isVaraNetwork ? 'Vara' : 'Ethereum';
 
       const handleClick = () => {

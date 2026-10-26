@@ -39,7 +39,22 @@ function useRelayVaraTx(
       const walletClient = await getWalletClient(config);
       archiveApi = await initArchiveApi();
 
+      const profile = NETWORK_PRESET.INBOUND_PROOF_PROFILE.profile;
+      const deployment = profile?.queueDeployment;
+      if (profile && deployment) {
+        const [chainId, genesis] = await Promise.all([
+          publicClient.getChainId(),
+          publicClient.getBlock({ blockNumber: 0n }),
+        ]);
+        if (
+          BigInt(chainId) !== profile.ethereumChainId ||
+          genesis.hash.toLowerCase() !== profile.ethereumGenesisHash ||
+          deployment.address !== NETWORK_PRESET.ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS.toLowerCase()
+        )
+          throw new Error('HOLD: queue deployment approval belongs to another lane');
+      }
       const prepared = await prepareVaraToEthRelay({
+        messageQueueDeploymentBlock: deployment?.block,
         nonce,
         blockNumber,
         ethereumPublicClient: publicClient,

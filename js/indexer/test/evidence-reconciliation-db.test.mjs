@@ -286,7 +286,11 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
     assert.equal(after.ethereum_finality_checkpoint, preNative.ethereum_finality_checkpoint);
     assert.equal(after.receipt_relay, preNative.receipt_relay);
     assert.equal(after.gear_manager_handoff, preNative.gear_manager_handoff);
-    await assert.rejects(migrate('down'), /Cannot|preserv|evidence/i);
+    const NativeMigration = (await import(`../db/migrations/${nativeMigrationFile}`)).default;
+    await assert.rejects(db.query('BEGIN').then(async () => {
+      try { await new NativeMigration().down({ query: (sql) => db.query(sql) }); }
+      finally { await db.query('ROLLBACK'); }
+    }), /Cannot|preserv|evidence/i);
     assert.deepEqual(await snapshot(), after, 'archive-loss refusal cannot restore unqualified completion');
   });
 
@@ -348,6 +352,53 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
     let parkedSettlement;
     try {
       await database.initialize();
+      // Reconstructed from HTML7fe1b032 VB-41/F8: the real SQL transaction,
+      // not a callback save, owns role/effect/checkpoint atomicity.
+      const roles = await import('../lib/gear/programIds.js');
+      const { Decoder } = await import('../lib/gear/codec.js');
+      const { handleVftManagerEvents } = await import('../lib/gear/handlers/vft-manager.js');
+      const { GearProgram, InitiatedTransfer } = await import('../lib/model/index.js');
+      const { Sails } = await import('sails-js');
+      const { SailsIdlParser } = await import('sails-js-parser');
+      const { readFile } = await import('node:fs/promises');
+      const parser = new SailsIdlParser();
+      await parser.init();
+      const sails = new Sails(parser).parseIdl(await readFile(new URL('../../../api/gear/vft_manager.idl', import.meta.url), 'utf8'));
+      const decoder = new Decoder(sails), nextProxy = hash('66');
+      await db.query(`INSERT INTO gear_programs(name, program_id) VALUES
+        ('vft_manager',$1),('historical_proxy',$2),('bridging_payment',$3)`, [hash('11'), hash('22'), hash('33')]);
+      const beforeRoles = (await db.query('SELECT * FROM gear_programs ORDER BY name')).rows;
+      const beforeBoundary = await snapshot();
+      const rotate = async (store, state) => {
+        await roles.reloadPrograms(store);
+        await state.new({ store, log: quiet, blocks: [] });
+        const method = 'HistoricalProxyAddressChanged';
+        const payload = sails.registry.createType(`(String,String,${JSON.stringify(sails.services.VftManager.events[method].type)})`,
+          ['VftManager', method, { old: hash('22'), new: nextProxy }]).toHex();
+        await handleVftManagerEvents({ state, decoder, service: 'VftManager', method, log: quiet,
+          blockHeader: { height: 300 }, event: { args: { message: { payload } } } });
+      };
+      await assert.rejects(database.transaction('SERIALIZABLE', async (manager) => {
+        const store = new Store(() => manager), staged = new GearState();
+        await rotate(store, staged);
+        await staged.addInitiatedTransfer(new InitiatedTransfer({ id: hash('ab'), txHash: hash('ac'), blockNumber: 300n }));
+        await staged.save(); // This must NOT commit anything outside this transaction.
+        await handleVftManagerEvents({ state: staged, decoder, service: 'VftManager', method: 'ReceiptDepositSettled',
+          log: quiet, blockHeader: { height: 300 }, event: { args: { message: { payload: '0xff' } } } });
+      }), /Invalid.*payload/);
+      assert.deepEqual(await snapshot(), beforeBoundary, 'trusted decode failure rolls back effects and SQL checkpoints');
+      assert.deepEqual((await db.query('SELECT * FROM gear_programs ORDER BY name')).rows, beforeRoles);
+      await database.transaction('SERIALIZABLE', async (manager) => {
+        const store = new Store(() => manager);
+        await roles.reloadPrograms(store);
+        assert.equal(roles.programs.get(hash('22')), 'historical_proxy', 'retry discards tentative in-memory rotation');
+        await rotate(store, new GearState());
+      });
+      assert.equal((await db.query("SELECT program_id FROM gear_programs WHERE name='historical_proxy'")).rows[0].program_id, nextProxy);
+      const failStore = { save: async () => { throw new Error('SQL write refused'); } };
+      await assert.rejects(roles.updateId(failStore, 'historical_proxy', hash('77')), /SQL write refused/);
+      assert.equal(roles.programs.get(nextProxy), 'historical_proxy', 'failed store cannot advance memory');
+      assert.equal((await database.getRepository(GearProgram).findOneByOrFail({ id: 'historical_proxy' })).programId, nextProxy);
       fixture.state.fault = ({ method, result }) => method === 'eth_getBlockReceipts' ? null : result;
       const beforeFailure = await snapshot();
       await assert.rejects(live(), /HOLD|unavailable|receipt/i);
@@ -784,9 +835,13 @@ test('real migration, bounded reconciliation CLI and API retain authenticated or
     } finally { await db.query('DELETE FROM ethereum_finality_checkpoint WHERE id = $1', [id]); }
   });
 
-  await t.test('rollback refuses populated evidence and retains every original row', async () => {
-    const saved = await snapshot();
-    await assert.rejects(migrate('down'), /Cannot|preserv|evidence/i);
-    assert.deepEqual(await snapshot(), saved);
+  await t.test('HTML7fe1b032 reconstructed: rollback refuses retained unmapped liabilities', async () => {
+    await insert('transfer', { ...inbound, id: 'unmapped-liability', destination: null,
+      status: 'Bridging', completed_at: null, completed_at_block: null, completed_at_tx_hash: null });
+    try {
+      const saved = await snapshot();
+      await assert.rejects(migrate('down'), /Cannot.*unmapped deposit liabilities/i);
+      assert.deepEqual(await snapshot(), saved);
+    } finally { await db.query("DELETE FROM transfer WHERE id='unmapped-liability'"); }
   });
 });

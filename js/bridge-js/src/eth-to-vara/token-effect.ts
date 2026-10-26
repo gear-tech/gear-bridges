@@ -1,6 +1,7 @@
 import { decode as decodeRlp, encode as encodeRlp } from '@ethereumjs/rlp';
 import { bytesToHex, concatHex, decodeEventLog, keccak256, stringToHex } from 'viem';
 import type { HexString } from '@gear-js/api';
+import { assertHistoricalReceiptAuthority, type HistoricalReceiptAuthority } from './historical-receipt.js';
 
 export interface InboundTokenEffect {
   readonly managerAddress: HexString;
@@ -16,12 +17,12 @@ export interface SettledReceiptDeposit {
   sender: HexString;
   receiver: HexString;
   eth_token_id: HexString;
-  token_id: HexString;
+  token_id: HexString | null;
   amount: number | string | bigint;
   outcome: string;
 }
 
-export const VFT_MANAGER_IDL_SHA256 = '154430a8ae96db936ca025e1fde23299ede2bd608399555b862a7ef1cb4dc66b';
+export const VFT_MANAGER_IDL_SHA256 = '6af2095193bef52ebeed5ac723f9d9f712afed29e2075c023223fd1abb190bed';
 export const NATIVE_WRAPPER_IDL_SHA256 = '8ef5f27c84e720d05b7ffb3496153a0049e1e642e2c5c8a72cadff662c9ff2f1';
 export const NATIVE_WRAPPER_V1_IDL_SHA256 = 'afd6509bb15544b1302dcd4c5659bd77ef07c7dfb98a292f0c4a99b59c73fca9';
 export type NativeWrapperMode = 'escrow-v1' | 'held-escrow-v2';
@@ -42,7 +43,7 @@ const sameActor = (a: unknown, b: unknown) => hexIdentity(a, 32) === hexIdentity
 const sameToken = (a: unknown, b: unknown) => hexIdentity(a, 20) === hexIdentity(b, 20);
 
 export interface NativeReceiptDeposit extends SettledReceiptDeposit {
-  supply: 'Gear' | 'Ethereum'; native: boolean; operation_id: HexString; child: HexString | null;
+  supply: 'Gear' | 'Ethereum' | null; native: boolean; operation_id: HexString; child: HexString | null;
 }
 export interface NativeRedemption {
   from: HexString; to: HexString; amount: number | string | bigint; child: HexString;
@@ -56,6 +57,8 @@ export interface NativeReceiptIdentity {
   managerId: HexString; proxyId: HexString; wrapperId: HexString; slot: bigint; transactionIndex: bigint;
   wrapperMode: NativeWrapperMode; wrapperEthereumToken: HexString;
   receiptRlp: Uint8Array; expectedEffect: InboundTokenEffect;
+  /** Set only after exact historical deployment/original authentication; never for new signing. */
+  historicalReceipt?: HistoricalReceiptAuthority;
 }
 function u64Le(value: bigint): HexString {
   if (value < 0n || value > 0xffffffffffffffffn) throw new Error('Invalid native operation coordinate');
@@ -73,7 +76,9 @@ const messageId = (id: HexString | null) => typeof id === 'string' && /^0x[0-9a-
 /** Validate the original known-pending cohort without treating its projected rows as settled. */
 export function validateNativePendingCohort(identity: NativeReceiptIdentity, rows: readonly NativeReceiptDeposit[]): void {
   nativeWrapperIdlSha256(identity.wrapperMode);
-  validateInboundTokenEffect(identity.receiptRlp, rows.map(row => ({ ...row, outcome: 'Settled' })), identity.expectedEffect);
+  if (identity.historicalReceipt && (!sameActor(identity.historicalReceipt.managerId, identity.managerId) || !sameActor(identity.historicalReceipt.proxyId, identity.proxyId) ||
+      identity.historicalReceipt.slot !== identity.slot || identity.historicalReceipt.transactionIndex !== identity.transactionIndex)) throw new Error('HOLD: historical receipt authority belongs to another operation');
+  validateInboundTokenEffect(identity.receiptRlp, rows.map(row => ({ ...row, outcome: 'Settled' })), identity.expectedEffect, identity.historicalReceipt);
   let native = 0;
   for (const row of rows) {
     if (row.outcome !== 'Settled' && !(row.native && (row.outcome === 'NativeQueued' || row.outcome === 'Refunded'))) throw new Error('HOLD: incomplete original native cohort');
@@ -159,32 +164,44 @@ export const BridgingRequestedAbi = [{ type: 'event', name: 'BridgingRequested',
 ] }] as const;
 
 /** Compare durable settled rows to every original authenticated manager log, not balances or proxy success. */
-export function validateInboundTokenEffect(receiptRlp: Uint8Array, deposits: readonly SettledReceiptDeposit[], expected: InboundTokenEffect): void {
+export function validateInboundTokenEffect(receiptRlp: Uint8Array, deposits: readonly SettledReceiptDeposit[], expected: InboundTokenEffect, historicalAuthority?: HistoricalReceiptAuthority): void {
   for (const value of [expected.managerAddress, expected.sourceToken, expected.sender]) hexIdentity(value, 20);
   for (const value of [expected.destinationToken, expected.receiver]) hexIdentity(value, 32);
   for (const row of deposits) {
     hexIdentity(row.sender, 20); hexIdentity(row.eth_token_id, 20);
-    hexIdentity(row.receiver, 32); hexIdentity(row.token_id, 32);
+    hexIdentity(row.receiver, 32);
+    if (row.token_id === null) throw new Error('HOLD: unmapped token is a retained liability, not a settlement or refund');
+    hexIdentity(row.token_id, 32);
   }
-  const envelope = decodeRlp(receiptRlp);
-  if (bytesToHex(encodeRlp(envelope)) !== bytesToHex(receiptRlp)) throw new Error('Noncanonical original receipt envelope');
-  let receipt = envelope;
-  if (envelope instanceof Uint8Array) {
-    if (![1, 2, 3, 4].includes(envelope[0])) throw new Error('Unsupported original receipt envelope');
-    const payload = envelope.subarray(1);
-    receipt = decodeRlp(payload);
-    if (bytesToHex(encodeRlp(receipt)) !== bytesToHex(payload)) throw new Error('Noncanonical original typed receipt');
+  // Fresh admission uses the raw trie value. Never unwrap/rewrite retained
+  // historical originals: their framing and operation IDs belong to old code.
+  let trieValue = receiptRlp;
+  if (historicalAuthority !== undefined) {
+    assertHistoricalReceiptAuthority(historicalAuthority, receiptRlp);
+    const wrapped = decodeRlp(receiptRlp);
+    // Legacy receipts are already an RLP list. Typed network receipts contain exactly the original raw bytes.
+    if (wrapped instanceof Uint8Array) {
+      if (bytesToHex(encodeRlp(wrapped)) !== bytesToHex(receiptRlp) || ![1, 2, 3, 4].includes(wrapped[0])) throw new Error('Noncanonical historical receipt wrapper');
+      trieValue = wrapped;
+    }
   }
+  const typed = trieValue.length > 0 && trieValue[0] <= 0x7f;
+  if (typed && ![1, 2, 3, 4].includes(trieValue[0])) throw new Error('Unsupported original receipt envelope');
+  const payload = typed ? trieValue.subarray(1) : trieValue;
+  const receipt = decodeRlp(payload);
+  if (bytesToHex(encodeRlp(receipt)) !== bytesToHex(payload)) throw new Error('Noncanonical original receipt envelope');
   if (!Array.isArray(receipt) || receipt.length !== 4 ||
-      !(receipt[0] instanceof Uint8Array) || bytesToHex(receipt[0]) !== '0x01' || !Array.isArray(receipt[3])) {
+      !(receipt[0] instanceof Uint8Array) || bytesToHex(receipt[0]) !== '0x01' ||
+      !(receipt[1] instanceof Uint8Array) || receipt[1].length > 8 || receipt[1][0] === 0 ||
+      !(receipt[2] instanceof Uint8Array) || receipt[2].length !== 256 || !Array.isArray(receipt[3])) {
     throw new Error('Invalid successful original receipt frame');
   }
   const topic = keccak256(stringToHex('BridgingRequested(address,bytes32,address,uint256)'));
   let matched = 0, expectedMatches = 0;
 
   for (const [index, log] of receipt[3].entries()) {
-    if (!Array.isArray(log) || log.length !== 3 || !(log[0] instanceof Uint8Array) || !Array.isArray(log[1]) ||
-        !(log[2] instanceof Uint8Array) || !log[1].every(item => item instanceof Uint8Array)) {
+    if (!Array.isArray(log) || log.length !== 3 || !(log[0] instanceof Uint8Array) || log[0].length !== 20 || !Array.isArray(log[1]) ||
+        !(log[2] instanceof Uint8Array) || !log[1].every(item => item instanceof Uint8Array && item.length === 32)) {
       throw new Error('Malformed original receipt log');
     }
     const topics = (log[1] as Uint8Array[]).map(item => bytesToHex(item));
@@ -198,7 +215,7 @@ export function validateInboundTokenEffect(receiptRlp: Uint8Array, deposits: rea
         BigInt(row.amount) !== args.amount) throw new Error('Original receipt deposit is not the exact settled effect');
     matched++;
     if (args.from.toLowerCase() === expected.sender.toLowerCase() && args.to.toLowerCase() === expected.receiver.toLowerCase() &&
-        args.token.toLowerCase() === expected.sourceToken.toLowerCase() && row.token_id.toLowerCase() === expected.destinationToken.toLowerCase() &&
+        args.token.toLowerCase() === expected.sourceToken.toLowerCase() && row.token_id?.toLowerCase() === expected.destinationToken.toLowerCase() &&
         args.amount === expected.amount) expectedMatches++;
   }
   if (!matched || matched !== deposits.length || expectedMatches < 1) throw new Error('Original receipt does not prove the expected token effect');

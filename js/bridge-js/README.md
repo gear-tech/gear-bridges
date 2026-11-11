@@ -22,51 +22,54 @@ Before using this library, ensure you have:
 4. Deployed program IDs for:
    - Historical proxy program
 
-## Quick Start
+## Choose one bridge deployment
+
+Vara Mainnet is the only supported public Substrate deployment. Its paired network
+is Ethereum Mainnet (chain ID `1`), not Sepolia or Hoodi. For a production integration,
+use `wss://rpc.vara.network`, an Ethereum Mainnet execution RPC and a Mainnet beacon
+RPC, together with the addresses in the
+[bridge deployment list](https://wiki.vara.network/docs/vara-network/bridge/developer_hub).
+Verify the current on-chain configuration before submitting a relay. Do not mix
+addresses from different deployments. Vara.eth/Hoodi is a separate environment;
+it is not a replacement RPC for a Substrate `GearApi` client.
+
+For learning to sign and submit transactions, use the local development scenario
+below. Full cross-chain examples additionally need a coordinated bridge fixture.
+
+## Relay integration
+
+This illustrates the current object-parameter API. The clients, signer, transaction,
+block, nonce and program/contract IDs must all come from your verified deployment;
+the snippet does not provision a bridge or create a test transaction.
 
 ```typescript
 import { relayEthToVara, relayVaraToEth } from '@gear-js/bridge';
-import { createPublicClient, createWalletClient, http } from 'viem';
-import { mainnet } from 'viem/chains';
-import { GearApi } from '@gear-js/api';
-
-// Configure Ethereum client
-const ethereumClient = createPublicClient({
-  chain: mainnet,
-  transport: http('https://eth-mainnet.alchemyapi.io/v2/your-api-key'),
-});
-
-// Configure Vara API
-const gearApi = await GearApi.create({
-  providerAddress: 'wss://rpc.vara.network',
-});
 
 // Relay transaction
-const result = await relayEthToVara(
-  '0x1234...', // Ethereum transaction hash
-  'https://beacon-node.example.com', // Beacon chain RPC URL
-  ethereumClient,
+const result = await relayEthToVara({
+  transactionHash,
+  beaconRpcUrl,
+  ethereumPublicClient: ethereumClient,
   gearApi,
-  '0xefgh...', // Historical proxy program ID
-  '0xijkl...', // Target client program ID
-  'MyService', // Service name on target client
-  'MyMethod', // Method name on target service
-  signerAccount, // Signer account
-);
+  historicalProxyId,
+  clientId,
+  clientServiceName: 'MyService',
+  clientMethodName: 'MyMethod',
+  signer: signerAccount,
+});
 
 console.log('Transaction relayed:', result.txHash);
 
 // Or relay from Vara to Ethereum
-const varaToEthResult = await relayVaraToEth(
-  123n, // Message nonce
-  12345n, // Vara block number
-  ethereumClient, // Public client
-  walletClient, // Wallet client
-  account, // Ethereum account
-  gearApi, // Gear API instance
-  '0x1234...', // Message queue contract address
-  false, // Enable logging
-);
+await relayVaraToEth({
+  nonce,
+  blockNumber,
+  ethereumPublicClient: ethereumClient,
+  ethereumWalletClient: walletClient,
+  ethereumAccount: account,
+  gearApi,
+  messageQueueAddress,
+});
 
 console.log('Vara to Ethereum transaction processed');
 ```
@@ -76,6 +79,8 @@ console.log('Vara to Ethereum transaction processed');
 ### `relayEthToVara`
 
 Relays an Ethereum transaction to the Vara network by creating a proof and submitting it through the historical proxy program.
+
+Accepts a single parameter object with the following fields.
 
 #### Parameters
 
@@ -91,7 +96,8 @@ Relays an Ethereum transaction to the Vara network by creating a proof and submi
 | `clientMethodName` | `string` | Name of the method to call on the target service |
 | `signer` | `string \| KeyringPair` | Account signer for transaction signing |
 | `signerOptions?` | `Partial<SignerOptions>` | Optional signing configuration parameters |
-| `silent?` | `boolean` | Whether to suppress logging output (default: `true`) |
+| `wait?` | `boolean` | Whether to wait for the checkpoint required by the proof |
+| `statusCb?` | `(status, details?) => void` | Optional progress callback |
 
 #### Returns
 
@@ -110,6 +116,8 @@ interface RelayResult {
 
 Relays a queued message from Vara network to Ethereum by finding the message, generating merkle proof, and processing it through the message queue contract.
 
+Accepts a single parameter object with the following fields.
+
 #### Parameters
 
 | Parameter | Type | Description |
@@ -121,7 +129,8 @@ Relays a queued message from Vara network to Ethereum by finding the message, ge
 | `ethereumAccount` | `Account` | Ethereum account to use for transactions |
 | `gearApi` | `GearApi` | Gear API instance for interacting with Vara network |
 | `messageQueueAddress` | `0x${string}` | Ethereum message queue contract address |
-| `silent?` | `boolean` | Whether to suppress logging output (default: `true`) |
+| `wait?` | `boolean` | Whether to wait for the required Merkle root |
+| `statusCb?` | `(status, details?) => void` | Optional progress callback |
 
 #### Returns
 
@@ -138,30 +147,30 @@ Promise<void> // Resolves when the message is successfully processed
 ```typescript
 import { relayVaraToEth } from '@gear-js/bridge';
 import { createPublicClient, createWalletClient, http } from 'viem';
-import { mainnet } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
+// chain, RPC and MessageQueue must come from the same deployment manifest.
 const publicClient = createPublicClient({
-  chain: mainnet,
-  transport: http(),
+  chain,
+  transport: http(executionRpcUrl),
 });
 
 const account = privateKeyToAccount('0x...');
 const walletClient = createWalletClient({
   account,
-  chain: mainnet,
-  transport: http(),
+  chain,
+  transport: http(executionRpcUrl),
 });
 
-await relayVaraToEth(
-  42n, // Message nonce
-  1000000n, // Block number
-  publicClient,
-  walletClient,
-  account,
+await relayVaraToEth({
+  nonce,
+  blockNumber,
+  ethereumPublicClient: publicClient,
+  ethereumWalletClient: walletClient,
+  ethereumAccount: account,
   gearApi,
-  '0x1234567890123456789012345678901234567890',
-);
+  messageQueueAddress,
+});
 ```
 
 ### `waitForMerkleRootAppearedInMessageQueue`
@@ -202,22 +211,83 @@ if (result.error) {
 }
 ```
 
-### Working with Different Networks
+### Local development writes
 
-The library supports various Ethereum networks. Configure your public client accordingly:
+Run a supported Gear node in development mode, as described in the
+[node guide](https://wiki.vara.network/docs/vara-network/node):
+
+```sh
+gear --dev --tmp
+```
+
+Connect to its local WebSocket RPC and submit a balance transfer with development
+accounts. This needs no bridge contracts, archive, beacon RPC or public faucet:
 
 ```typescript
-// For Sepolia testnet
-const ethereumClient = createPublicClient({
-  chain: sepolia,
-  transport: http('https://sepolia.infura.io/v3/your-project-id'),
-});
+import { GearApi, GearKeyring } from '@gear-js/api';
 
-// For Vara testnet
 const gearApi = await GearApi.create({
-  providerAddress: 'wss://testnet.vara.network',
+  providerAddress: 'ws://127.0.0.1:9944',
 });
+const alice = await GearKeyring.fromSuri('//Alice');
+const bob = await GearKeyring.fromSuri('//Bob');
+
+const tx = gearApi.balance.transfer(bob.address, 1_000_000_000_000n);
+try {
+  await new Promise<void>((resolve, reject) => {
+    let unsubscribe: (() => void) | undefined;
+    tx.signAndSend(alice, ({ status, dispatchError }) => {
+      if (dispatchError) {
+        unsubscribe?.();
+        reject(new Error(dispatchError.toString()));
+      } else if (status.isFinalized) {
+        console.log('Finalized in block:', status.asFinalized.toHex());
+        unsubscribe?.();
+        resolve();
+      }
+    })
+      .then((unsub) => {
+        unsubscribe = unsub;
+      })
+      .catch(reject);
+  });
+} finally {
+  await gearApi.disconnect();
+}
 ```
+
+Development keys are for your local chain. The public Vara Explorer indexes
+Mainnet; inspect local blocks with Gear IDEA or Polkadot.js configured for your
+local RPC.
+
+### Full bridge examples and CI fixtures
+
+The scripts in `example/` are full relay demonstrations, not a local-node setup.
+They use the development signer `//Alice`. Before running them, provision a
+bridge-compatible Gear development chain, checkpoint/eth-events/historical-proxy
+programs, an Ethereum MessageQueue/target contract, and the core relayers. See
+[running the bridge](../../docs/running-the-bridge.md). A plain `gear --dev` node
+alone cannot provide cross-chain proofs or relayed roots.
+
+Supply one fixture manifest with `VARA_WS_RPC`, `ETH_RPC_URL`, `BEACON_RPC_URL`,
+`HISTORICAL_PROXY_ID`, `MESSAGE_QUEUE_ADDRESS`, `ETH_DESTINATION` and a development
+`ETH_PRIVATE_KEY`. Program IDs must be the actual IDs deployed on that Gear chain;
+Ethereum addresses, execution/beacon RPCs and the checkpoint client's consensus
+configuration must describe the same Ethereum chain. There are no universal local
+contract addresses. Keep keys in an untracked `.env` in the package working
+directory. Do not use production funds for these demonstrations.
+
+The Ethereum-to-Vara example explicitly uses the Hoodi chain definition. Keep its
+execution and beacon clients on Hoodi and deploy/configure the Gear-side fixture
+to verify Hoodi. It is not a public Substrate test network or a Vara.eth deployment.
+For a fully local Ethereum fixture, adapt the chain definition and consensus
+fixture together; an execution-only local node cannot replace a beacon chain.
+
+CI uses the `bridge-js-test` GitHub environment and its RPC/program secrets. Audit
+those external values before running the integration suite. Historical transaction
+fixtures must be read from the chain where they were recorded; do not retarget
+their block numbers, nonces or hashes to a new chain. Hoodi and Vara.eth deployment
+files elsewhere in this repository remain independent.
 
 ## How It Works
 

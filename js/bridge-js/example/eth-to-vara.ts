@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, http, webSocket, zeroAddress } from 'viem';
+import { createPublicClient, createWalletClient, webSocket, zeroAddress } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { execSync } from 'child_process';
 import { Keyring } from '@polkadot/api';
@@ -41,7 +41,11 @@ if (!programId && !fs.existsSync(PING_WASM_PATH)) {
 }
 
 const main = async () => {
-  const publicClient = createPublicClient({ transport: webSocket(ETH_WS_RPC) });
+  const publicClient = createPublicClient({ chain: hoodi, transport: webSocket(ETH_WS_RPC) });
+
+  if ((await publicClient.getChainId()) !== hoodi.id) {
+    throw new Error('ETH_RPC_URL must point to Hoodi for this example and its bridge fixture');
+  }
   const gearApi = await GearApi.create({ providerAddress: VARA_WS_RPC, noInitWarn: true });
 
   const keyring = new Keyring({ type: 'sr25519', ss58Format: 137 });
@@ -85,7 +89,7 @@ const main = async () => {
 
   const walletClient = createWalletClient({
     chain: hoodi,
-    transport: http(),
+    transport: webSocket(ETH_WS_RPC),
     account: privateKeyToAccount(ETH_PRIVATE_KEY),
   });
 

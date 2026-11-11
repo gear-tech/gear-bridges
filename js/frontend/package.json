@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "vite",
-    "build": "vite build",
+    "build": "yarn test && vite build",
+    "test": "yarn workspace @gear-js/bridge exec vitest run --root ../frontend --config vitest.config.ts",
     "preview": "vite preview",
     "codegen": "graphql-codegen --require dotenv/config"
   },

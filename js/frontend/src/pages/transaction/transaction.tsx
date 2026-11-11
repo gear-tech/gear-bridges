@@ -1,5 +1,6 @@
 import { HexString } from '@gear-js/api';
 import { getVaraAddress } from '@gear-js/react-hooks';
+import { useQuery } from '@tanstack/react-query';
 import { PropsWithChildren } from 'react';
 import { useParams } from 'react-router-dom';
 
@@ -10,6 +11,7 @@ import { useNetworkType } from '@/context/network-type';
 import { useOptimisticTxUpdate, useTransaction } from '@/features/history';
 import { TransactionStatus } from '@/features/history/components/transaction-status';
 import { NetworkEnum, StatusEnum } from '@/features/history/graphql/graphql';
+import { loadVaraExtrinsic } from '@/features/history/resolve-vara-extrinsic';
 import { PayVaraFeeButton, RelayTxButton, RelayTxNote } from '@/features/swap';
 import { NETWORK } from '@/features/swap/consts';
 
@@ -70,7 +72,8 @@ function useTxUrl(network: NetworkEnum) {
   const { NETWORK_PRESET } = useNetworkType();
 
   const networkToTxUrl = {
-    [NetworkEnum.Vara]: NETWORK_PRESET.EXPLORER_URL.VARA ? `${NETWORK_PRESET.EXPLORER_URL.VARA}/extrinsic` : undefined,
+    // Vara links resolve within their recorded block in TransactionHashLink.
+    [NetworkEnum.Vara]: undefined,
     [NetworkEnum.Ethereum]: `${NETWORK_PRESET.EXPLORER_URL.ETH}/tx`,
   };
 
@@ -82,7 +85,9 @@ function useBlockUrl(network: NetworkEnum) {
 
   const networkToBlockUrl = {
     [NetworkEnum.Vara]: (blockNumber: string) =>
-      `https://idea.gear-tech.io/explorer/${blockNumber}?node=${NETWORK_PRESET.ARCHIVE_NODE_ADDRESS}`,
+      NETWORK_PRESET.EXPLORER_URL.VARA
+        ? `${NETWORK_PRESET.EXPLORER_URL.VARA}/block/${blockNumber}`
+        : `https://idea.gear-tech.io/explorer/${blockNumber}?node=${NETWORK_PRESET.ARCHIVE_NODE_ADDRESS}`,
     [NetworkEnum.Ethereum]: (blockNumber: string) => `${NETWORK_PRESET.EXPLORER_URL.ETH}/block/${blockNumber}`,
   };
 
@@ -103,6 +108,43 @@ function ExplorerLink({ children, network, id, useUrl }: ExplorerLinkProps) {
 
   return (
     <a href={url} target="_blank" rel="noreferrer" className={styles.link}>
+      {children}
+    </a>
+  );
+}
+
+type TransactionHashLinkProps = PropsWithChildren & {
+  network: NetworkEnum;
+  id: string;
+  blockNumber: string | null | undefined;
+};
+
+function TransactionHashLink({ children, network, id, blockNumber }: TransactionHashLinkProps) {
+  const { NETWORK_PRESET } = useNetworkType();
+  const explorer = NETWORK_PRESET.EXPLORER_URL.VARA;
+  const archive = NETWORK_PRESET.ARCHIVE_NODE_ADDRESS;
+  const isVaraExplorer = network === NetworkEnum.Vara && Boolean(explorer);
+  const { data: coordinate } = useQuery({
+    queryKey: ['vara-explorer-extrinsic', archive, blockNumber, id],
+    enabled: isVaraExplorer && Boolean(blockNumber),
+    staleTime: Infinity,
+    retry: false,
+    queryFn: ({ signal }) => loadVaraExtrinsic(archive, blockNumber!, id, signal),
+  });
+
+  if (!isVaraExplorer) {
+    return (
+      <ExplorerLink network={network} id={id} useUrl={useTxUrl}>
+        {children}
+      </ExplorerLink>
+    );
+  }
+
+  // Keep the hash copyable if the archive is unavailable; do not link to an ambiguous hash search.
+  if (!coordinate) return <span>{children}</span>;
+
+  return (
+    <a href={`${explorer}/extrinsic/${coordinate}`} target="_blank" rel="noreferrer" className={styles.link}>
       {children}
     </a>
   );
@@ -272,9 +314,9 @@ function Transaction() {
 
         <SectionCard heading="Identifiers">
           <Field label="Transaction Hash">
-            <ExplorerLink network={sourceNetwork} id={txHash} useUrl={useTxUrl}>
+            <TransactionHashLink network={sourceNetwork} id={txHash} blockNumber={blockNumber.toString()}>
               <Address value={txHash} />
-            </ExplorerLink>
+            </TransactionHashLink>
 
             <CopyButton value={txHash} message="Transaction hash copied to clipboard" />
           </Field>
@@ -334,9 +376,9 @@ function Transaction() {
           <Field label="Completed At Transaction Hash">
             {completedAtTxHash ? (
               <>
-                <ExplorerLink network={destNetwork} id={completedAtTxHash} useUrl={useTxUrl}>
+                <TransactionHashLink network={destNetwork} id={completedAtTxHash} blockNumber={completedAtBlock}>
                   <Address value={completedAtTxHash} />
-                </ExplorerLink>
+                </TransactionHashLink>
 
                 <CopyButton value={completedAtTxHash} message="Completion transaction hash copied to clipboard" />
               </>

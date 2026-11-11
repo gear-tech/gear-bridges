@@ -33,7 +33,7 @@ const MAINNET_PRESET = {
   ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS: ETH_MESSAGE_QUEUE_CONTRACT_ADDRESS.MAINNET,
 
   NETWORK_NAME: { VARA: 'Vara Mainnet', ETH: 'Ethereum Mainnet' },
-  EXPLORER_URL: { VARA: 'https://vara.subscan.io', ETH: 'https://etherscan.io' },
+  EXPLORER_URL: { VARA: 'https://explorer.vara.network', ETH: 'https://etherscan.io' },
 
   ETH_NETWORK: getEthNetwork(ETH_CHAIN_ID.MAINNET),
 };

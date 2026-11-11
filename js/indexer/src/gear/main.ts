@@ -166,7 +166,7 @@ const runProcessor = async () => {
 
   const db = new TypeormDatabase({
     supportHotBlocks: true,
-    stateSchema: 'gear_processor',
+    stateSchema: config.stateSchema,
   });
 
   await setPrograms();

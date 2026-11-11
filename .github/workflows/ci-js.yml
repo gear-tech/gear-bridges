@@ -115,6 +115,9 @@ jobs:
       - name: Build
         run: yarn build:indexer
 
+      - name: Check explicit Gear network configuration
+        run: yarn workspace indexer test:config
+
       - name: 'Lint'
         run: yarn lint:indexer
 

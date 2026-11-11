@@ -1,3 +1,6 @@
+# Mainnet template: replace ALL placeholder addresses/keys with one verified
+# deployment manifest. For local writes use a private bridge fixture; see
+# js/bridge-js/README.md. There is no public Substrate test deployment here.
 [prometheus]
 endpoint = "0.0.0.0:9090"
 
@@ -40,47 +43,6 @@ thread_count = 24
 critical_threshold = "4h"
 startup_sync_strategy = "critical-threshold"
 startup_sync_blocks = []
-spike_window = "15m"
-spike_timeout = "30m"
-priority_spike_timeout = "10m"
-spike_threshold = 8
-save_interval = "30m"
-check_interval = "30s"
-
-[relayers.testnet]
-priority = 50
-
-[relayers.testnet.gear]
-endpoint = "wss://testnet-vara.example"
-max_reconnect_attempts = 3
-
-[relayers.testnet.ethereum]
-endpoint = "wss://testnet-ethereum.example"
-message_queue_address = "0x5555555555555555555555555555555555555555"
-fee_payer = "0x6666666666666666666666666666666666666666666666666666666666666666"
-
-[relayers.testnet.genesis]
-authority_set_hash = "0x7777777777777777777777777777777777777777777777777777777777777777"
-authority_set_id = 456
-
-[relayers.testnet.http]
-address = "127.0.0.1:8444"
-token = "testnet-secret"
-
-[relayers.testnet.storage]
-block_storage = "/var/lib/gear-bridges/testnet/merkle-roots.json"
-
-[relayers.testnet.proof_storage]
-kind = "gear"
-gear_fee_payer = "//testnet-relayer"
-config_dir = "/var/lib/gear-bridges/testnet/onchain-proof-storage"
-
-[relayers.testnet.options]
-confirmations_merkle_root = 4
-thread_count = "auto"
-critical_threshold = "authority_set_change"
-startup_sync_strategy = "blocks"
-startup_sync_blocks = [100, 101, 102]
 spike_window = "15m"
 spike_timeout = "30m"
 priority_spike_timeout = "10m"

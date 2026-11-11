@@ -43,6 +43,22 @@ const getTxHash = async () => {
 };
 
 export default async () => {
+  const required = [
+    'VARA_WS_RPC',
+    'ETH_RPC_URL',
+    'BEACON_RPC_URL',
+    'HISTORICAL_PROXY_ID',
+    'VARA_TO_ETH_BLOCK_NUMBER',
+    'VARA_TO_ETH_NONCE',
+  ];
+  const missing = required.filter((key) => !process.env[key]?.trim());
+
+  if (missing.length) {
+    throw new Error(
+      `Bridge integration fixture is not configured. Missing: ${missing.join(', ')}. Supply one supported bridge deployment; see README.md.`,
+    );
+  }
+
   if (!fs.existsSync(PATH_TO_BIN)) {
     execSync(`cargo build -p js-test --release`, { stdio: 'inherit' });
   }
